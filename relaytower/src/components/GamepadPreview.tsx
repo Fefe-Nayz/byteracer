@@ -14,26 +14,29 @@ export default function GamepadPreview() {
 
   if (!connected || !selectedGamepadId) return null;
 
-  // Create joystick pairs (usually axes 0-1 and 2-3 for left and right sticks)
+  // Dynamically create joystick pairs from available axes
   const joysticks = [];
-  if (gamepadInputs.axes.length >= 2) {
-    joysticks.push({
-      name: "Left Stick",
-      xAxis: 0,
-      yAxis: 1,
-      x: axisValues[0] || 0,
-      y: axisValues[1] || 0,
-    });
-  }
 
-  if (gamepadInputs.axes.length >= 4) {
-    joysticks.push({
-      name: "Right Stick",
-      xAxis: 2,
-      yAxis: 3,
-      x: axisValues[2] || 0,
-      y: axisValues[3] || 0,
-    });
+  // Assume axes come in pairs (like X/Y for a stick)
+  for (let i = 0; i < gamepadInputs.axes.length; i += 2) {
+    // Make sure we have both X and Y axes
+    if (i + 1 < gamepadInputs.axes.length) {
+      // Get appropriate label based on index
+      let name = "Joystick " + (i / 2 + 1);
+      if (gamepadInputs.axes[i].label.includes("Left")) {
+        name = "Left Stick";
+      } else if (gamepadInputs.axes[i].label.includes("Right")) {
+        name = "Right Stick";
+      }
+
+      joysticks.push({
+        name,
+        xAxis: i,
+        yAxis: i + 1,
+        x: axisValues[i] || 0,
+        y: axisValues[i + 1] || 0,
+      });
+    }
   }
 
   return (

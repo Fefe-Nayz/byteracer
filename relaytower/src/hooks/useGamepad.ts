@@ -24,12 +24,12 @@ export type ActionKey = "accelerate" | "brake" | "turn" | "turnCameraX" | "turnC
 export interface ActionInfo {
   key: ActionKey;
   label: string;
-  type: "button" | "axis";
+  type: "button" | "axis" | "both"
 }
 
 export const ACTIONS: ActionInfo[] = [
-  { key: "accelerate", label: "Accélérer", type: "button" },
-  { key: "brake", label: "Freiner", type: "button" },
+  { key: "accelerate", label: "Accélérer", type: "both" },
+  { key: "brake", label: "Freiner", type: "both" },
   { key: "turn", label: "Tourner", type: "axis" },
   { key: "turnCameraX", label: "Tourner la caméra horizontalement", type: "axis" },
   { key: "turnCameraY", label: "Tourner la caméra verticalement", type: "axis" },
@@ -87,14 +87,17 @@ export function useGamepad() {
   const isLoadingFromStorage = useRef(false);
   const isInitialLoad = useRef(true);
 
+  // First, make sure remappingRef's type includes initialAxisValues
   const remappingRef = useRef<{
     active: boolean;
     action: ActionKey | null;
-    actionType: "button" | "axis" | null;
+    actionType: "button" | "axis" | "both" | null;
+    initialAxisValues?: number[];
   }>({
     active: false,
     action: null,
-    actionType: null
+    actionType: null,
+    initialAxisValues: []
   });
 
   // Update mappings when gamepad changes - load from storage
@@ -242,7 +245,6 @@ export function useGamepad() {
   function listenForNextInput(action: ActionKey | null) {
     if (action === null) {
       console.log("Cancelling remap operation");
-      // Update both state and ref
       setListeningFor(null);
       remappingRef.current = {
         active: false,
@@ -258,12 +260,17 @@ export function useGamepad() {
     
     console.log(`Now listening for ${actionType} input for action ${action}`);
     
-    // Update both state and ref
+    // Store initial axis values for proper detection
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const activePad = Array.from(pads).find(g => g && g.id === selectedGamepadId);
+    const initialAxisValues = activePad ? [...activePad.axes] : [];
+    
     setListeningFor(action);
     remappingRef.current = {
       active: true,
       action: action,
-      actionType: actionType
+      actionType: actionType,
+      initialAxisValues: initialAxisValues
     };
   }
 
@@ -271,26 +278,30 @@ export function useGamepad() {
   function isActionActive(action: ActionKey): boolean {
     if (!gamepadState.connected) return false;
     const map = mappings[action];
-    if (!map) return false;
+    if (!map || map.index === -1) return false; // Check for -1 (unmapped)
 
+    // Find the action info to check if it's "both" type
+    const actionInfo = ACTIONS.find(a => a.key === action);
+    
     if (map.type === "button") {
       const id = `button-${map.index}`;
       return gamepadState.pressedInputs.has(id);
-    } else {
+    } else if (map.type === "axis") {
       // For axis
       const val = gamepadState.axisValues[map.index] ?? 0;
       
-      // For turn actions, use a threshold
+      // For turn actions, use different thresholds
       if (action === "turn") {
-        return val < -0.2; // Negative values = left
-      } else if (action === "turnCameraX") {
-        return Math.abs(val) > 0.2;
-      } else if (action === "turnCameraY") {
+        return Math.abs(val) > 0.2; 
+      } else if (action === "turnCameraX" || action === "turnCameraY") {
         return Math.abs(val) > 0.2;
       }
-      
+
       return Math.abs(val) > 0.2;
     }
+    
+    // Should never reach here, but better safe
+    return false;
   }
   
   // Get the axis value for an action
@@ -407,8 +418,8 @@ export function useGamepad() {
       
       console.log(`Checking for ${actionType} input for action ${action}`);
       
-      // For button-type actions, update the conflict check
-      if (actionType === "button") {
+      // For button-type actions or "both" type
+      if (actionType === "button" || actionType === "both") {
         // Check each button directly
         for (let i = 0; i < activePad.buttons.length; i++) {
           const buttonState = activePad.buttons[i];
@@ -417,75 +428,36 @@ export function useGamepad() {
           if (buttonState.pressed || buttonState.value > 0.5) {
             console.log(`Button ${i} detected for ${action} (pressed=${buttonState.pressed}, value=${buttonState.value})`);
             
-            // Update mapping, handling any conflicts within the setMappings callback
-            setMappings(prev => {
-              // Check conflicts using the current state from the callback
-              const conflictingAction = findActionUsingInput("button", i, prev);
-              
-              const newMappings = { ...prev };
-              
-              // If button already assigned to a different action, clear that assignment
-              if (conflictingAction && conflictingAction !== action) {
-                console.log(`Removing button ${i} from ${conflictingAction} (conflict resolution)`);
-                newMappings[conflictingAction] = { type: "button", index: -1 }; // -1 means unassigned
-              }
-              
-              // Assign the button to the current action
-              newMappings[action] = { type: "button", index: i };
-              return newMappings;
-            });
+            // Make sure this is a new button press - wasn't already pressed
+            const wasPressed = gamepadState.pressedInputs.has(`button-${i}`);
+            if (wasPressed) {
+              // Skip if it was already pressed in previous frame - debounce
+              continue;
+            }
             
-            // Clear remapping mode
-            remappingRef.current = {
-              active: false,
-              action: null,
-              actionType: null
-            };
-            setListeningFor(null);
-            
-            console.log("Remapping complete with conflict resolution");
-            return;
+            // Map to button type
+            remapToButton(action, i);
+            return; // Exit after successful remap
           }
         }
       }
       
-      // For axis-type actions, update the conflict check the same way
-      if (actionType === "axis") {
+      // For axis-type actions or "both" type
+      if (actionType === "axis" || actionType === "both") {
         for (let i = 0; i < activePad.axes.length; i++) {
-          const value = activePad.axes[i];
+          const currentValue = activePad.axes[i];
+          const initialValue = remappingRef.current.initialAxisValues?.[i] || 0;
           
-          // Check if axis moved significantly
-          if (Math.abs(value) > 0.5) {
-            console.log(`Axis ${i} moved to ${value} for ${action}`);
+          // Calculate movement delta
+          const change = Math.abs(currentValue - initialValue);
+          
+          // Only detect significant movement
+          if (change > 0.7) {
+            console.log(`Axis ${i} moved from ${initialValue} to ${currentValue} (change: ${change}) for ${action}`);
             
-            // Update mapping, handling any conflicts within the setMappings callback
-            setMappings(prev => {
-              // Check conflicts using the current state from the callback
-              const conflictingAction = findActionUsingInput("axis", i, prev);
-              
-              const newMappings = { ...prev };
-              
-              // If axis already assigned to a different action, clear that assignment
-              if (conflictingAction && conflictingAction !== action) {
-                console.log(`Removing axis ${i} from ${conflictingAction} (conflict resolution)`);
-                newMappings[conflictingAction] = { type: "axis", index: -1 }; // -1 means unassigned
-              }
-              
-              // Assign the axis to the current action
-              newMappings[action] = { type: "axis", index: i };
-              return newMappings;
-            });
-            
-            // Clear remapping mode
-            remappingRef.current = {
-              active: false,
-              action: null,
-              actionType: null
-            };
-            setListeningFor(null);
-            
-            console.log("Remapping complete with conflict resolution");
-            return;
+            // Map to axis type
+            remapToAxis(action, i);
+            return; // Exit after successful remap
           }
         }
       }
@@ -520,6 +492,66 @@ export function useGamepad() {
     if (prevJSON !== newJSON) {
       setGamepadState(newState);
     }
+  }
+  
+  function remapToButton(action: ActionKey, buttonIndex: number) {
+    // Update mapping, handling any conflicts within the setMappings callback
+    setMappings(prev => {
+      // Check conflicts using the current state from the callback
+      const conflictingAction = findActionUsingInput("button", buttonIndex, prev);
+      
+      const newMappings = { ...prev };
+      
+      // If button already assigned to a different action, clear that assignment
+      if (conflictingAction && conflictingAction !== action) {
+        console.log(`Removing button ${buttonIndex} from ${conflictingAction} (conflict resolution)`);
+        newMappings[conflictingAction] = { type: "button", index: -1 }; // -1 means unassigned
+      }
+      
+      // Assign the button to the current action
+      newMappings[action] = { type: "button", index: buttonIndex };
+      return newMappings;
+    });
+    
+    // Clear remapping mode
+    remappingRef.current = {
+      active: false,
+      action: null,
+      actionType: null
+    };
+    setListeningFor(null);
+    
+    console.log("Remapping complete with conflict resolution (button)");
+  }
+  
+  function remapToAxis(action: ActionKey, axisIndex: number) {
+    // Update mapping, handling any conflicts within the setMappings callback
+    setMappings(prev => {
+      // Check conflicts using the current state from the callback
+      const conflictingAction = findActionUsingInput("axis", axisIndex, prev);
+      
+      const newMappings = { ...prev };
+      
+      // If axis already assigned to a different action, clear that assignment
+      if (conflictingAction && conflictingAction !== action) {
+        console.log(`Removing axis ${axisIndex} from ${conflictingAction} (conflict resolution)`);
+        newMappings[conflictingAction] = { type: "axis", index: -1 }; 
+      }
+      
+      // Assign the axis to the current action
+      newMappings[action] = { type: "axis", index: axisIndex };
+      return newMappings;
+    });
+    
+    // Clear remapping mode
+    remappingRef.current = {
+      active: false,
+      action: null,
+      actionType: null
+    };
+    setListeningFor(null);
+    
+    console.log("Remapping complete with conflict resolution (axis)");
   }
   
   // Set up event listeners and polling
