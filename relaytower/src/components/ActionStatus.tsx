@@ -14,26 +14,40 @@ export default function ActionStatus({ action }: { action: ActionInfo }) {
   const mapping = mappings[action.key];
   const inputLabel = mapping ? getInputLabelForMapping(mapping) : "Not mapped";
 
-  // For axis type actions, get the actual value
-  const axisValue =
-    action.type === "axis" ? getAxisValueForAction(action.key) ?? 0 : undefined;
+  // Determine if this is a "both" type action mapped as a button or axis
+  const currentMappingType = mapping?.type || "button";
 
-  // For button type actions, simple active/inactive state
-  if (action.type === "button") {
+  // For "both" type actions, use the current mapping type to determine display
+  const effectiveType =
+    action.type === "both" ? currentMappingType : action.type;
+
+  // Get axis value if this is an axis-mapped action
+  const axisValue =
+    effectiveType === "axis"
+      ? getAxisValueForAction(action.key) ?? 0
+      : undefined;
+
+  // For button type actions (or "both" mapped to buttons), show active/inactive state
+  if (effectiveType === "button") {
     return (
       <div
         className={`p-3 border rounded-md ${
           isActive ? "bg-green-200" : "bg-red-100"
         }`}
       >
-        <div className="font-semibold">{action.label}</div>
+        <div className="font-semibold">
+          {action.label}
+          {action.type === "both" && (
+            <span className="text-xs ml-1">(Button mode)</span>
+          )}
+        </div>
         <div className="text-sm">{isActive ? "ACTIVE" : "Inactive"}</div>
         <div className="text-xs mt-1">Mapped to: {inputLabel}</div>
       </div>
     );
   }
 
-  // For axis type actions, show value and gradient
+  // For axis type actions (or "both" mapped to axes), show value and gradient
   const axisStyle = {
     background: `linear-gradient(to right, #f87171 ${
       50 - (axisValue || 0) * 50
@@ -42,7 +56,12 @@ export default function ActionStatus({ action }: { action: ActionInfo }) {
 
   return (
     <div className="p-3 border rounded-md">
-      <div className="font-semibold">{action.label}</div>
+      <div className="font-semibold">
+        {action.label}
+        {action.type === "both" && (
+          <span className="text-xs ml-1">(Axis mode)</span>
+        )}
+      </div>
       <div className="text-sm">Value: {axisValue?.toFixed(2) || 0}</div>
 
       <div
