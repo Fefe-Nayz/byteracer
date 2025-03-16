@@ -242,7 +242,7 @@ export function useGamepad() {
   }
 
   // Start or cancel remapping
-  function listenForNextInput(action: ActionKey | null) {
+  function listenForNextInput(action: ActionKey | null, preferredType?: "button" | "axis") {
     if (action === null) {
       console.log("Cancelling remap operation");
       setListeningFor(null);
@@ -256,7 +256,9 @@ export function useGamepad() {
     
     // Find action type
     const actionInfo = ACTIONS.find(a => a.key === action);
-    const actionType = actionInfo?.type || "button";
+    
+    // Use preferred type if specified, otherwise use action's default type
+    const actionType = preferredType || actionInfo?.type || "button";
     
     console.log(`Now listening for ${actionType} input for action ${action}`);
     
@@ -611,7 +613,7 @@ export function useGamepad() {
     getActionForInput,
     getInputLabelForMapping,
     
-    // Remapping
+    // Remapping with preferred type parameter
     listenForNextInput,
     listeningFor,
   };
