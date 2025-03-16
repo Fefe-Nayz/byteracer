@@ -9,6 +9,7 @@ export default function RemapControls() {
     listenForNextInput,
     listeningFor,
     getInputLabelForMapping,
+    remappingType, // Make sure this is exposed in your useGamepadContext
   } = useGamepadContext();
 
   // Filter actions by type
@@ -73,8 +74,13 @@ export default function RemapControls() {
     // Get current mapping info
     const map = mappings[action.key];
     const currentType = map ? map.type : "button";
+
+    // Use the active remapping type from context
+    // This ensures we show the correct prompt based on which button was clicked
+    const activeRemappingType = remappingType || "button";
+
     const inputLabel = isCurrentlyRemapping
-      ? getRemapPrompt(action, map?.type)
+      ? getRemapPrompt(action, activeRemappingType)
       : getInputLabel(action.key);
 
     return (

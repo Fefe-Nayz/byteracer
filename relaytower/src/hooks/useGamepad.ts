@@ -19,7 +19,7 @@ export type GamepadAxisInput = {
 
 export type GamepadInput = GamepadButtonInput | GamepadAxisInput;
 
-export type ActionKey = "accelerate" | "brake" | "turn" | "turnCameraX" | "turnCameraY";
+export type ActionKey = "accelerate" | "brake" | "turn" | "turnCameraX" | "turnCameraY" | "use";
 
 export interface ActionInfo {
   key: ActionKey;
@@ -33,6 +33,7 @@ export const ACTIONS: ActionInfo[] = [
   { key: "turn", label: "Tourner", type: "axis" },
   { key: "turnCameraX", label: "Tourner la caméra horizontalement", type: "axis" },
   { key: "turnCameraY", label: "Tourner la caméra verticalement", type: "axis" },
+  { key: "use", label: "Utiliser", type: "button" },
 ];
 
 type Mapping = Record<ActionKey, { type: "button" | "axis"; index: number }>;
@@ -79,6 +80,7 @@ export function useGamepad() {
     turn: { type: "axis", index: 0 },
     turnCameraX: { type: "axis", index: 2 },
     turnCameraY: { type: "axis", index: 3 },
+    use: { type: "button", index: 2 },
   });
   
   const [listeningFor, setListeningFor] = useState<ActionKey | null>(null);
@@ -99,6 +101,9 @@ export function useGamepad() {
     actionType: null,
     initialAxisValues: []
   });
+
+  // Add state to track the current remapping type
+  const [remappingType, setRemappingType] = useState<"button" | "axis">("button");
 
   // Update mappings when gamepad changes - load from storage
   useEffect(() => {
@@ -124,6 +129,7 @@ export function useGamepad() {
         turn: { type: "axis", index: 0 },
         turnCameraX: { type: "axis", index: 2 },
         turnCameraY: { type: "axis", index: 3 },
+        use: { type: "button", index: 2 },
       });
     }
     
@@ -259,6 +265,9 @@ export function useGamepad() {
     
     // Use preferred type if specified, otherwise use action's default type
     const actionType = preferredType || actionInfo?.type || "button";
+    
+    // Update the remapping type state for UI display
+    setRemappingType(actionType as "button" | "axis");
     
     console.log(`Now listening for ${actionType} input for action ${action}`);
     
@@ -616,5 +625,6 @@ export function useGamepad() {
     // Remapping with preferred type parameter
     listenForNextInput,
     listeningFor,
+    remappingType,
   };
 }

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { useGamepadContext } from "@/contexts/GamepadContext";
+import { ActionKey } from "@/hooks/useGamepad";
 import { Card } from "./ui/card";
 
 export default function WebSocketStatus() {
@@ -10,7 +11,8 @@ export default function WebSocketStatus() {
   const [pingTime, setPingTime] = useState<number | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const pingTimestampRef = useRef<number>(0);
-  const { isActionActive, getAxisValueForAction, selectedGamepadId } = useGamepadContext();
+  const { isActionActive, getAxisValueForAction, selectedGamepadId, mappings } =
+    useGamepadContext();
 
   useEffect(() => {
     // Connect to websocket
@@ -51,34 +53,65 @@ export default function WebSocketStatus() {
     };
   }, []);
 
+  // Helper function to get the appropriate value for "both" type actions
+  const getActionValue = (actionKey: ActionKey) => {
+    const mapping = mappings[actionKey as keyof typeof mappings];
+    
+    // If mapping doesn't exist or is not set (-1), return 0 or false
+    if (!mapping || mapping.index === -1) {
+      return actionKey === "accelerate" || actionKey === "brake" ? false : 0;
+    }
+
+    // If mapped to a button, return boolean
+    if (mapping.type === "button") {
+      return isActionActive(actionKey);
+    }
+
+    // If mapped to an axis, return axis value
+    if (mapping.type === "axis") {
+      return getAxisValueForAction(actionKey) ?? 0;
+    }
+
+    // Fallback
+    return actionKey === "accelerate" || actionKey === "brake" ? false : 0;
+  };
+
   // Send gamepad state periodically
   useEffect(() => {
     // Only send data if connected to WebSocket AND have a selected gamepad
     if (!socket || status !== "connected" || !selectedGamepadId) return;
-    
+
     const interval = setInterval(() => {
       pingTimestampRef.current = Date.now();
-      
-      // Send the current gamepad state
+
+      // Send the current gamepad state with proper handling of "both" type actions
       const gamepadState = {
-        accelerate: isActionActive("accelerate"),
-        brake: isActionActive("brake"),
+        accelerate: getActionValue("accelerate"),
+        brake: getActionValue("brake"),
         turn: getAxisValueForAction("turn") ?? 0,
         turnCameraX: getAxisValueForAction("turnCameraX") ?? 0,
         turnCameraY: getAxisValueForAction("turnCameraY") ?? 0,
+        use: isActionActive("use"),
       };
-      
+
       socket.send(
         JSON.stringify({
-          type: "gamepadState",
+          name: "gamepad_input", // Updated to match server expectation
           data: gamepadState,
           createdAt: pingTimestampRef.current,
         })
       );
-    }, 30); // 20 updates per second
-    
+    }, 30); // ~33 updates per second
+
     return () => clearInterval(interval);
-  }, [socket, status, isActionActive, getAxisValueForAction, selectedGamepadId]);
+  }, [
+    socket,
+    status,
+    isActionActive,
+    getAxisValueForAction,
+    selectedGamepadId,
+    mappings,
+  ]);
 
   return (
     <Card className="p-4">
