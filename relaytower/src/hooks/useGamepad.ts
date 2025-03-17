@@ -21,22 +21,111 @@ export type GamepadInput = GamepadButtonInput | GamepadAxisInput;
 
 export type ActionKey = "accelerate" | "brake" | "turn" | "turnCameraX" | "turnCameraY" | "use";
 
+// Enhance the ActionInfo interface
 export interface ActionInfo {
   key: ActionKey;
   label: string;
-  type: "button" | "axis" | "both"
+  type: "button" | "axis" | "both";
+  // New fields:
+  defaultMapping: {
+    type: "button" | "axis";
+    index: number;
+  };
+  allowSharedMappingWith?: ActionKey[]; // List of actions that can share the same input
+  // New field for axis configuration
+  axisConfig?: {
+    defaultMin: number;      // Minimum range (-1 to 1)1)
+    defaultMax: number;      // Maximum range (-1 to 1)
+    inverted?: boolean;      // Whether axis should be inverted by default
+    normalize: "full" | "positive"; // How to normalize: full (-1 to 1) or positive (0 to 1)
+  };
 }
 
 export const ACTIONS: ActionInfo[] = [
-  { key: "accelerate", label: "Accélérer", type: "both" },
-  { key: "brake", label: "Freiner", type: "both" },
-  { key: "turn", label: "Tourner", type: "axis" },
-  { key: "turnCameraX", label: "Tourner la caméra horizontalement", type: "axis" },
-  { key: "turnCameraY", label: "Tourner la caméra verticalement", type: "axis" },
-  { key: "use", label: "Utiliser", type: "button" },
+  { 
+    key: "accelerate", 
+    label: "Accélérer", 
+    type: "both",
+    defaultMapping: { type: "axis", index: 1 },
+    allowSharedMappingWith: ["brake"],
+    axisConfig: {
+      defaultMin: -1.0,
+      defaultMax: 0.0,
+      inverted: true,
+      normalize: "positive" // Normalized to 0-1 range
+    }
+  },
+  { 
+    key: "brake", 
+    label: "Freiner", 
+    type: "both",
+    defaultMapping: { type: "axis", index: 1 },
+    allowSharedMappingWith: ["accelerate"],
+    axisConfig: {
+      defaultMin: 0.0,
+      defaultMax: 1.0,
+      inverted: false,
+      normalize: "positive" // Normalized to 0-1 range
+    }
+  },
+  { 
+    key: "turn", 
+    label: "Tourner", 
+    type: "axis",
+    defaultMapping: { type: "axis", index: 0 },
+    axisConfig: {
+      defaultMin: -1.0,
+      defaultMax: 1.0,
+      inverted: false,
+      normalize: "full" // Full -1 to 1 range
+    }
+  },
+  { 
+    key: "turnCameraX", 
+    label: "Tourner la caméra horizontalement", 
+    type: "axis",
+    defaultMapping: { type: "axis", index: 2 },
+    axisConfig: {
+      defaultMin: -1.0,
+      defaultMax: 1.0,
+      inverted: false,
+      normalize: "full" // Full -1 to 1 range
+    }
+  },
+  { 
+    key: "turnCameraY", 
+    label: "Tourner la caméra verticalement", 
+    type: "axis",
+    defaultMapping: { type: "axis", index: 3 },
+    axisConfig: {
+      defaultMin: -1.0,
+      defaultMax: 1.0,
+      inverted: false,
+      normalize: "full" // Full -1 to 1 range
+    }
+  },
+  { 
+    key: "use", 
+    label: "Utiliser", 
+    type: "button",
+    defaultMapping: { type: "button", index: 2 }
+  },
 ];
 
-type Mapping = Record<ActionKey, { type: "button" | "axis"; index: number }>;
+// Update Mapping type - Fix the "both" type issue
+type Mapping = Record<
+  ActionKey, 
+  { 
+    type: "button" | "axis"; // Remove "both" from here - it's not a mapping type
+    index: number;
+    axisConfig?: {
+      min: number;     
+      max: number;     
+      inverted: boolean;
+      normalize: "full" | "positive";
+    };
+  }
+>;
 
 type GamepadState = {
   connected: boolean;
@@ -74,13 +163,33 @@ export function useGamepad() {
   );
   
   // Current mappings for the selected gamepad
-  const [mappings, setMappings] = useState<Mapping>({
-    accelerate: { type: "button", index: 0 },
-    brake: { type: "button", index: 1 },
-    turn: { type: "axis", index: 0 },
-    turnCameraX: { type: "axis", index: 2 },
-    turnCameraY: { type: "axis", index: 3 },
-    use: { type: "button", index: 2 },
+  const [mappings, setMappings] = useState<Mapping>(() => {
+    const defaultMappings = {} as Mapping;
+    
+    ACTIONS.forEach(action => {
+      const actionInfo = ACTIONS.find(a => a.key === action.key);
+      
+      // Create mapping with correct type (button or axis, not both)
+    const mapping: Mapping[ActionKey] = {
+        type: action.defaultMapping.type, // This is already "button" or "axis", not "both"
+        index: action.defaultMapping.index
+      };
+        
+      // Add axisConfig if this is an axis-type mapping
+      if (action.defaultMapping.type === "axis") {
+        // Use nullish coalescing for cleaner defaults
+        mapping.axisConfig = {
+          min: actionInfo?.axisConfig?.defaultMin ?? -1.0,
+          max: actionInfo?.axisConfig?.defaultMax ?? 1.0,
+          inverted: actionInfo?.axisConfig?.inverted ?? false,
+          normalize: actionInfo?.axisConfig?.normalize ?? "full"
+        };
+      }
+      
+      defaultMappings[action.key] = mapping;
+    });
+    
+    return defaultMappings;
   });
   
   const [listeningFor, setListeningFor] = useState<ActionKey | null>(null);
@@ -121,16 +230,35 @@ export function useGamepad() {
       setTimeout(() => {
         isLoadingFromStorage.current = false;
       }, 0);
+    // Fixed version with proper default mappings
     } else if (selectedGamepadId) {
-      // Default mappings for this gamepad
-      setMappings({
-        accelerate: { type: "button", index: 0 },
-        brake: { type: "button", index: 1 },
-        turn: { type: "axis", index: 0 },
-        turnCameraX: { type: "axis", index: 2 },
-        turnCameraY: { type: "axis", index: 3 },
-        use: { type: "button", index: 2 },
+      // Use default mappings from the ACTIONS array
+      const defaultMappings = {} as Mapping;
+      
+      ACTIONS.forEach(action => {
+        const actionInfo = ACTIONS.find(a => a.key === action.key);
+        
+        // Create mapping with correct type (button or axis, not both)
+       const mapping: Mapping[ActionKey] = {
+          type: action.defaultMapping.type, // This is already "button" or "axis", not "both"
+          index: action.defaultMapping.index
+        };
+          
+        // Add axisConfig if this is an axis-type mapping
+        if (action.defaultMapping.type === "axis") {
+          // Use nullish coalescing for cleaner defaults
+          mapping.axisConfig = {
+            min: actionInfo?.axisConfig?.defaultMin ?? -1.0,
+            max: actionInfo?.axisConfig?.defaultMax ?? 1.0,
+            inverted: actionInfo?.axisConfig?.inverted ?? false,
+            normalize: actionInfo?.axisConfig?.normalize ?? "full"
+          };
+        }
+        
+        defaultMappings[action.key] = mapping;
       });
+      
+      setMappings(defaultMappings);
     }
     
     // Only depends on selectedGamepadId and storedMappings
@@ -315,12 +443,62 @@ export function useGamepad() {
     return false;
   }
   
-  // Get the axis value for an action
-  function getAxisValueForAction(action: ActionKey): number | undefined {
+  // Get the axis value for an action with range adjustments
+  function getAxisValueForAction(action: ActionKey, applyConfig = true): number | undefined {
     if (!gamepadState.connected) return 0;
     const map = mappings[action];
     if (!map || map.type !== "axis") return undefined;
     
+    // Get raw value
+    const rawValue = gamepadState.axisValues[map.index] ?? 0;
+    
+    // If we don't need to apply configuration, return raw value
+    if (!applyConfig || !map.axisConfig) return rawValue;
+    
+    // Apply axis configuration
+    const { min, max, inverted, normalize } = map.axisConfig;
+    
+    // First, clamp raw value between min and max
+    const clampedValue = Math.max(min, Math.min(max, rawValue));
+    
+    // Calculate the normalized value based on the mode
+    if (normalize === "positive") {
+      // For positive mode: map range to 0-1
+      const rangeDiff = Math.abs(max - min);
+      
+      if (rangeDiff === 0) return 0; // Avoid division by zero
+      
+      // Calculate normalized position in range (0-1)
+      let normalizedPos;
+      
+      if (!inverted) {
+        // Normal mapping: lower bound → 0, upper bound → 1
+        normalizedPos = (clampedValue - min) / rangeDiff;
+      } else {
+        // Inverted mapping: lower bound → 1, upper bound → 0
+        normalizedPos = 1 - ((clampedValue - min) / rangeDiff);
+      }
+      
+      return normalizedPos;
+    } else {
+      // For full mode: map range to -1 to 1
+      const rangeDiff = Math.abs(max - min);
+      
+      if (rangeDiff === 0) return 0; // Avoid division by zero
+      
+      // Map the value to -1 to 1 range
+      let fullRangeValue = -1 + 2 * ((clampedValue - min) / rangeDiff);
+      
+      // Apply inversion if needed (simply flip the sign)
+      return inverted ? -fullRangeValue : fullRangeValue;
+    }
+  }
+  
+  // Add a function to get raw axis value
+  function getRawAxisValue(action: ActionKey): number | undefined {
+    if (!gamepadState.connected) return 0;
+    const map = mappings[action];
+    if (!map || map.type !== "axis") return undefined;
     return gamepadState.axisValues[map.index] ?? 0;
   }
 
@@ -345,6 +523,20 @@ export function useGamepad() {
       }
     }
     return null;
+  }
+  
+  // Improved findAllActionsUsingInput function to find ALL conflicts
+  function findAllActionsUsingInput(type: "button" | "axis", index: number, currentMappings?: Mapping): ActionKey[] {
+    // Use provided mappings or fall back to the current state mappings
+    const mappingsToCheck = currentMappings || mappings;
+    const conflictingActions: ActionKey[] = [];
+    
+    for (const [action, cfg] of Object.entries(mappingsToCheck) as [ActionKey, { type: string; index: number }][]) {
+      if (cfg.type === type && cfg.index === index) {
+        conflictingActions.push(action as ActionKey);
+      }
+    }
+    return conflictingActions;
   }
   
   // Get label for input mapping
@@ -508,23 +700,41 @@ export function useGamepad() {
   function remapToButton(action: ActionKey, buttonIndex: number) {
     // Update mapping, handling any conflicts within the setMappings callback
     setMappings(prev => {
-      // Check conflicts using the current state from the callback
-      const conflictingAction = findActionUsingInput("button", buttonIndex, prev);
-      
+      // Find ALL actions currently using this button
+      const conflictingActions = findAllActionsUsingInput("button", buttonIndex, prev);
       const newMappings = { ...prev };
       
-      // If button already assigned to a different action, clear that assignment
-      if (conflictingAction && conflictingAction !== action) {
-        console.log(`Removing button ${buttonIndex} from ${conflictingAction} (conflict resolution)`);
-        newMappings[conflictingAction] = { type: "button", index: -1 }; // -1 means unassigned
-      }
+      // Current action info
+      const newActionInfo = ACTIONS.find(a => a.key === action);
+      
+      // Process each conflicting action
+      conflictingActions.forEach(conflictingAction => {
+        // Skip if it's the action we're currently mapping
+        if (conflictingAction === action) return;
+        
+        const existingActionInfo = ACTIONS.find(a => a.key === conflictingAction);
+        
+        // Check if BIDIRECTIONAL sharing is allowed
+        const newAllowsExisting = newActionInfo?.allowSharedMappingWith?.includes(conflictingAction) || false;
+        const existingAllowsNew = existingActionInfo?.allowSharedMappingWith?.includes(action) || false;
+        
+        const sharingAllowed = newAllowsExisting && existingAllowsNew;
+        
+        // Only clear the conflicting mapping if sharing is not allowed
+        if (!sharingAllowed) {
+          console.log(`Removing button ${buttonIndex} from ${conflictingAction} (conflict resolution)`);
+          newMappings[conflictingAction] = { type: "button", index: -1 }; // -1 means unassigned
+        } else {
+          console.log(`Allowing shared button ${buttonIndex} between ${action} and ${conflictingAction}`);
+        }
+      });
       
       // Assign the button to the current action
       newMappings[action] = { type: "button", index: buttonIndex };
       return newMappings;
     });
     
-    // Clear remapping mode
+    // Reset remapping state
     remappingRef.current = {
       active: false,
       action: null,
@@ -538,23 +748,54 @@ export function useGamepad() {
   function remapToAxis(action: ActionKey, axisIndex: number) {
     // Update mapping, handling any conflicts within the setMappings callback
     setMappings(prev => {
-      // Check conflicts using the current state from the callback
-      const conflictingAction = findActionUsingInput("axis", axisIndex, prev);
-      
+      // Find ALL actions currently using this axis
+      const conflictingActions = findAllActionsUsingInput("axis", axisIndex, prev);
       const newMappings = { ...prev };
       
-      // If axis already assigned to a different action, clear that assignment
-      if (conflictingAction && conflictingAction !== action) {
-        console.log(`Removing axis ${axisIndex} from ${conflictingAction} (conflict resolution)`);
-        newMappings[conflictingAction] = { type: "axis", index: -1 }; 
-      }
+      // Current action info
+      const newActionInfo = ACTIONS.find(a => a.key === action);
       
-      // Assign the axis to the current action
-      newMappings[action] = { type: "axis", index: axisIndex };
+      // Process each conflicting action
+      conflictingActions.forEach(conflictingAction => {
+        // Skip if it's the action we're currently mapping
+        if (conflictingAction === action) return;
+        
+        const existingActionInfo = ACTIONS.find(a => a.key === conflictingAction);
+        
+        // Check if BIDIRECTIONAL sharing is allowed
+        const newAllowsExisting = newActionInfo?.allowSharedMappingWith?.includes(conflictingAction) || false;
+        const existingAllowsNew = existingActionInfo?.allowSharedMappingWith?.includes(action) || false;
+        
+        const sharingAllowed = newAllowsExisting && existingAllowsNew;
+        
+        // Only clear the conflicting mapping if sharing is not allowed
+        if (!sharingAllowed) {
+          console.log(`Removing axis ${axisIndex} from ${conflictingAction} (conflict resolution)`);
+          newMappings[conflictingAction] = { type: "axis", index: -1 }; // -1 means unassigned
+        } else {
+          console.log(`Allowing shared axis ${axisIndex} between ${action} and ${conflictingAction}`);
+        }
+      });
+      
+      // Get the action info to access default axis configuration
+      const actionInfo = ACTIONS.find(a => a.key === action);
+      
+      // Assign the axis to the current action WITH proper axis config
+      newMappings[action] = { 
+        type: "axis", 
+        index: axisIndex,
+        // Include the axis configuration from the ACTIONS array
+        axisConfig: {
+          min: actionInfo?.axisConfig?.defaultMin ?? -1.0,
+          max: actionInfo?.axisConfig?.defaultMax ?? 1.0,
+          inverted: actionInfo?.axisConfig?.inverted ?? false,
+          normalize: actionInfo?.axisConfig?.normalize ?? "full"
+        }
+      };
       return newMappings;
     });
     
-    // Clear remapping mode
+    // Reset remapping state
     remappingRef.current = {
       active: false,
       action: null,
@@ -601,6 +842,26 @@ export function useGamepad() {
     };
   }, [selectedGamepadId]);
 
+  // Make sure this function accepts 'middle' parameter
+  function setAxisConfig(
+    action: ActionKey, 
+    config: { min: number; max: number; inverted: boolean; normalize: "full" | "positive" }
+  ) {
+    setMappings(prev => {
+      const newMappings = { ...prev };
+      const currentMapping = newMappings[action];
+      
+      if (currentMapping && (currentMapping.type === "axis")) {
+        newMappings[action] = {
+          ...currentMapping,
+          axisConfig: config
+        };
+      }
+      
+      return newMappings;
+    });
+  }
+
   return {
     // Available gamepads
     availableGamepads,
@@ -619,6 +880,7 @@ export function useGamepad() {
     mappings,
     isActionActive,
     getAxisValueForAction,
+    getRawAxisValue,
     getActionForInput,
     getInputLabelForMapping,
     
@@ -626,5 +888,7 @@ export function useGamepad() {
     listenForNextInput,
     listeningFor,
     remappingType,
+
+    setAxisConfig,
   };
 }

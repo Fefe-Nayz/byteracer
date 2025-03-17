@@ -76,6 +76,56 @@ export default function WebSocketStatus() {
     return actionKey === "accelerate" || actionKey === "brake" ? false : 0;
   };
 
+  const computeSpeed = () => {
+    const accelerateMapping = mappings["accelerate"];
+    const brakeMapping = mappings["brake"];
+
+    const accelerateValue = () => {
+      if (!accelerateMapping || accelerateMapping.index === -1) {
+        return 0;
+      }
+
+      if (accelerateMapping.type === "button") {
+        if (isActionActive("accelerate")) {
+          return 1;
+        } else {
+          return 0;
+        }
+      }
+
+      if (accelerateMapping.type === "axis") {
+        return getAxisValueForAction("accelerate") ?? 0;
+      }
+
+      return 0;
+
+    }
+
+    const brakeValue = () => {
+      if (!brakeMapping || brakeMapping.index === -1) {
+        return 0;
+      }
+
+      if (brakeMapping.type === "button") {
+        if (isActionActive("brake")) {
+          return 1;
+        } else {
+          return 0;
+        }
+      }
+
+      if (brakeMapping.type === "axis") {
+        return getAxisValueForAction("brake") ?? 0;
+      }
+
+      return 0;
+
+    }
+
+    return accelerateValue() - brakeValue();
+
+  }
+
   // Send gamepad state periodically
   useEffect(() => {
     // Only send data if connected to WebSocket AND have a selected gamepad
@@ -86,8 +136,7 @@ export default function WebSocketStatus() {
 
       // Send the current gamepad state with proper handling of "both" type actions
       const gamepadState = {
-        accelerate: getActionValue("accelerate"),
-        brake: getActionValue("brake"),
+        speed: computeSpeed(),
         turn: getAxisValueForAction("turn") ?? 0,
         turnCameraX: getAxisValueForAction("turnCameraX") ?? 0,
         turnCameraY: getAxisValueForAction("turnCameraY") ?? 0,
