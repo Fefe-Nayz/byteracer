@@ -9,6 +9,7 @@
     "typescript": "^5.0.0"
   },
   "dependencies": {
-    "hono": "^4.7.4"
+    "hono": "^4.7.4",
+    "socket.io": "^4.8.1"
   }
 }
