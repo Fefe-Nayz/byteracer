@@ -7,8 +7,16 @@ const app = new Hono();
 const { upgradeWebSocket, websocket } =
   createBunWebSocket<ServerWebSocket>()
 
+const cars = new Map<string, Car>()
+
+type Car = {
+  id: string;
+}
+
+type WebSocketEventName = "ping" | "pong" | "car_ready"
+
 type WebSocketEvent = {
-  name: string
+  name: WebSocketEventName,
   data: any
   createdAt: number
 }
@@ -21,11 +29,21 @@ app.get(
         const event = JSON.parse(message.data.toString()) as WebSocketEvent
         console.table(event)
 
-        ws.send(JSON.stringify({ 
-          name: 'pong',
-          data: {},  
-          createdAt: event.createdAt
-        }))
+        switch (event.name) {
+          case "car_ready":
+            console.log("Car ready")
+            cars.set(event.data.id, { id: event.data.id })
+            break;
+          case "ping":
+            ws.send(JSON.stringify({
+              name: 'pong',
+              data: {},
+              createdAt: event.createdAt
+            }))
+            break;
+          default:
+            break;
+        }
       },
       onClose: () => {
         console.log('Connection closed')
