@@ -1,58 +1,85 @@
-import type { ServerWebSocket } from 'bun';
-import { Hono } from 'hono';
-import { createBunWebSocket } from 'hono/bun';
+import type { ServerWebSocket } from "bun";
+import { Hono } from "hono";
+import { createBunWebSocket } from "hono/bun";
 
 const app = new Hono();
 
-const { upgradeWebSocket, websocket } =
-  createBunWebSocket<ServerWebSocket>()
+const { upgradeWebSocket, websocket } = createBunWebSocket<ServerWebSocket>();
 
-const cars = new Map<string, Car>()
+const cars = new Map<string, Car>();
 
 type Car = {
   id: string;
-}
+};
 
-type WebSocketEventName = "ping" | "pong" | "car_ready"
+type WebSocketEventName = "ping" | "pong" | "car_ready" | "gamepad_input";
 
 type WebSocketEvent = {
-  name: WebSocketEventName,
-  data: any
-  createdAt: number
-}
+  name: WebSocketEventName;
+  data: any;
+  createdAt: number;
+};
 
 app.get(
-  '/ws',
+  "/ws",
   upgradeWebSocket((c) => {
     return {
       onMessage(message, ws) {
-        const event = JSON.parse(message.data.toString()) as WebSocketEvent
-        console.table(event)
-
+        const event = JSON.parse(message.data.toString()) as WebSocketEvent;
         switch (event.name) {
           case "car_ready":
-            console.log("Car ready")
-            cars.set(event.data.id, { id: event.data.id })
+            console.log("Car ready");
+            cars.set(event.data.id, { id: event.data.id });
+
+            console.log({
+              event,
+            });
+
             break;
+
+          case "gamepad_input":
+            console.log("Receiving gamepad_input");
+
+            // ws.send("", {})
+
+            console.log({
+              event,
+            });
+            break;
+
           case "ping":
-            ws.send(JSON.stringify({
-              name: 'pong',
-              data: {},
-              createdAt: event.createdAt
-            }))
+            const sentAt = event.data.sentAt;
+
+            ws.send(
+              JSON.stringify({
+                name: "pong",
+                data: {
+                  sentAt,
+                },
+                createdAt: event.createdAt,
+              })
+            );
+
+            console.log({
+              event,
+            });
+
             break;
           default:
+            console.log({
+              event,
+            });
             break;
         }
       },
       onClose: () => {
-        console.log('Connection closed')
+        console.log("Connection closed");
       },
-    }
+    };
   })
-)
+);
 
 export default {
   fetch: app.fetch,
   websocket,
-}
+};

@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
 import { useGamepadContext } from "@/contexts/GamepadContext";
 import { ActionKey } from "@/hooks/useGamepad";
+import { useEffect, useRef, useState } from "react";
 import { Card } from "./ui/card";
 
 export default function WebSocketStatus() {
@@ -47,14 +47,15 @@ export default function WebSocketStatus() {
       setStatus("disconnected");
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (message) => {
       try {
-        const data = JSON.parse(event.data);
-        if (data.name === "pong") {
+        const event = JSON.parse(message.data);
+
+        if (event.name === "pong") {
           // Calculate round-trip time in milliseconds
           const now = Date.now();
-          const pingMs = now - pingTimestampRef.current;
-          setPingTime(pingMs);
+          const latency = now - event.data.sentAt;
+          setPingTime(latency);
         }
       } catch (e) {
         console.error("Error parsing websocket message:", e);
@@ -62,8 +63,22 @@ export default function WebSocketStatus() {
     };
     setSocket(ws);
 
+    // Ping
+    const pingLoop = setInterval(() => {
+      ws.send(
+        JSON.stringify({
+          name: "ping",
+          data: {
+            sentAt: Date.now(),
+          },
+          createdAt: Date.now(),
+        })
+      );
+    }, 500);
+
     return () => {
       ws.close();
+      clearInterval(pingLoop);
     };
   }, []);
 
@@ -140,6 +155,8 @@ export default function WebSocketStatus() {
 
   // Send gamepad state periodically
   useEffect(() => {
+    console.log("Use effect qui prend son air consangin, euhhhh, hautin");
+
     // Only send data if connected to WebSocket AND have a selected gamepad
     if (!socket || status !== "connected" || !selectedGamepadId) return;
 
@@ -165,7 +182,7 @@ export default function WebSocketStatus() {
           createdAt: pingTimestampRef.current,
         })
       );
-    }, 30); // ~33 updates per second
+    }, 1000); // ~33 updates per second
 
     return () => clearInterval(interval);
   }, [

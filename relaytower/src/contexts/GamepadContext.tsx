@@ -1,6 +1,6 @@
 "use client";
-import React, { createContext, useContext, ReactNode } from "react";
 import { useGamepad } from "@/hooks/useGamepad";
+import { createContext, ReactNode, useContext } from "react";
 
 // Define the context type explicitly
 type GamepadContextType = ReturnType<typeof useGamepad>;
@@ -15,10 +15,10 @@ export function GamepadProvider({ children }: { children: ReactNode }) {
   // Make the context value explicit
   const contextValue: GamepadContextType = gamepadState;
 
-  console.log(
-    "GamepadProvider rendering - listening for:",
-    gamepadState.listeningFor
-  );
+  // console.log(
+  //   "GamepadProvider rendering - listening for:",
+  //   gamepadState.listeningFor
+  // );
 
   return (
     <GamepadContext.Provider value={contextValue}>
