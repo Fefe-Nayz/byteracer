@@ -7,10 +7,11 @@ import { Card } from "./ui/card";
 export default function WebSocketStatus() {
   const [status, setStatus] = useState<
     "connecting" | "connected" | "disconnected"
-  >("disconnected");
+  >("connecting");
   const [pingTime, setPingTime] = useState<number | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const pingTimestampRef = useRef<number>(0);
+  const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { isActionActive, getAxisValueForAction, selectedGamepadId, mappings } =
     useGamepadContext();
 
@@ -29,17 +30,50 @@ export default function WebSocketStatus() {
   }, [isActionActive, getAxisValueForAction]);
 
   useEffect(() => {
-    // Connect to websocket
-    const ws = new WebSocket("ws://localhost:3000/ws");
+    // Connect to websocket - correct port (3001 instead of 3000)
+    const ws = new WebSocket("ws://localhost:3001/ws");
+    setSocket(ws);
 
     ws.onopen = () => {
       console.log("Connected to gamepad server");
       setStatus("connected");
+
+      // Register as controller
+      ws.send(
+        JSON.stringify({
+          name: "client_register",
+          data: {
+            type: "controller",
+            id: `controller-${Math.random().toString(36).substring(2, 9)}`,
+          },
+          createdAt: Date.now(),
+        })
+      );
+
+      // Only start ping loop after connection is established
+      pingIntervalRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              name: "ping",
+              data: {
+                sentAt: Date.now(),
+              },
+              createdAt: Date.now(),
+            })
+          );
+        }
+      }, 500);
     };
 
     ws.onclose = () => {
       console.log("Disconnected from gamepad server");
       setStatus("disconnected");
+      // Clear ping interval if connection closes
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
     };
 
     ws.onerror = (error) => {
@@ -61,24 +95,18 @@ export default function WebSocketStatus() {
         console.error("Error parsing websocket message:", e);
       }
     };
-    setSocket(ws);
-
-    // Ping
-    const pingLoop = setInterval(() => {
-      ws.send(
-        JSON.stringify({
-          name: "ping",
-          data: {
-            sentAt: Date.now(),
-          },
-          createdAt: Date.now(),
-        })
-      );
-    }, 500);
 
     return () => {
-      ws.close();
-      clearInterval(pingLoop);
+      // Clean up on component unmount
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+      }
+      if (
+        ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING
+      ) {
+        ws.close();
+      }
     };
   }, []);
 
@@ -155,42 +183,38 @@ export default function WebSocketStatus() {
 
   // Send gamepad state periodically
   useEffect(() => {
-    console.log("Use effect qui prend son air consangin, euhhhh, hautin");
-
     // Only send data if connected to WebSocket AND have a selected gamepad
     if (!socket || status !== "connected" || !selectedGamepadId) return;
 
     const interval = setInterval(() => {
-      pingTimestampRef.current = Date.now();
+      // Check connection state before sending
+      if (socket.readyState === WebSocket.OPEN) {
+        pingTimestampRef.current = Date.now();
 
-      // Use the functions from the ref instead of the closure
-      const { isActionActive, getAxisValueForAction } = functionsRef.current;
+        // Use the functions from the ref instead of the closure
+        const { isActionActive, getAxisValueForAction } = functionsRef.current;
 
-      // Send the current gamepad state with proper handling of "both" type actions
-      const gamepadState = {
-        speed: computeSpeed(),
-        turn: getAxisValueForAction("turn") ?? 0,
-        turnCameraX: getAxisValueForAction("turnCameraX") ?? 0,
-        turnCameraY: getAxisValueForAction("turnCameraY") ?? 0,
-        use: isActionActive("use"),
-      };
+        // Send the current gamepad state with proper handling of "both" type actions
+        const gamepadState = {
+          speed: computeSpeed(),
+          turn: getAxisValueForAction("turn") ?? 0,
+          turnCameraX: getAxisValueForAction("turnCameraX") ?? 0,
+          turnCameraY: getAxisValueForAction("turnCameraY") ?? 0,
+          use: isActionActive("use"),
+        };
 
-      socket.send(
-        JSON.stringify({
-          name: "gamepad_input", // Updated to match server expectation
-          data: gamepadState,
-          createdAt: pingTimestampRef.current,
-        })
-      );
-    }, 1000); // ~33 updates per second
+        socket.send(
+          JSON.stringify({
+            name: "gamepad_input",
+            data: gamepadState,
+            createdAt: pingTimestampRef.current,
+          })
+        );
+      }
+    }, 50); // Send updates at 20 Hz
 
     return () => clearInterval(interval);
-  }, [
-    socket,
-    status,
-    selectedGamepadId,
-    mappings, // Still need mappings for equality check
-  ]); // Removed function references from dependencies
+  }, [socket, status, selectedGamepadId, mappings]);
 
   return (
     <Card className="p-4">
