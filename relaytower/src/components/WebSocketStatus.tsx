@@ -14,6 +14,20 @@ export default function WebSocketStatus() {
   const { isActionActive, getAxisValueForAction, selectedGamepadId, mappings } =
     useGamepadContext();
 
+  // Store function references in refs to avoid dependency issues
+  const functionsRef = useRef({
+    isActionActive,
+    getAxisValueForAction,
+  });
+
+  // Keep refs in sync with the latest functions
+  useEffect(() => {
+    functionsRef.current = {
+      isActionActive,
+      getAxisValueForAction,
+    };
+  }, [isActionActive, getAxisValueForAction]);
+
   useEffect(() => {
     // Connect to websocket
     const ws = new WebSocket("ws://localhost:3000/ws");
@@ -56,7 +70,7 @@ export default function WebSocketStatus() {
   // Helper function to get the appropriate value for "both" type actions
   const getActionValue = (actionKey: ActionKey) => {
     const mapping = mappings[actionKey as keyof typeof mappings];
-    
+
     // If mapping doesn't exist or is not set (-1), return 0 or false
     if (!mapping || mapping.index === -1) {
       return actionKey === "accelerate" || actionKey === "brake" ? false : 0;
@@ -77,6 +91,7 @@ export default function WebSocketStatus() {
   };
 
   const computeSpeed = () => {
+    const { isActionActive, getAxisValueForAction } = functionsRef.current;
     const accelerateMapping = mappings["accelerate"];
     const brakeMapping = mappings["brake"];
 
@@ -98,8 +113,7 @@ export default function WebSocketStatus() {
       }
 
       return 0;
-
-    }
+    };
 
     const brakeValue = () => {
       if (!brakeMapping || brakeMapping.index === -1) {
@@ -119,12 +133,10 @@ export default function WebSocketStatus() {
       }
 
       return 0;
-
-    }
+    };
 
     return accelerateValue() - brakeValue();
-
-  }
+  };
 
   // Send gamepad state periodically
   useEffect(() => {
@@ -133,6 +145,9 @@ export default function WebSocketStatus() {
 
     const interval = setInterval(() => {
       pingTimestampRef.current = Date.now();
+
+      // Use the functions from the ref instead of the closure
+      const { isActionActive, getAxisValueForAction } = functionsRef.current;
 
       // Send the current gamepad state with proper handling of "both" type actions
       const gamepadState = {
@@ -156,11 +171,9 @@ export default function WebSocketStatus() {
   }, [
     socket,
     status,
-    isActionActive,
-    getAxisValueForAction,
     selectedGamepadId,
-    mappings,
-  ]);
+    mappings, // Still need mappings for equality check
+  ]); // Removed function references from dependencies
 
   return (
     <Card className="p-4">
