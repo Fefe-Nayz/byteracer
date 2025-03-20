@@ -11,13 +11,15 @@ export function ButtonDisplay({ button }: { button: GamepadButtonInput }) {
   return (
     <div
       className={`p-3 border rounded-md text-center transition-colors ${
-        isPressed ? "bg-green-200" : "bg-gray-100"
+        isPressed
+          ? "bg-primary/10 border-primary/50"
+          : "bg-muted border-muted-foreground/20"
       }`}
     >
       <div className="font-semibold">{button.label}</div>
       <div className="text-sm">{isPressed ? "Pressed" : "Released"}</div>
       {mappedAction && (
-        <div className="text-xs text-blue-600 mt-1">
+        <div className="text-xs text-primary mt-1">
           Mapped to: {mappedAction}
         </div>
       )}

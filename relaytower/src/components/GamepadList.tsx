@@ -9,10 +9,10 @@ export function GamepadItem({ gamepad }: { gamepad: Gamepad }) {
 
   return (
     <Card className={`p-4 my-2 ${isSelected ? "border-2 border-primary" : ""}`}>
-      <div className="flex justify-between items-center">
-        <div>
+      <div className="flex justify-between items-center gap-4">
+        <div className="min-w-0 flex-1">
           <h3 className="font-medium truncate">{gamepad.id}</h3>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-gray-500 truncate">
             {gamepad.buttons.length} buttons, {gamepad.axes.length} axes
             {gamepad.mapping ? ` (${gamepad.mapping} mapping)` : ""}
           </p>
@@ -20,6 +20,7 @@ export function GamepadItem({ gamepad }: { gamepad: Gamepad }) {
         <Button
           onClick={() => selectGamepad(gamepad)}
           variant={isSelected ? "outline" : "default"}
+          className="flex-shrink-0"
         >
           {isSelected ? "Selected" : "Use"}
         </Button>

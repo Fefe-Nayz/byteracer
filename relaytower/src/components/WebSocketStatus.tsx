@@ -3,6 +3,7 @@ import { useGamepadContext } from "@/contexts/GamepadContext";
 import { ActionKey } from "@/hooks/useGamepad";
 import { useEffect, useRef, useState } from "react";
 import { Card } from "./ui/card";
+import { trackWsMessage, trackWsConnection, logError } from "./DebugState";
 
 export default function WebSocketStatus() {
   const [status, setStatus] = useState<
@@ -10,6 +11,7 @@ export default function WebSocketStatus() {
   >("connecting");
   const [pingTime, setPingTime] = useState<number | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [reconnectTrigger, setReconnectTrigger] = useState(0); // Add reconnect counter
   const pingTimestampRef = useRef<number>(0);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const { isActionActive, getAxisValueForAction, selectedGamepadId, mappings } =
@@ -29,39 +31,121 @@ export default function WebSocketStatus() {
     };
   }, [isActionActive, getAxisValueForAction]);
 
+  // Event listeners for debug controls
   useEffect(() => {
-    // Connect to websocket - correct port (3001 instead of 3000)
-    const ws = new WebSocket("ws://localhost:3001/ws");
+    const handleReconnect = () => {
+      console.log("Reconnecting WebSocket...");
+      if (socket) {
+        if (
+          socket.readyState === WebSocket.OPEN ||
+          socket.readyState === WebSocket.CONNECTING
+        ) {
+          socket.close();
+        }
+      }
+      // Increment the reconnect trigger to force the connection useEffect to run
+      setReconnectTrigger((prev) => prev + 1);
+    };
+
+    const handleSendPing = () => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const pingData = {
+          name: "ping",
+          data: {
+            sentAt: Date.now(),
+            debug: true,
+          },
+          createdAt: Date.now(),
+        };
+        socket.send(JSON.stringify(pingData));
+        trackWsMessage("sent", pingData);
+      } else {
+        logError("Cannot send ping", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    };
+
+    const handleClearWsLogs = () => {
+      // This will reset the lastWsSent and lastWsReceived in DebugState.tsx
+      trackWsMessage("sent", null);
+      trackWsMessage("received", null);
+      // Force a re-render
+      setStatus((prev) => (prev === "connected" ? "connected" : prev));
+    };
+
+    window.addEventListener("debug:reconnect-ws", handleReconnect);
+    window.addEventListener("debug:send-ping", handleSendPing);
+    window.addEventListener("debug:clear-ws-logs", handleClearWsLogs);
+
+    return () => {
+      window.removeEventListener("debug:reconnect-ws", handleReconnect);
+      window.removeEventListener("debug:send-ping", handleSendPing);
+      window.removeEventListener("debug:clear-ws-logs", handleClearWsLogs);
+    };
+  }, [socket]);
+
+  // WebSocket connection effect - now depends on reconnectTrigger
+  useEffect(() => {
+    // Clean up any existing socket first
+    if (socket) {
+      if (
+        socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING
+      ) {
+        socket.close();
+      }
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+    }
+
+    console.log(`Connecting to WebSocket (attempt #${reconnectTrigger})...`);
+    setStatus("connecting");
+
+    // Connect to websocket
+    const ws = new WebSocket("ws://127.0.0.1:3001/ws");
     setSocket(ws);
 
     ws.onopen = () => {
       console.log("Connected to gamepad server");
       setStatus("connected");
 
+      // Track connection for debug state
+      trackWsConnection("connect");
+
       // Register as controller
-      ws.send(
-        JSON.stringify({
-          name: "client_register",
-          data: {
-            type: "controller",
-            id: `controller-${Math.random().toString(36).substring(2, 9)}`,
-          },
-          createdAt: Date.now(),
-        })
-      );
+      const registerData = {
+        name: "client_register",
+        data: {
+          type: "controller",
+          id: `controller-${Math.random().toString(36).substring(2, 9)}`,
+        },
+        createdAt: Date.now(),
+      };
+
+      ws.send(JSON.stringify(registerData));
+
+      // Track message for debug
+      trackWsMessage("sent", registerData);
 
       // Only start ping loop after connection is established
       pingIntervalRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              name: "ping",
-              data: {
-                sentAt: Date.now(),
-              },
-              createdAt: Date.now(),
-            })
-          );
+          const pingData = {
+            name: "ping",
+            data: {
+              sentAt: Date.now(),
+            },
+            createdAt: Date.now(),
+          };
+
+          ws.send(JSON.stringify(pingData));
+
+          // Track ping for debug
+          trackWsMessage("sent", pingData);
         }
       }, 500);
     };
@@ -69,6 +153,10 @@ export default function WebSocketStatus() {
     ws.onclose = () => {
       console.log("Disconnected from gamepad server");
       setStatus("disconnected");
+
+      // Track disconnection for debug state
+      trackWsConnection("disconnect");
+
       // Clear ping interval if connection closes
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
@@ -79,11 +167,17 @@ export default function WebSocketStatus() {
     ws.onerror = (error) => {
       console.error("WebSocket error:", error);
       setStatus("disconnected");
+
+      // Log error for debug state
+      logError("WebSocket connection error", error);
     };
 
     ws.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data);
+
+        // Track received message for debug
+        trackWsMessage("received", event);
 
         if (event.name === "pong") {
           // Calculate round-trip time in milliseconds
@@ -93,13 +187,18 @@ export default function WebSocketStatus() {
         }
       } catch (e) {
         console.error("Error parsing websocket message:", e);
+        logError("Error parsing WebSocket message", {
+          error: e,
+          rawMessage: message.data,
+        });
       }
     };
 
     return () => {
-      // Clean up on component unmount
+      // Clean up when effect runs again or component unmounts
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
       }
       if (
         ws.readyState === WebSocket.OPEN ||
@@ -108,7 +207,7 @@ export default function WebSocketStatus() {
         ws.close();
       }
     };
-  }, []);
+  }, [reconnectTrigger]); // Add reconnectTrigger dependency
 
   // Helper function to get the appropriate value for "both" type actions
   const getActionValue = (actionKey: ActionKey) => {
@@ -203,13 +302,15 @@ export default function WebSocketStatus() {
           use: isActionActive("use"),
         };
 
-        socket.send(
-          JSON.stringify({
-            name: "gamepad_input",
-            data: gamepadState,
-            createdAt: pingTimestampRef.current,
-          })
-        );
+        const message = {
+          name: "gamepad_input",
+          data: gamepadState,
+          createdAt: pingTimestampRef.current,
+        };
+
+        socket.send(JSON.stringify(message));
+
+        trackWsMessage("sent", message);
       }
     }, 50); // Send updates at 20 Hz
 

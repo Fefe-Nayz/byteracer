@@ -9,7 +9,7 @@ export default function RemapControls() {
     listenForNextInput,
     listeningFor,
     getInputLabelForMapping,
-    remappingType, // Make sure this is exposed in your useGamepadContext
+    remappingType,
   } = useGamepadContext();
 
   // Filter actions by type
@@ -44,13 +44,25 @@ export default function RemapControls() {
       : getInputLabel(action.key);
 
     return (
-      <div key={action.key} className="flex items-center justify-between">
+      <div
+        key={action.key}
+        className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0"
+      >
         <div className="flex-grow">
           <span className="font-medium">{action.label}:</span>{" "}
-          <span className="text-blue-600">{inputLabel}</span>
+          <span
+            className={
+              isCurrentlyRemapping
+                ? "text-primary font-medium animate-pulse"
+                : "text-muted-foreground"
+            }
+          >
+            {inputLabel}
+          </span>
         </div>
         <Button
           size="sm"
+          variant={isCurrentlyRemapping ? "secondary" : "outline"}
           onClick={() => {
             if (isCurrentlyRemapping) {
               console.log(`Canceling remap for ${action.key}`);
@@ -76,7 +88,6 @@ export default function RemapControls() {
     const currentType = map ? map.type : "button";
 
     // Use the active remapping type from context
-    // This ensures we show the correct prompt based on which button was clicked
     const activeRemappingType = remappingType || "button";
 
     const inputLabel = isCurrentlyRemapping
@@ -84,21 +95,29 @@ export default function RemapControls() {
       : getInputLabel(action.key);
 
     return (
-      <div key={action.key} className="flex flex-col gap-2">
+      <div
+        key={action.key}
+        className="flex flex-col py-2.5 px-4 border-b border-border last:border-b-0"
+      >
         <div className="flex items-center justify-between">
           <div className="flex-grow">
             <span className="font-medium">{action.label}:</span>{" "}
-            <span className="text-blue-600">
+            <span
+              className={
+                isCurrentlyRemapping
+                  ? "text-primary font-medium animate-pulse"
+                  : "text-muted-foreground"
+              }
+            >
               {inputLabel}
-              <span className="text-xs text-gray-500 ml-1">
-                ({currentType})
-              </span>
+              <span className="text-xs ml-1 opacity-70">({currentType})</span>
             </span>
           </div>
 
           {isCurrentlyRemapping ? (
             <Button
               size="sm"
+              variant="secondary"
               onClick={() => {
                 console.log(`Canceling remap for ${action.key}`);
                 listenForNextInput(null);
@@ -110,21 +129,23 @@ export default function RemapControls() {
             <div className="flex gap-2">
               <Button
                 size="sm"
+                variant="outline"
                 onClick={() => {
                   console.log(`Starting button remap for ${action.key}`);
                   listenForNextInput(action.key, "button");
                 }}
               >
-                Remap a Button
+                Map Button
               </Button>
               <Button
                 size="sm"
+                variant="outline"
                 onClick={() => {
                   console.log(`Starting axis remap for ${action.key}`);
                   listenForNextInput(action.key, "axis");
                 }}
               >
-                Remap an Axis
+                Map Axis
               </Button>
             </div>
           )}
@@ -140,11 +161,13 @@ export default function RemapControls() {
       {/* Multi-Input Actions (Both) */}
       {bothActions.length > 0 && (
         <div className="mb-4">
-          <h4 className="text-md font-medium mb-2">
+          <h4 className="text-md font-medium mb-2 flex items-center">
             Multi-Input Controls
-            <span className="text-sm text-gray-500 ml-2">(Button or Axis)</span>
+            <span className="text-sm text-muted-foreground ml-2">
+              (Button or Axis)
+            </span>
           </h4>
-          <div className="space-y-3">
+          <div className="border rounded-md overflow-hidden">
             {bothActions.map((action) => renderBothTypeActionRow(action))}
           </div>
         </div>
@@ -154,7 +177,7 @@ export default function RemapControls() {
       {buttonActions.length > 0 && (
         <div className="mb-4">
           <h4 className="text-md font-medium mb-2">Button Controls</h4>
-          <div className="space-y-2">
+          <div className="border rounded-md overflow-hidden">
             {buttonActions.map((action) => renderStandardActionRow(action))}
           </div>
         </div>
@@ -164,7 +187,7 @@ export default function RemapControls() {
       {axisActions.length > 0 && (
         <div className="mb-4">
           <h4 className="text-md font-medium mb-2">Axis Controls</h4>
-          <div className="space-y-2">
+          <div className="border rounded-md overflow-hidden">
             {axisActions.map((action) => renderStandardActionRow(action))}
           </div>
         </div>

@@ -1,6 +1,7 @@
 "use client";
 import { useGamepadContext } from "@/contexts/GamepadContext";
 import { ActionInfo, ActionKey } from "@/hooks/useGamepad";
+import { Progress } from "./ui/progress";
 import AxisConfigSlider from "./AxisConfig";
 
 export default function ActionStatus({ action }: { action: ActionInfo }) {
@@ -33,57 +34,63 @@ export default function ActionStatus({ action }: { action: ActionInfo }) {
     return (
       <div
         className={`p-3 border rounded-md ${
-          isActive ? "bg-green-200" : "bg-red-100"
+          isActive
+            ? "bg-primary/10 border-primary/50"
+            : "bg-muted border-muted-foreground/20"
         }`}
       >
         <div className="font-semibold">
           {action.label}
           {action.type === "both" && (
-            <span className="text-xs ml-1">(Button mode)</span>
+            <span className="text-xs ml-1 text-muted-foreground">
+              (Button mode)
+            </span>
           )}
         </div>
         <div className="text-sm">{isActive ? "ACTIVE" : "Inactive"}</div>
-        <div className="text-xs mt-1">Mapped to: {inputLabel}</div>
+        <div className="text-xs mt-1 text-muted-foreground">
+          Mapped to: {inputLabel}
+        </div>
       </div>
     );
   }
 
   // For axis type actions (or "both" mapped to axes), show value and gradient
   if (effectiveType === "axis") {
-    const axisStyle = {
-      background: `linear-gradient(to right, #f87171 ${
-        50 - (axisValue || 0) * 50
-      }%, #86efac ${50 - (axisValue || 0) * 50}%)`,
-    };
+    // Calculate position as percentage (0-100)
+    const percentage = (((axisValue || 0) + 1) / 2) * 100;
 
     return (
       <div className="p-3 border rounded-md">
         <div className="font-semibold">
           {action.label}
           {action.type === "both" && (
-            <span className="text-xs ml-1">(Axis mode)</span>
+            <span className="text-xs ml-1 text-muted-foreground">
+              (Axis mode)
+            </span>
           )}
         </div>
         <div className="text-sm">Value: {axisValue?.toFixed(2) || 0}</div>
 
-        <div
-          className="relative h-4 mt-1 bg-gray-200 rounded-full overflow-hidden"
-          style={axisStyle}
-        >
-          {/* Center indicator */}
-          <div className="absolute h-full w-0.5 bg-black left-1/2 transform -translate-x-1/2 opacity-50"></div>
+        <div className="relative my-2">
+          <Progress className="h-4 bg-secondary/50" value={percentage} />
 
-          {/* Value indicator */}
+          {/* Center marker */}
+          <div className="absolute inset-y-0 w-0.5 bg-muted-foreground/50 left-1/2 z-10"></div>
+
+          {/* Value indicator marker */}
           <div
-            className="absolute h-full w-1.5 bg-black"
+            className="absolute top-0 bottom-0 w-1 bg-foreground z-20"
             style={{
-              left: `${50 + (axisValue || 0) * 50}%`,
+              left: `calc(${percentage}%)`,
               transform: "translateX(-50%)",
             }}
           ></div>
         </div>
 
-        <div className="text-xs mt-1">Mapped to: {inputLabel}</div>
+        <div className="text-xs text-muted-foreground">
+          Mapped to: {inputLabel}
+        </div>
 
         {/* Add the axis configuration slider */}
         <AxisConfigSlider action={action} />
