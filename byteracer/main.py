@@ -130,7 +130,7 @@ async def main():
     """
     # Initialize camera
     Vilib.camera_start(vflip=False, hflip=False)
-    Vilib.display(local=True, web=True)
+    Vilib.display(local=False, web=True)
     
     # Initialize TTS (set language if needed)
     tts = TTS()
