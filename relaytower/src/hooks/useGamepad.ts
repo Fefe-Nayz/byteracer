@@ -1,6 +1,9 @@
 "use client";
+import { applyDeadzone } from "@/lib/gamepad";
 import { useEffect, useRef, useState } from "react";
 import { useLocalStorage } from "./useLocalStorage";
+
+const DEADZONE = 0.04;
 
 // Types
 export type GamepadButtonInput = {
@@ -539,7 +542,8 @@ export function useGamepad() {
         normalizedPos = 1 - (clampedValue - min) / rangeDiff;
       }
 
-      return normalizedPos;
+      // Apply deadzone to the normalized value
+      return applyDeadzone(normalizedPos, DEADZONE);
     } else {
       // For full mode: map range to -1 to 1
       const rangeDiff = Math.abs(max - min);
@@ -550,7 +554,7 @@ export function useGamepad() {
       let fullRangeValue = -1 + 2 * ((clampedValue - min) / rangeDiff);
 
       // Apply inversion if needed (simply flip the sign)
-      return inverted ? -fullRangeValue : fullRangeValue;
+      return inverted ? applyDeadzone(-fullRangeValue, DEADZONE) : applyDeadzone(-fullRangeValue, DEADZONE);
     }
   }
 
