@@ -102,11 +102,15 @@ export default function WebSocketStatus() {
       }
     }
 
-    console.log(`Connecting to WebSocket (attempt #${reconnectTrigger})...`);
+    // Get the hostname dynamically from current window location
+    const hostname = window.location.hostname;
+    console.log(
+      `Connecting to WebSocket at ${hostname}:3001 (attempt #${reconnectTrigger})...`
+    );
     setStatus("connecting");
 
-    // Connect to websocket
-    const ws = new WebSocket("ws://127.0.0.1:3001/ws");
+    // Connect to websocket using dynamic hostname
+    const ws = new WebSocket(`ws://${hostname}:3001/ws`);
     setSocket(ws);
 
     ws.onopen = () => {

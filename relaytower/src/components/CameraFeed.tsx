@@ -1,14 +1,22 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { RefreshCw } from "lucide-react";
 import { Button } from "./ui/button";
 
 export default function CameraFeed() {
-  const [streamUrl, setStreamUrl] = useState("http://127.0.0.1:9000/mjpg");
+  // Use window.location.hostname to get the current server hostname dynamically
+  const [streamUrl, setStreamUrl] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [key, setKey] = useState(Date.now()); // Used to force refresh the stream
+
+  // Set URL when component mounts (and whenever hostname might change)
+  useEffect(() => {
+    // This will work regardless of whether it's an IP address or hostname
+    const hostname = window.location.hostname;
+    setStreamUrl(`http://${hostname}:9000/mjpg`);
+  }, []);
 
   const refreshStream = () => {
     setIsLoading(true);
