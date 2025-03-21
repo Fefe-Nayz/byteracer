@@ -299,10 +299,10 @@ export default function WebSocketStatus() {
 
         // Send the current gamepad state with proper handling of "both" type actions
         const gamepadState = {
-          speed: computeSpeed(),
-          turn: getAxisValueForAction("turn") ?? 0,
-          turnCameraX: getAxisValueForAction("turnCameraX") ?? 0,
-          turnCameraY: getAxisValueForAction("turnCameraY") ?? 0,
+          speed: computeSpeed().toFixed(2),
+          turn: getAxisValueForAction("turn")?.toFixed(2) ?? 0,
+          turnCameraX: getAxisValueForAction("turnCameraX")?.toFixed(2) ?? 0,
+          turnCameraY: getAxisValueForAction("turnCameraY")?.toFixed(2) ?? 0,
           use: isActionActive("use"),
         };
 

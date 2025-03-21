@@ -72,8 +72,11 @@ def on_message(message):
             
             px.forward(speed_value * 100)
             px.set_dir_servo_angle(turn_value * 30)
-            px.set_cam_pan_angle(camera_pan_value * 30)
-            px.set_cam_tilt_angle(camera_tilt_value * 30)
+            px.set_cam_pan_angle(camera_pan_value * 90)
+            if camera_tilt_value >= 0:
+                px.set_cam_tilt_angle(camera_tilt_value * 65)
+            else:
+                px.set_cam_tilt_angle(camera_tilt_value * 35)
             
         else:
             print(f"Received message: {data['name']}")
