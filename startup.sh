@@ -13,27 +13,56 @@ echo "=== ByteRacer Startup Script ==="
 # Create the parent directory if it doesn't exist
 mkdir -p "$(dirname "$FOLDER_PATH")"
 
+# Wait for internet connection (up to 60 seconds)
+max_wait=60
+interval=5
+elapsed=0
+internet_available=false
+
+echo "Checking for internet connection..."
+while [ $elapsed -lt $max_wait ]; do
+    if ping -c 1 -W 2 github.com &> /dev/null; then
+        internet_available=true
+        echo "Internet connection detected."
+        break
+    fi
+    echo "No connection yet. Waiting..."
+    sleep $interval
+    elapsed=$((elapsed + interval))
+done
+
 # Check if the repository exists and is valid
 UPDATED=false
-if [ -d "$FOLDER_PATH/.git" ]; then
-    echo "Repository exists. Checking for updates..."
-    cd "$FOLDER_PATH"
-    git fetch origin
-    LOCAL=$(git rev-parse HEAD)
-    REMOTE=$(git rev-parse origin/$BRANCH)
-    if [ "$LOCAL" != "$REMOTE" ]; then
-        echo "Updates found. Resetting repository to latest commit..."
-        git reset --hard origin/$BRANCH
-        UPDATED=true
+if $internet_available; then
+    echo "Internet is available. Proceeding with GitHub fetch."
+    
+    # Your existing repository check and update code
+    if [ -d "$FOLDER_PATH/.git" ]; then
+        echo "Repository exists. Checking for updates..."
+        cd "$FOLDER_PATH"
+        git fetch origin
+        LOCAL=$(git rev-parse HEAD)
+        REMOTE=$(git rev-parse origin/$BRANCH)
+        if [ "$LOCAL" != "$REMOTE" ]; then
+            echo "Updates found. Resetting repository to latest commit..."
+            git reset --hard origin/$BRANCH
+            UPDATED=true
+        else
+            echo "Repository is already up to date."
+        fi
     else
-        echo "Repository is already up to date."
+        echo "Repository missing or corrupted. Cloning fresh copy..."
+        rm -rf "$FOLDER_PATH"
+        git clone -b $BRANCH $REPO_URL "$FOLDER_PATH"
+        UPDATED=true
     fi
+
+    # Additional dependency installation and build steps here...
+
 else
-    echo "Repository missing or corrupted. Cloning fresh copy..."
-    rm -rf "$FOLDER_PATH"
-    git clone -b $BRANCH $REPO_URL "$FOLDER_PATH"
-    UPDATED=true
+    echo "No internet connection detected. Skipping GitHub fetch."
 fi
+
 
 # If updates were applied, install/update dependencies and build the web server.
 if [ "$UPDATED" = true ]; then
