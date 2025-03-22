@@ -3,11 +3,11 @@ import { useCallback, useMemo } from "react";
 import { ActionInfo } from "@/hooks/useGamepad";
 import { useGamepadContext } from "@/contexts/GamepadContext";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
-import { Label } from "./ui/label";
 import { DualRangeSlider } from "./ui/dual-range-slider";
+import { Label } from "./ui/label";
 import { Progress } from "./ui/progress";
 import { Slider } from "./ui/slider";
+import { Switch } from "./ui/switch";
 
 export default function AxisConfigSlider({ action }: { action: ActionInfo }) {
   const { mappings, setAxisConfig, getRawAxisValue, getAxisValueForAction } =
