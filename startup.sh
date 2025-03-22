@@ -10,9 +10,6 @@ BRANCH="main"
 
 echo "=== ByteRacer Startup Script ==="
 
-# Ensure Bun is available in PATH
-export PATH="$HOME/.bun/bin:$PATH"
-
 # Create the parent directory if it doesn't exist
 mkdir -p "$(dirname "$FOLDER_PATH")"
 
