@@ -1,5 +1,5 @@
 "use client";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { ActionInfo } from "@/hooks/useGamepad";
 import { useGamepadContext } from "@/contexts/GamepadContext";
 import { Button } from "./ui/button";
@@ -7,18 +7,26 @@ import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
 import { DualRangeSlider } from "./ui/dual-range-slider";
 import { Progress } from "./ui/progress";
+import { Slider } from "./ui/slider";
 
 export default function AxisConfigSlider({ action }: { action: ActionInfo }) {
   const { mappings, setAxisConfig, getRawAxisValue, getAxisValueForAction } =
     useGamepadContext();
 
   const mapping = mappings[action.key];
-  const axisConfig = mapping?.axisConfig || {
-    min: -1.0,
-    max: 1.0,
-    inverted: false,
-    normalize: "full",
-  };
+
+  // Wrap axisConfig initialization in useMemo to avoid recreating it on every render
+  const axisConfig = useMemo(
+    () =>
+      mapping?.axisConfig || {
+        min: -1.0,
+        max: 1.0,
+        inverted: false,
+        normalize: "full" as const,
+        deadzone: 0.1, // Include default deadzone value
+      },
+    [mapping?.axisConfig]
+  );
 
   // Current raw value from joystick
   const rawValue = getRawAxisValue?.(action.key) ?? 0;
@@ -47,6 +55,19 @@ export default function AxisConfigSlider({ action }: { action: ActionInfo }) {
     [action.key, axisConfig, setAxisConfig]
   );
 
+  // Handle deadzone change
+  const handleDeadzoneChange = useCallback(
+    (values: number[]) => {
+      if (values.length === 1) {
+        setAxisConfig(action.key, {
+          ...axisConfig,
+          deadzone: values[0],
+        });
+      }
+    },
+    [action.key, axisConfig, setAxisConfig]
+  );
+
   // Toggle inversion
   const toggleInverted = useCallback(() => {
     setAxisConfig(action.key, {
@@ -69,15 +90,13 @@ export default function AxisConfigSlider({ action }: { action: ActionInfo }) {
       min: parseFloat((action.axisConfig?.defaultMin || -1.0).toFixed(2)),
       max: parseFloat((action.axisConfig?.defaultMax || 1.0).toFixed(2)),
       inverted: action.axisConfig?.inverted || false,
-      normalize: action.axisConfig?.normalize || "full",
+      normalize: (action.axisConfig?.normalize || "full") as
+        | "full"
+        | "positive",
+      deadzone: parseFloat((action.axisConfig?.deadzone || 0.1).toFixed(2)), // Include deadzone in reset
     };
     setAxisConfig(action.key, defaultConfig);
   }, [action, setAxisConfig]);
-
-  // Format values for labels
-  const formatValue = (value: number | undefined) => {
-    return value !== undefined ? value.toFixed(2) : "";
-  };
 
   return (
     <div className="mt-4 space-y-3">
@@ -112,8 +131,25 @@ export default function AxisConfigSlider({ action }: { action: ActionInfo }) {
           step={0.01}
           value={[axisConfig.min, axisConfig.max]}
           onValueChange={handleRangeChange}
-          label={formatValue}
         />
+      </div>
+
+      {/* Deadzone Configuration Slider */}
+      <div className="space-y-1">
+        <div className="flex justify-between text-xs">
+          <span>Deadzone:</span>
+          <span>{((axisConfig.deadzone || 0.1) * 100).toFixed(0)}%</span>
+        </div>
+        <Slider
+          min={0}
+          max={0.5}
+          step={0.01}
+          value={[axisConfig.deadzone || 0.1]}
+          onValueChange={handleDeadzoneChange}
+        />
+        <div className="text-xs text-muted-foreground">
+          Higher values eliminate small unwanted movements
+        </div>
       </div>
 
       {/* Output Visualization */}

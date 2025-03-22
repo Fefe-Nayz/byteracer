@@ -211,10 +211,7 @@ export default function CameraFeed() {
           </div>
         )}
 
-        <div
-          className="relative rounded-md overflow-hidden"
-          style={{ aspectRatio: "16/9" }}
-        >
+        <div className="relative rounded-md overflow-hidden aspect-[16/9]">
           {/* Error state - positioned over entire feed */}
           {error && (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-30 rounded-md bg-background">
@@ -244,10 +241,7 @@ export default function CameraFeed() {
 
           {/* Centered 4:3 aspect ratio version */}
           <div className="absolute inset-0 flex items-center justify-center z-10">
-            <div
-              className="relative"
-              style={{ aspectRatio: "4/3", height: "100%" }}
-            >
+            <div className="relative aspect-[4/3] h-full">
               <img
                 key={key}
                 src={streamUrl}

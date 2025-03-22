@@ -20,15 +20,26 @@ import {
   AlertCircle,
 } from "lucide-react";
 
+// Define proper types instead of any
+type MessageData = Record<string, unknown>;
+type MessageEntry = { time: Date; data: MessageData | null };
+
 // Track WebSocket messages globally
-let lastWsSent: { time: Date; data: any } | null = null;
-let lastWsReceived: { time: Date; data: any } | null = null;
+let lastWsSent: MessageEntry | null = null;
+let lastWsReceived: MessageEntry | null = null;
 let wsConnectTime: Date | null = null;
 let wsDisconnectTime: Date | null = null;
-let errorLogs: { time: Date; message: string; details?: any }[] = [];
+let errorLogs: {
+  time: Date;
+  message: string;
+  details?: Record<string, unknown>;
+}[] = [];
 
 // Add this to your WebSocketStatus component to track messages
-export function trackWsMessage(direction: "sent" | "received", data: any) {
+export function trackWsMessage(
+  direction: "sent" | "received",
+  data: MessageData | null
+) {
   if (direction === "sent") {
     lastWsSent = { time: new Date(), data };
   } else {
@@ -46,7 +57,7 @@ export function trackWsConnection(type: "connect" | "disconnect") {
 }
 
 // Add this to log errors
-export function logError(message: string, details?: any) {
+export function logError(message: string, details?: Record<string, unknown>) {
   errorLogs.unshift({ time: new Date(), message, details });
   // Keep only last 100 errors
   if (errorLogs.length > 100) errorLogs.pop();
@@ -90,7 +101,7 @@ export default function DebugState() {
 
     let frameCount = 0;
     let lastTime = performance.now();
-    let frameTimes: number[] = [];
+    const frameTimes: number[] = [];
 
     const measurePerformance = () => {
       const now = performance.now();
@@ -476,10 +487,13 @@ export default function DebugState() {
                   </div>
                   <div className="text-xl font-bold">
                     {/* Memory usage if available */}
-                    {(window as any).performance?.memory
+                    {(window.performance as Performance & {
+                      memory?: { usedJSHeapSize: number }
+                    })?.memory
                       ? `${Math.round(
-                          (window as any).performance.memory.usedJSHeapSize /
-                            1048576
+                          (window.performance as Performance & {
+                            memory?: { usedJSHeapSize: number }
+                          }).memory!.usedJSHeapSize / 1048576
                         )}MB`
                       : "N/A"}
                   </div>

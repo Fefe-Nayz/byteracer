@@ -1,5 +1,4 @@
 "use client";
-import { useState, useEffect } from "react";
 import { GamepadProvider } from "@/contexts/GamepadContext";
 import { useGamepadContext } from "@/contexts/GamepadContext";
 import GamepadList from "@/components/GamepadList";

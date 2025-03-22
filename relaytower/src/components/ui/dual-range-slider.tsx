@@ -34,7 +34,7 @@ const DualRangeSlider = React.forwardRef<
       {initialValue.map((value, index) => (
         <React.Fragment key={index}>
           <SliderPrimitive.Thumb className="relative block h-4 w-4 rounded-full border-2 border-primary bg-background ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50">
-            {/* {label && (
+            {label && (
               <span
                 className={cn(
                   "absolute flex w-full justify-center",
@@ -44,7 +44,7 @@ const DualRangeSlider = React.forwardRef<
               >
                 {label(value)}
               </span>
-            )} */}
+            )}
           </SliderPrimitive.Thumb>
         </React.Fragment>
       ))}

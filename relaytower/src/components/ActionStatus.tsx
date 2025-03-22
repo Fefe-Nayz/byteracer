@@ -1,6 +1,6 @@
 "use client";
 import { useGamepadContext } from "@/contexts/GamepadContext";
-import { ActionInfo, ActionKey } from "@/hooks/useGamepad";
+import { ActionInfo } from "@/hooks/useGamepad";
 import { Progress } from "./ui/progress";
 import AxisConfigSlider from "./AxisConfig";
 

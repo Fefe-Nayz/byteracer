@@ -44,6 +44,7 @@ export interface ActionInfo {
     defaultMax: number; // Maximum range (-1 to 1)
     inverted?: boolean; // Whether axis should be inverted by default
     normalize: "full" | "positive"; // How to normalize: full (-1 to 1) or positive (0 to 1)
+    deadzone?: number; // Deadzone for axis input
   };
 }
 
@@ -59,6 +60,7 @@ export const ACTIONS: ActionInfo[] = [
       defaultMax: 0.0,
       inverted: true,
       normalize: "positive", // Normalized to 0-1 range
+      deadzone: 0.1, // Deadzone for axis input
     },
   },
   {
@@ -72,42 +74,46 @@ export const ACTIONS: ActionInfo[] = [
       defaultMax: 1.0,
       inverted: false,
       normalize: "positive", // Normalized to 0-1 range
+      deadzone: 0.1, // Deadzone for axis input
     },
   },
   {
     key: "turn",
     label: "Tourner",
-    type: "axis",
+    type: "both",
     defaultMapping: { type: "axis", index: 0 },
     axisConfig: {
       defaultMin: -1.0,
       defaultMax: 1.0,
       inverted: false,
       normalize: "full", // Full -1 to 1 range
+      deadzone: 0.1, // Deadzone for axis input
     },
   },
   {
     key: "turnCameraX",
     label: "Tourner la caméra horizontalement",
-    type: "axis",
+    type: "both",
     defaultMapping: { type: "axis", index: 2 },
     axisConfig: {
       defaultMin: -1.0,
       defaultMax: 1.0,
       inverted: false,
       normalize: "full", // Full -1 to 1 range
+      deadzone: 0.1, // Deadzone for axis input
     },
   },
   {
     key: "turnCameraY",
     label: "Tourner la caméra verticalement",
-    type: "axis",
+    type: "both",
     defaultMapping: { type: "axis", index: 3 },
     axisConfig: {
       defaultMin: -1.0,
       defaultMax: 1.0,
       inverted: false,
       normalize: "full", // Full -1 to 1 range
+      deadzone: 0.1, // Deadzone for axis input
     },
   },
   {
@@ -129,6 +135,7 @@ type Mapping = Record<
       max: number;
       inverted: boolean;
       normalize: "full" | "positive";
+      deadzone?: number; // Add deadzone property to the mapping
     };
   }
 >;
@@ -191,6 +198,7 @@ export function useGamepad() {
           max: actionInfo?.axisConfig?.defaultMax ?? 1.0,
           inverted: actionInfo?.axisConfig?.inverted ?? false,
           normalize: actionInfo?.axisConfig?.normalize ?? "full",
+          deadzone: actionInfo?.axisConfig?.deadzone ?? 0.1, // Include deadzone in the default
         };
       }
 
@@ -262,6 +270,7 @@ export function useGamepad() {
             max: actionInfo?.axisConfig?.defaultMax ?? 1.0,
             inverted: actionInfo?.axisConfig?.inverted ?? false,
             normalize: actionInfo?.axisConfig?.normalize ?? "full",
+            deadzone: actionInfo?.axisConfig?.deadzone ?? 0.1, // Include deadzone in the default
           };
         }
 
@@ -477,7 +486,6 @@ export function useGamepad() {
     if (!map || map.index === -1) return false; // Check for -1 (unmapped)
 
     // Find the action info to check if it's "both" type
-    const actionInfo = ACTIONS.find((a) => a.key === action);
 
     if (map.type === "button") {
       const id = `button-${map.index}`;
@@ -516,10 +524,13 @@ export function useGamepad() {
     if (!applyConfig || !map.axisConfig) return rawValue;
 
     // Apply axis configuration
-    const { min, max, inverted, normalize } = map.axisConfig;
-
+    const { min, max, inverted, normalize, deadzone = 0.1 } = map.axisConfig;
+    
+    // Apply deadzone
+    const rawWithDeadzone = applyDeadzone(rawValue, deadzone);
+    
     // First, clamp raw value between min and max
-    const clampedValue = Math.max(min, Math.min(max, rawValue));
+    const clampedValue = Math.max(min, Math.min(max, rawWithDeadzone));
 
     // Calculate the normalized value based on the mode
     if (normalize === "positive") {
@@ -547,7 +558,7 @@ export function useGamepad() {
       if (rangeDiff === 0) return 0; // Avoid division by zero
 
       // Map the value to -1 to 1 range
-      let fullRangeValue = -1 + 2 * ((clampedValue - min) / rangeDiff);
+      const fullRangeValue = -1 + 2 * ((clampedValue - min) / rangeDiff); // Changed to const
 
       // Apply inversion if needed (simply flip the sign)
       return inverted ? -fullRangeValue : fullRangeValue;
@@ -579,24 +590,24 @@ export function useGamepad() {
   }
 
   // Find if any action is using this input
-  function findActionUsingInput(
-    type: "button" | "axis",
-    index: number,
-    currentMappings?: Mapping
-  ): ActionKey | null {
-    // Use provided mappings or fall back to the current state mappings
-    const mappingsToCheck = currentMappings || mappings;
+  // function findActionUsingInput(
+  //   type: "button" | "axis",
+  //   index: number,
+  //   currentMappings?: Mapping
+  // ): ActionKey | null {
+  //   // Use provided mappings or fall back to the current state mappings
+  //   const mappingsToCheck = currentMappings || mappings;
 
-    for (const [action, cfg] of Object.entries(mappingsToCheck) as [
-      ActionKey,
-      { type: string; index: number }
-    ][]) {
-      if (cfg.type === type && cfg.index === index) {
-        return action as ActionKey;
-      }
-    }
-    return null;
-  }
+  //   for (const [action, cfg] of Object.entries(mappingsToCheck) as [
+  //     ActionKey,
+  //     { type: string; index: number }
+  //   ][]) {
+  //     if (cfg.type === type && cfg.index === index) {
+  //       return action as ActionKey;
+  //     }
+  //   }
+  //   return null;
+  // }
 
   // Improved findAllActionsUsingInput function to find ALL conflicts
   function findAllActionsUsingInput(
@@ -764,7 +775,7 @@ export function useGamepad() {
 
     // Log the buttons state in each poll during remapping
     if (remappingRef.current.active) {
-      let activeButtons = [];
+      const activeButtons = []; // Changed to const
       for (let i = 0; i < activePad.buttons.length; i++) {
         if (activePad.buttons[i].pressed || activePad.buttons[i].value > 0.5) {
           activeButtons.push(
@@ -867,9 +878,8 @@ export function useGamepad() {
       );
       const newMappings = { ...prev };
 
-      // Current action info
-      const newActionInfo = ACTIONS.find((a) => a.key === action);
-
+      // Current action info - using directly without storing in variable to avoid unused variable
+      
       // Process each conflicting action
       conflictingActions.forEach((conflictingAction) => {
         // Skip if it's the action we're currently mapping
@@ -880,6 +890,7 @@ export function useGamepad() {
         );
 
         // Check if BIDIRECTIONAL sharing is allowed
+        const newActionInfo = ACTIONS.find((a) => a.key === action); // moved here so it's used
         const newAllowsExisting =
           newActionInfo?.allowSharedMappingWith?.includes(conflictingAction) ||
           false;
@@ -914,6 +925,7 @@ export function useGamepad() {
           max: actionInfo?.axisConfig?.defaultMax ?? 1.0,
           inverted: actionInfo?.axisConfig?.inverted ?? false,
           normalize: actionInfo?.axisConfig?.normalize ?? "full",
+          deadzone: actionInfo?.axisConfig?.deadzone ?? 0.1, // Include deadzone
         },
       };
       return newMappings;
@@ -956,7 +968,7 @@ export function useGamepad() {
     const gamepadListInterval = setInterval(updateAvailableGamepads, 2000);
 
     // Update gamepad state more frequently
-    const stateInterval = setInterval(updateGamepadState, 50);
+    const stateInterval = setInterval(updateGamepadState, 10);
 
     return () => {
       clearInterval(gamepadListInterval);
@@ -974,6 +986,7 @@ export function useGamepad() {
       max: number;
       inverted: boolean;
       normalize: "full" | "positive";
+      deadzone?: number; // Add deadzone to config type
     }
   ) {
     setMappings((prev) => {
@@ -989,6 +1002,22 @@ export function useGamepad() {
 
       return newMappings;
     });
+  }
+
+  // Helper function to apply deadzone
+  function applyDeadzone(value: number, deadzone: number): number {
+    // Calculate the absolute value
+    const absValue = Math.abs(value);
+    
+    // If under deadzone threshold, return 0
+    if (absValue < deadzone) {
+      return 0;
+    }
+    
+    // Otherwise, rescale the value to remove the deadzone
+    // This remaps the range [deadzone, 1] to [0, 1] with the same sign
+    const sign = value >= 0 ? 1 : -1;
+    return sign * ((absValue - deadzone) / (1 - deadzone));
   }
 
   return {

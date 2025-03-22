@@ -1,7 +1,6 @@
 "use client";
 import { useGamepadContext } from "@/contexts/GamepadContext";
-import { ActionKey } from "@/hooks/useGamepad";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Card } from "./ui/card";
 import { trackWsMessage, trackWsConnection, logError } from "./DebugState";
 
@@ -173,7 +172,10 @@ export default function WebSocketStatus() {
       setStatus("disconnected");
 
       // Log error for debug state
-      logError("WebSocket connection error", error);
+      logError("WebSocket connection error", {
+        message: "Connection error",
+        errorType: error.type,
+      });
     };
 
     ws.onmessage = (message) => {
@@ -211,32 +213,10 @@ export default function WebSocketStatus() {
         ws.close();
       }
     };
-  }, [reconnectTrigger]); // Add reconnectTrigger dependency
+  }, [reconnectTrigger]); // Add reconnectTrigger and socket dependency
 
-  // Helper function to get the appropriate value for "both" type actions
-  const getActionValue = (actionKey: ActionKey) => {
-    const mapping = mappings[actionKey as keyof typeof mappings];
-
-    // If mapping doesn't exist or is not set (-1), return 0 or false
-    if (!mapping || mapping.index === -1) {
-      return actionKey === "accelerate" || actionKey === "brake" ? false : 0;
-    }
-
-    // If mapped to a button, return boolean
-    if (mapping.type === "button") {
-      return isActionActive(actionKey);
-    }
-
-    // If mapped to an axis, return axis value
-    if (mapping.type === "axis") {
-      return getAxisValueForAction(actionKey) ?? 0;
-    }
-
-    // Fallback
-    return actionKey === "accelerate" || actionKey === "brake" ? false : 0;
-  };
-
-  const computeSpeed = () => {
+  // Wrap computeSpeed in useCallback to prevent recreation on every render
+  const computeSpeed = useCallback(() => {
     const { isActionActive, getAxisValueForAction } = functionsRef.current;
     const accelerateMapping = mappings["accelerate"];
     const brakeMapping = mappings["brake"];
@@ -282,7 +262,7 @@ export default function WebSocketStatus() {
     };
 
     return accelerateValue() - brakeValue();
-  };
+  }, [mappings]); // Only depend on mappings
 
   // Send gamepad state periodically
   useEffect(() => {
@@ -319,7 +299,7 @@ export default function WebSocketStatus() {
     }, 50); // Send updates at 20 Hz
 
     return () => clearInterval(interval);
-  }, [socket, status, selectedGamepadId, mappings]);
+  }, [socket, status, selectedGamepadId, mappings, computeSpeed]); // Added computeSpeed dependency
 
   return (
     <Card className="p-4">

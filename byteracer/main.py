@@ -70,7 +70,9 @@ def on_message(message):
             camera_pan_value = data["data"].get("turnCameraX", 0)
             camera_tilt_value = data["data"].get("turnCameraY", 0)
             
-            px.forward(speed_value * 100)
+            #px.forward(speed_value * 100)
+            px.set_motor_speed(1, speed_value * 100) # normal motor
+            px.set_motor_speed(2, speed_value * -100) # slow motor
             px.set_dir_servo_angle(turn_value * 30)
             px.set_cam_pan_angle(camera_pan_value * 90)
             if camera_tilt_value >= 0:

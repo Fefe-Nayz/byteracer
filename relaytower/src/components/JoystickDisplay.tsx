@@ -38,7 +38,7 @@ export default function JoystickDisplay({
 
         {/* Position dot */}
         <div
-          className="absolute w-4 h-4 bg-primary rounded-full transform -translate-x-1/2 -translate-y-1/2 transition-all"
+          className="absolute w-4 h-4 bg-primary rounded-full transform -translate-x-1/2 -translate-y-1/2 "
           style={{ left: dotX, top: dotY }}
         ></div>
       </div>
