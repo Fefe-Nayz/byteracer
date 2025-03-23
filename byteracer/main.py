@@ -102,7 +102,7 @@ def on_message(message):
                 print("Use button pressed - playing sound")
                 if music_player:
                     # Play a sound - adjust filename as needed
-                    music_player.sound_play('assets/fart.mp3')
+                    music_player.sound_play_threading('assets/fart.mp3')
             
             # Update previous state
             previous_use_state = use_value
