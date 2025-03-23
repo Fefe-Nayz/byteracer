@@ -19,7 +19,7 @@ stop_speaking_ip = False
 
 def get_ip():
     """
-    A helper function to retrieve the robot's IP address.
+    Retrieves the IP address used by the Raspberry Pi.
     Falls back to '127.0.0.1' if unable to determine.
     """
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -36,33 +36,55 @@ def get_ip():
 
 async def speak_ip_periodically(tts):
     """
-    Asynchronous loop to speak the robot's IP address every 5 seconds,
-    until a gamepad input is received (stop_speaking_ip = True).
+    Speaks the robot's IP address every 5 seconds until a gamepad input is received.
     """
     global stop_speaking_ip
-    
+
     while not stop_speaking_ip:
         ip_address = get_ip()
-        # Speak the IP address
         tts.say(f"My IP address is {ip_address}")
-        # Wait 5 seconds before speaking again
+        await asyncio.sleep(5)
+
+async def monitor_network_mode(tts):
+    """
+    Monitors the network mode by checking the IP address.
+    If it detects a change (e.g., switching from Access Point mode to WiFi/Ethernet or vice-versa),
+    it announces the new mode.
+    """
+    last_mode = None
+    while True:
+        ip_address = get_ip()
+        # A simple check: if the IP starts with "127." we assume it's in AP (or fallback) mode.
+        # Adjust this logic if your AP uses a different IP range.
+        if ip_address.startswith("127."):
+            current_mode = "Access Point mode"
+        else:
+            current_mode = "WiFi/Ethernet mode"
+        
+        if current_mode != last_mode:
+            tts.say(f"Network mode changed: {current_mode}")
+            if current_mode == "Access Point mode":
+                tts.say("Please connect to the robot's WiFi hotspot and go to the adress 192.168.50.5:3000")
+            else:
+                tts.say("Please connet to the robot's same network and go to the adress {ip_address}:3000")
+            print(f"Network mode changed: {current_mode}")
+            last_mode = current_mode
+        
         await asyncio.sleep(5)
 
 def on_message(message):
     """
-    Handle messages coming from the websocket.
-    If 'gamepad_input' is detected, stop the IP announcement.
+    Handles messages from the websocket.
+    Stops the periodic IP announcements if a gamepad input is received.
     """
     global stop_speaking_ip
-    
+
     try:
         data = json.loads(message)
         if data["name"] == "welcome":
             print(f"Received welcome message, client ID: {data['data']['clientId']}")
         elif data["name"] == "gamepad_input":
             print(f"Received gamepad input: {data['data']}")
-            
-            # ** Once we receive any gamepad input, stop speaking the IP. **
             stop_speaking_ip = True
 
             turn_value = data["data"].get("turn", 0)
@@ -70,8 +92,7 @@ def on_message(message):
             camera_pan_value = data["data"].get("turnCameraX", 0)
             camera_tilt_value = data["data"].get("turnCameraY", 0)
             
-            #px.forward(speed_value * 100)
-            px.set_motor_speed(1, speed_value * 100) # normal motor
+            px.set_motor_speed(1, speed_value * 100)  # normal motor
             px.set_motor_speed(2, speed_value * -100) # slow motor
             px.set_dir_servo_angle(turn_value * 30)
             px.set_cam_pan_angle(camera_pan_value * 90)
@@ -95,7 +116,6 @@ async def connect_to_websocket(url):
     try:
         async with websockets.connect(url) as websocket:
             print(f"Connected to server at {url}!")
-            
             # Register as a car
             register_message = json.dumps({
                 "name": "client_register",
@@ -127,13 +147,14 @@ async def connect_to_websocket(url):
 async def main():
     """
     Main entry point:
-    - Starts camera
-    - Displays locally and via web
-    - Creates two tasks:
-        1) Connect to the websocket server
-        2) Periodically speak the IP address
+    - Starts the camera.
+    - Initializes the TTS.
+    - Launches three asynchronous tasks:
+         1) Websocket connection.
+         2) Periodically speaking the IP address.
+         3) Monitoring network mode changes.
     """
-    # Initialize camera
+    # Start camera and display (local=False, web=True)
     Vilib.camera_start(vflip=False, hflip=False)
     Vilib.display(local=False, web=True)
     
@@ -144,13 +165,12 @@ async def main():
     # Build URL with /ws route
     url = f"ws://{SERVER_HOST}/ws"
     print(f"Connecting to {url}...")
-
-    # Run both tasks concurrently
-    # Task A: Websocket connection
-    # Task B: Speak IP every 5 seconds until gamepad input
+    
+    # Run tasks concurrently:
     await asyncio.gather(
         connect_to_websocket(url),
-        speak_ip_periodically(tts)
+        speak_ip_periodically(tts),
+        monitor_network_mode(tts)
     )
 
 if __name__ == "__main__":
@@ -160,10 +180,14 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nShutting down gracefully...")
     finally:
-        # Clean up
         Vilib.camera_close()
         px.forward(0)
         px.set_dir_servo_angle(0)
         px.set_cam_pan_angle(0)
         px.set_cam_tilt_angle(0)
         print("ByteRacer offline.")
+
+
+# TODO:
+# - Add handling for other messages (e.g., camera fatures, microphone (speaker/ music etc), reboot/shutdown robot, restart services, check for updates, battery status, gamemodes, game specific commands, etc.)
+# - Add error handling for camera and network issues
