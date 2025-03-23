@@ -728,7 +728,7 @@ export default function DebugState() {
                 <Wrench size={16} className="mr-2" /> Robot Management
               </div>
               <div className="text-muted-foreground text-xs mb-2">
-                Control the robot's services and hardware
+                Control the robot&apos;s services and hardware
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <Button
@@ -806,7 +806,7 @@ export default function DebugState() {
                 <Download size={16} className="mr-2" /> Software Management
               </div>
               <div className="text-muted-foreground text-xs mb-2">
-                Manage the robot's software
+                Manage the robot&apos;s software
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <Button

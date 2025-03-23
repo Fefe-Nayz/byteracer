@@ -122,6 +122,9 @@ export default function WebSocketStatus() {
     if (savedWsUrl) setCustomWsUrl(savedWsUrl);
     if (savedCameraUrl) setCustomCameraUrl(savedCameraUrl);
 
+    console.log(batteryLevel);
+    console.log(customCameraUrl);
+
     return () => {
       window.removeEventListener(
         "debug:update-urls",
