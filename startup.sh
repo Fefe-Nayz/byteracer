@@ -107,6 +107,9 @@ if [ "$UPDATED" = true ]; then
             sudo bash ./install.sh
         fi
     fi
+
+    sudo chmod -R 777 /home/pi/ByteRacer/
+
 else
     echo "No repository updates detected; skipping dependency installation."
 fi

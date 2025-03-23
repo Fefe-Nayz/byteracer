@@ -87,10 +87,11 @@ def on_message(message):
             print(f"Received gamepad input: {data['data']}")
             stop_speaking_ip = True
 
-            turn_value = data["data"].get("turn", 0)
-            speed_value = data["data"].get("speed", 0)
-            camera_pan_value = data["data"].get("turnCameraX", 0)
-            camera_tilt_value = data["data"].get("turnCameraY", 0)
+            turn_value = float(data["data"].get("turn", 0))
+            speed_value = float(data["data"].get("speed", 0))
+            camera_pan_value = float(data["data"].get("turnCameraX", 0))
+            camera_tilt_value = float(data["data"].get("turnCameraY", 0))
+
             
             px.set_motor_speed(1, speed_value * 100)  # normal motor
             px.set_motor_speed(2, speed_value * -100) # slow motor

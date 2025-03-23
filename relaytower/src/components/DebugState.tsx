@@ -21,12 +21,20 @@ import {
 } from "lucide-react";
 
 // Define proper types instead of any
-type MessageData = Record<string, unknown>;
+interface WebSocketMessage {
+  name: string;
+  data: Record<string, unknown>;
+  createdAt: number;
+}
+
+type MessageData = WebSocketMessage;
 type MessageEntry = { time: Date; data: MessageData | null };
 
 // Track WebSocket messages globally
 let lastWsSent: MessageEntry | null = null;
 let lastWsReceived: MessageEntry | null = null;
+let lastGamepadInputMessage: MessageEntry | null = null;
+let lastPingMessage: MessageEntry | null = null;
 let wsConnectTime: Date | null = null;
 let wsDisconnectTime: Date | null = null;
 let errorLogs: {
@@ -35,13 +43,20 @@ let errorLogs: {
   details?: Record<string, unknown>;
 }[] = [];
 
-// Add this to your WebSocketStatus component to track messages
+// Update the trackWsMessage function to store type-specific messages
 export function trackWsMessage(
   direction: "sent" | "received",
   data: MessageData | null
 ) {
   if (direction === "sent") {
     lastWsSent = { time: new Date(), data };
+
+    // Store type-specific messages
+    if (data && data.name === "gamepad_input") {
+      lastGamepadInputMessage = { time: new Date(), data };
+    } else if (data && data.name === "ping") {
+      lastPingMessage = { time: new Date(), data };
+    }
   } else {
     lastWsReceived = { time: new Date(), data };
   }
@@ -228,6 +243,55 @@ export default function DebugState() {
                     : "No messages sent"}
                 </pre>
               </div>
+
+              <Collapsible className="space-y-2">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center justify-between w-full px-2 py-1 h-7"
+                  >
+                    <span className="flex items-center">
+                      <Settings size={14} className="mr-2" /> Gamepad Input
+                      Messages{" "}
+                      {lastGamepadInputMessage &&
+                        `(${formatTime(lastGamepadInputMessage.time)})`}
+                    </span>
+                    <ChevronDown size={14} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="bg-muted p-2 rounded-md overflow-x-auto whitespace-pre-wrap text-[10px] max-h-40">
+                    {lastGamepadInputMessage
+                      ? JSON.stringify(lastGamepadInputMessage.data, null, 2)
+                      : "No gamepad input messages sent"}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
+
+              <Collapsible className="space-y-2">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center justify-between w-full px-2 py-1 h-7"
+                  >
+                    <span className="flex items-center">
+                      <Clock size={14} className="mr-2" /> Ping Messages
+                      {lastPingMessage &&
+                        `(${formatTime(lastPingMessage.time)})`}
+                    </span>
+                    <ChevronDown size={14} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="bg-muted p-2 rounded-md overflow-x-auto whitespace-pre-wrap text-[10px] max-h-40">
+                    {lastPingMessage
+                      ? JSON.stringify(lastPingMessage.data, null, 2)
+                      : "No ping messages sent"}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
 
               <div className="space-y-2">
                 <div className="font-medium flex items-center gap-2">
@@ -487,13 +551,17 @@ export default function DebugState() {
                   </div>
                   <div className="text-xl font-bold">
                     {/* Memory usage if available */}
-                    {(window.performance as Performance & {
-                      memory?: { usedJSHeapSize: number }
-                    })?.memory
+                    {(
+                      window.performance as Performance & {
+                        memory?: { usedJSHeapSize: number };
+                      }
+                    )?.memory
                       ? `${Math.round(
-                          (window.performance as Performance & {
-                            memory?: { usedJSHeapSize: number }
-                          }).memory!.usedJSHeapSize / 1048576
+                          (
+                            window.performance as Performance & {
+                              memory?: { usedJSHeapSize: number };
+                            }
+                          ).memory!.usedJSHeapSize / 1048576
                         )}MB`
                       : "N/A"}
                   </div>
@@ -512,9 +580,7 @@ export default function DebugState() {
                       style={{
                         height: `${Math.min(100, (time / 33) * 100)}%`,
                         backgroundColor:
-                          time > 16
-                            ? "var(--destructive)"
-                            : "var(--primary)",
+                          time > 16 ? "var(--destructive)" : "var(--primary)",
                         opacity: 0.7,
                         width: `${
                           100 /

@@ -20,19 +20,20 @@ export type GamepadAxisInput = {
 export type GamepadInput = GamepadButtonInput | GamepadAxisInput;
 
 export type ActionKey =
-  | "accelerate"
-  | "brake"
-  | "turn"
-  | "turnCameraX"
-  | "turnCameraY"
+  | "forward"
+  | "backward"
+  | "turnRight"
+  | "turnLeft"
+  | "turnCameraRight"
+  | "turnCameraLeft"
+  | "turnCameraUp"
+  | "turnCameraDown"
   | "use";
 
-// Enhance the ActionInfo interface
 export interface ActionInfo {
   key: ActionKey;
   label: string;
   type: "button" | "axis" | "both";
-  // New fields:
   defaultMapping: {
     type: "button" | "axis";
     index: number;
@@ -48,72 +49,147 @@ export interface ActionInfo {
   };
 }
 
+export type ActionGroupKey =
+  | "speed"
+  | "turn"
+  | "turnCameraX"
+  | "turnCameraY";
+
+export interface ActionGroup {
+  key: ActionGroupKey;
+  actions: ActionKey[];
+}
+
+export const ACTION_GROUPS: ActionGroup[] = [
+  {
+    key: "speed",
+    actions: ["forward", "backward"],
+  },
+  {
+    key: "turn",
+    actions: ["turnRight", "turnLeft"],
+  },
+  {
+    key: "turnCameraX",
+    actions: ["turnCameraRight", "turnCameraLeft"],
+  },
+  {
+    key: "turnCameraY",
+    actions: ["turnCameraUp", "turnCameraDown"],
+  }
+];
+
 export const ACTIONS: ActionInfo[] = [
   {
-    key: "accelerate",
-    label: "Accélérer",
+    key: "forward",
+    label: "Avancer",
     type: "both",
     defaultMapping: { type: "axis", index: 1 },
-    allowSharedMappingWith: ["brake"],
+    allowSharedMappingWith: ["backward"],
     axisConfig: {
       defaultMin: -1.0,
       defaultMax: 0.0,
       inverted: true,
-      normalize: "positive", // Normalized to 0-1 range
-      deadzone: 0.1, // Deadzone for axis input
+      normalize: "positive",
+      deadzone: 0.1,
     },
   },
   {
-    key: "brake",
-    label: "Freiner",
+    key: "backward",
+    label: "Reculer",
     type: "both",
     defaultMapping: { type: "axis", index: 1 },
-    allowSharedMappingWith: ["accelerate"],
+    allowSharedMappingWith: ["forward"],
     axisConfig: {
       defaultMin: 0.0,
       defaultMax: 1.0,
       inverted: false,
-      normalize: "positive", // Normalized to 0-1 range
-      deadzone: 0.1, // Deadzone for axis input
+      normalize: "positive",
+      deadzone: 0.1,
     },
   },
   {
-    key: "turn",
-    label: "Tourner",
+    key: "turnRight",
+    label: "Tourner à Droite",
     type: "both",
     defaultMapping: { type: "axis", index: 0 },
+    allowSharedMappingWith: ["turnLeft"],
     axisConfig: {
-      defaultMin: -1.0,
+      defaultMin: 0.0,
       defaultMax: 1.0,
       inverted: false,
-      normalize: "full", // Full -1 to 1 range
-      deadzone: 0.1, // Deadzone for axis input
+      normalize: "positive",
+      deadzone: 0.1,
     },
   },
   {
-    key: "turnCameraX",
-    label: "Tourner la caméra horizontalement",
+    key: "turnLeft",
+    label: "Tourner à Gauche",
+    type: "both",
+    defaultMapping: { type: "axis", index: 0 },
+    allowSharedMappingWith: ["turnRight"],
+    axisConfig: {
+      defaultMin: -1.0,
+      defaultMax: 0.0,
+      inverted: true,
+      normalize: "positive",
+      deadzone: 0.1,
+    },
+  },
+  {
+    key: "turnCameraRight",
+    label: "Tourner la caméra à droite",
     type: "both",
     defaultMapping: { type: "axis", index: 2 },
+    allowSharedMappingWith: ["turnCameraLeft"],
     axisConfig: {
-      defaultMin: -1.0,
+      defaultMin: 0.0,
       defaultMax: 1.0,
       inverted: false,
-      normalize: "full", // Full -1 to 1 range
-      deadzone: 0.1, // Deadzone for axis input
+      normalize: "positive",
+      deadzone: 0.1,
     },
   },
   {
-    key: "turnCameraY",
-    label: "Tourner la caméra verticalement",
+    key: "turnCameraLeft",
+    label: "Tourner la caméra à gauche",
     type: "both",
-    defaultMapping: { type: "axis", index: 3 },
+    defaultMapping: { type: "axis", index: 2 },
+    allowSharedMappingWith: ["turnCameraRight"],
     axisConfig: {
       defaultMin: -1.0,
+      defaultMax: 0.0,
+      inverted: true,
+      normalize: "positive",
+      deadzone: 0.1,
+    },
+  },
+  {
+    key: "turnCameraUp",
+    label: "Tourner la caméra en haut",
+    type: "both",
+    defaultMapping: { type: "axis", index: 3 },
+    allowSharedMappingWith: ["turnCameraDown"],
+    axisConfig: {
+      defaultMin: -1.0,
+      defaultMax: 0.0,
+      inverted: true,
+      normalize: "positive",
+      deadzone: 0.1,
+    },
+  },
+  {
+    key: "turnCameraDown",
+    label: "Tourner la caméra en bas",
+    type: "both",
+    defaultMapping: { type: "axis", index: 3 },
+    allowSharedMappingWith: ["turnCameraUp"],
+    axisConfig: {
+      defaultMin: 0.0,
       defaultMax: 1.0,
       inverted: false,
-      normalize: "full", // Full -1 to 1 range
-      deadzone: 0.1, // Deadzone for axis input
+      normalize: "positive",
+      deadzone: 0.1,
     },
   },
   {
@@ -490,19 +566,20 @@ export function useGamepad() {
     if (map.type === "button") {
       const id = `button-${map.index}`;
       return gamepadState.pressedInputs.has(id);
-    } else if (map.type === "axis") {
-      // For axis
-      const val = gamepadState.axisValues[map.index] ?? 0;
-
-      // For turn actions, use different thresholds
-      if (action === "turn") {
-        return Math.abs(val) > 0.2;
-      } else if (action === "turnCameraX" || action === "turnCameraY") {
-        return Math.abs(val) > 0.2;
-      }
-
-      return Math.abs(val) > 0.2;
     }
+    // } else if (map.type === "axis") {
+    //   // For axis
+    //   const val = gamepadState.axisValues[map.index] ?? 0;
+
+    //   // For turn actions, use different thresholds
+    //   if (action === "turn") {
+    //     return Math.abs(val) > 0.2;
+    //   } else if (action === "turnCameraX" || action === "turnCameraY") {
+    //     return Math.abs(val) > 0.2;
+    //   }
+
+    //   return Math.abs(val) > 0.2;
+    // }
 
     // Should never reach here, but better safe
     return false;
@@ -525,10 +602,10 @@ export function useGamepad() {
 
     // Apply axis configuration
     const { min, max, inverted, normalize, deadzone = 0.1 } = map.axisConfig;
-    
+
     // Apply deadzone
     const rawWithDeadzone = applyDeadzone(rawValue, deadzone);
-    
+
     // First, clamp raw value between min and max
     const clampedValue = Math.max(min, Math.min(max, rawWithDeadzone));
 
@@ -879,7 +956,7 @@ export function useGamepad() {
       const newMappings = { ...prev };
 
       // Current action info - using directly without storing in variable to avoid unused variable
-      
+
       // Process each conflicting action
       conflictingActions.forEach((conflictingAction) => {
         // Skip if it's the action we're currently mapping
@@ -1008,12 +1085,12 @@ export function useGamepad() {
   function applyDeadzone(value: number, deadzone: number): number {
     // Calculate the absolute value
     const absValue = Math.abs(value);
-    
+
     // If under deadzone threshold, return 0
     if (absValue < deadzone) {
       return 0;
     }
-    
+
     // Otherwise, rescale the value to remove the deadzone
     // This remaps the range [deadzone, 1] to [0, 1] with the same sign
     const sign = value >= 0 ? 1 : -1;
@@ -1048,5 +1125,9 @@ export function useGamepad() {
     remappingType,
 
     setAxisConfig,
+
+    // Action definitions and groupings
+    ACTIONS,
+    ACTION_GROUPS,
   };
 }

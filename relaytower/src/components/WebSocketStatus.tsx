@@ -3,8 +3,38 @@ import { useGamepadContext } from "@/contexts/GamepadContext";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Card } from "./ui/card";
 import { trackWsMessage, trackWsConnection, logError } from "./DebugState";
+import { ActionKey, ActionInfo } from "@/hooks/useGamepad"; // Add ActionInfo import
+
+type GamepadStateValue = boolean | string | number;
 
 export default function WebSocketStatus() {
+  const {
+    isActionActive,
+    getAxisValueForAction,
+    selectedGamepadId,
+    mappings,
+    ACTION_GROUPS,
+    ACTIONS, // Add ACTIONS from context
+  } = useGamepadContext();
+
+  // Store function references in refs to avoid dependency issues
+  const functionsRef = useRef({
+    isActionActive,
+    getAxisValueForAction,
+    ACTION_GROUPS,
+    ACTIONS, // Add ACTIONS to the ref
+  });
+
+  // Keep refs in sync with the latest functions
+  useEffect(() => {
+    functionsRef.current = {
+      isActionActive,
+      getAxisValueForAction,
+      ACTION_GROUPS,
+      ACTIONS, // Update ACTIONS in ref when it changes
+    };
+  }, [isActionActive, getAxisValueForAction, ACTION_GROUPS, ACTIONS]);
+
   const [status, setStatus] = useState<
     "connecting" | "connected" | "disconnected"
   >("connecting");
@@ -13,22 +43,6 @@ export default function WebSocketStatus() {
   const [reconnectTrigger, setReconnectTrigger] = useState(0); // Add reconnect counter
   const pingTimestampRef = useRef<number>(0);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const { isActionActive, getAxisValueForAction, selectedGamepadId, mappings } =
-    useGamepadContext();
-
-  // Store function references in refs to avoid dependency issues
-  const functionsRef = useRef({
-    isActionActive,
-    getAxisValueForAction,
-  });
-
-  // Keep refs in sync with the latest functions
-  useEffect(() => {
-    functionsRef.current = {
-      isActionActive,
-      getAxisValueForAction,
-    };
-  }, [isActionActive, getAxisValueForAction]);
 
   // Event listeners for debug controls
   useEffect(() => {
@@ -109,7 +123,7 @@ export default function WebSocketStatus() {
     setStatus("connecting");
 
     // Connect to websocket using dynamic hostname
-    const ws = new WebSocket(`ws://${hostname}:3001/ws`);
+    const ws = new WebSocket(`ws://192.168.1.50:3001/ws`);
     setSocket(ws);
 
     ws.onopen = () => {
@@ -215,54 +229,94 @@ export default function WebSocketStatus() {
     };
   }, [reconnectTrigger]); // Add reconnectTrigger and socket dependency
 
-  // Wrap computeSpeed in useCallback to prevent recreation on every render
-  const computeSpeed = useCallback(() => {
-    const { isActionActive, getAxisValueForAction } = functionsRef.current;
-    const accelerateMapping = mappings["accelerate"];
-    const brakeMapping = mappings["brake"];
+  // Wrap computeGamepadState in useCallback to prevent recreation on every render
+  const computeGamepadState = useCallback(() => {
+    const { isActionActive, getAxisValueForAction, ACTION_GROUPS, ACTIONS } =
+      functionsRef.current;
 
-    const accelerateValue = () => {
-      if (!accelerateMapping || accelerateMapping.index === -1) {
+    const gamepadState: Record<string, GamepadStateValue> = {};
+    const processedActions = new Set<ActionKey>(); // Track which actions we've already processed
+
+    // Process each action group to create a combined value
+    ACTION_GROUPS.forEach((group) => {
+      // Only process groups with exactly 2 opposing actions (like forward/backward)
+      if (group.actions.length === 2) {
+        const [action1, action2] = group.actions;
+
+        // Get values for both actions in the group
+        const value1 = getActionValue(action1);
+        const value2 = getActionValue(action2);
+
+        // Combine the values (positive - negative)
+        gamepadState[group.key] = (value1 - value2).toFixed(2);
+
+        // Mark these actions as processed
+        processedActions.add(action1);
+        processedActions.add(action2);
+      } else {
+        // For groups with different number of actions, process individually
+        group.actions.forEach((action) => {
+          processAction(action);
+          processedActions.add(action);
+        });
+      }
+    });
+
+    // Now process any remaining actions that weren't part of a group
+    ACTIONS.forEach((actionInfo: ActionInfo) => {
+      if (!processedActions.has(actionInfo.key)) {
+        processAction(actionInfo.key);
+      }
+    });
+
+    // Function to process an individual action and add it to gamepadState
+    function processAction(action: ActionKey) {
+      const mapping = mappings[action];
+      if (!mapping || mapping.index === -1) return;
+
+      const actionInfo = ACTIONS.find((a: ActionInfo) => a.key === action);
+      if (!actionInfo) return;
+
+      // Handle actions based on their type
+      if (
+        actionInfo.type === "button" ||
+        (actionInfo.type === "both" && mapping.type === "button")
+      ) {
+        // For button actions (or "both" mapped to button)
+        gamepadState[action] = isActionActive(action);
+      } else if (
+        actionInfo.type === "axis" ||
+        (actionInfo.type === "both" && mapping.type === "axis")
+      ) {
+        // For axis actions (or "both" mapped to axis)
+        const value = getAxisValueForAction(action);
+        if (value !== undefined) {
+          gamepadState[action] = value.toFixed(2);
+        }
+      }
+    }
+
+    // Helper function to get normalized value for an action
+    function getActionValue(action: ActionKey): number {
+      const mapping = mappings[action];
+
+      if (!mapping || mapping.index === -1) {
         return 0;
       }
 
-      if (accelerateMapping.type === "button") {
-        if (isActionActive("accelerate")) {
-          return 1;
-        } else {
-          return 0;
-        }
+      if (mapping.type === "button") {
+        return isActionActive(action) ? 1 : 0;
       }
 
-      if (accelerateMapping.type === "axis") {
-        return getAxisValueForAction("accelerate") ?? 0;
+      if (mapping.type === "axis") {
+        return getAxisValueForAction(action) ?? 0;
       }
 
       return 0;
-    };
+    }
 
-    const brakeValue = () => {
-      if (!brakeMapping || brakeMapping.index === -1) {
-        return 0;
-      }
-
-      if (brakeMapping.type === "button") {
-        if (isActionActive("brake")) {
-          return 1;
-        } else {
-          return 0;
-        }
-      }
-
-      if (brakeMapping.type === "axis") {
-        return getAxisValueForAction("brake") ?? 0;
-      }
-
-      return 0;
-    };
-
-    return accelerateValue() - brakeValue();
-  }, [mappings]); // Only depend on mappings
+    return gamepadState;
+  }, [mappings]);
 
   // Send gamepad state periodically
   useEffect(() => {
@@ -274,17 +328,8 @@ export default function WebSocketStatus() {
       if (socket.readyState === WebSocket.OPEN) {
         pingTimestampRef.current = Date.now();
 
-        // Use the functions from the ref instead of the closure
-        const { isActionActive, getAxisValueForAction } = functionsRef.current;
-
-        // Send the current gamepad state with proper handling of "both" type actions
-        const gamepadState = {
-          speed: computeSpeed().toFixed(2),
-          turn: getAxisValueForAction("turn")?.toFixed(2) ?? 0,
-          turnCameraX: getAxisValueForAction("turnCameraX")?.toFixed(2) ?? 0,
-          turnCameraY: getAxisValueForAction("turnCameraY")?.toFixed(2) ?? 0,
-          use: isActionActive("use"),
-        };
+        // Get the comprehensive gamepad state
+        const gamepadState = computeGamepadState();
 
         const message = {
           name: "gamepad_input",
@@ -293,13 +338,12 @@ export default function WebSocketStatus() {
         };
 
         socket.send(JSON.stringify(message));
-
         trackWsMessage("sent", message);
       }
     }, 50); // Send updates at 20 Hz
 
     return () => clearInterval(interval);
-  }, [socket, status, selectedGamepadId, mappings, computeSpeed]); // Added computeSpeed dependency
+  }, [socket, status, selectedGamepadId, computeGamepadState]);
 
   return (
     <Card className="p-4">
