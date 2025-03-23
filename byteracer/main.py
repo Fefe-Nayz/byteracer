@@ -66,7 +66,7 @@ async def monitor_network_mode(tts):
             if current_mode == "Access Point mode":
                 tts.say("Please connect to the robot's WiFi hotspot and go to the adress 192.168.50.5:3000")
             else:
-                tts.say("Please connet to the robot's same network and go to the adress {ip_address}:3000")
+                tts.say(f"Please connet to the robot's same network and go to the adress {ip_address}:3000")
             print(f"Network mode changed: {current_mode}")
             last_mode = current_mode
         

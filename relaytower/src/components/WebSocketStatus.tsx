@@ -123,7 +123,7 @@ export default function WebSocketStatus() {
     setStatus("connecting");
 
     // Connect to websocket using dynamic hostname
-    const ws = new WebSocket(`ws://192.168.1.50:3001/ws`);
+    const ws = new WebSocket(`ws://${hostname}:3001/ws`);
     setSocket(ws);
 
     ws.onopen = () => {
