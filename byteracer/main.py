@@ -8,7 +8,7 @@ from vilib import Vilib
 from picarx import Picarx
 
 # Import the TTS (and optionally Music) from robot_hat
-from robot_hat import TTS
+from robot_hat import Music, TTS
 
 SERVER_HOST = "127.0.0.1:3001"
 
@@ -16,6 +16,10 @@ px = Picarx()
 
 # Global flag to stop speaking once a gamepad input arrives
 stop_speaking_ip = False
+# Track previous state of the "use" button
+previous_use_state = False
+# Global music instance
+music_player = None
 
 def get_ip():
     """
@@ -77,7 +81,7 @@ def on_message(message):
     Handles messages from the websocket.
     Stops the periodic IP announcements if a gamepad input is received.
     """
-    global stop_speaking_ip
+    global stop_speaking_ip, previous_use_state, music_player
 
     try:
         data = json.loads(message)
@@ -91,7 +95,17 @@ def on_message(message):
             speed_value = float(data["data"].get("speed", 0))
             camera_pan_value = float(data["data"].get("turnCameraX", 0))
             camera_tilt_value = float(data["data"].get("turnCameraY", 0))
-
+            use_value = data["data"].get("use", False)
+            
+            # Handle the "use" button with impulse triggering
+            if use_value and not previous_use_state:
+                print("Use button pressed - playing sound")
+                if music_player:
+                    # Play a sound - adjust filename as needed
+                    music_player.sound_play('assets/fart.mp3')
+            
+            # Update previous state
+            previous_use_state = use_value
             
             px.set_motor_speed(1, speed_value * 100)  # normal motor
             px.set_motor_speed(2, speed_value * -100) # slow motor
@@ -155,6 +169,8 @@ async def main():
          2) Periodically speaking the IP address.
          3) Monitoring network mode changes.
     """
+    global music_player
+    
     # Start camera and display (local=False, web=True)
     Vilib.camera_start(vflip=False, hflip=False)
     Vilib.display(local=False, web=True)
@@ -162,6 +178,9 @@ async def main():
     # Initialize TTS (set language if needed)
     tts = TTS()
     tts.lang("en-US")
+
+    # Initialize Music (optional)
+    music_player = Music()
     
     # Build URL with /ws route
     url = f"ws://{SERVER_HOST}/ws"
