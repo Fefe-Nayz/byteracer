@@ -232,17 +232,28 @@ export default function DebugState() {
 
           <TabsContent value="websocket">
             <div className="space-y-4">
-              <div className="space-y-2">
-                <div className="font-medium flex items-center gap-2">
-                  <Send size={14} /> Last Message Sent (
-                  {formatTime(lastWsSent?.time || null)})
-                </div>
-                <pre className="bg-muted p-2 rounded-md overflow-x-auto whitespace-pre-wrap text-[10px] max-h-24">
-                  {lastWsSent
-                    ? JSON.stringify(lastWsSent.data, null, 2)
-                    : "No messages sent"}
-                </pre>
-              </div>
+              <Collapsible className="space-y-2">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center justify-between w-full px-2 py-1 h-7"
+                  >
+                    <span className="flex items-center">
+                      <Send size={14} className="mr-2" /> Last Message Sent
+                      {lastWsSent && `(${formatTime(lastWsSent.time)})`}
+                    </span>
+                    <ChevronDown size={14} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="bg-muted p-2 rounded-md overflow-x-auto whitespace-pre-wrap text-[10px] max-h-40">
+                    {lastWsSent
+                      ? JSON.stringify(lastWsSent.data, null, 2)
+                      : "No messages sent"}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
 
               <Collapsible className="space-y-2">
                 <CollapsibleTrigger asChild>
@@ -293,17 +304,29 @@ export default function DebugState() {
                 </CollapsibleContent>
               </Collapsible>
 
-              <div className="space-y-2">
-                <div className="font-medium flex items-center gap-2">
-                  <Download size={14} /> Last Message Received (
-                  {formatTime(lastWsReceived?.time || null)})
-                </div>
-                <pre className="bg-muted p-2 rounded-md overflow-x-auto whitespace-pre-wrap text-[10px] max-h-24">
-                  {lastWsReceived
-                    ? JSON.stringify(lastWsReceived.data, null, 2)
-                    : "No messages received"}
-                </pre>
-              </div>
+              <Collapsible className="space-y-2">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex items-center justify-between w-full px-2 py-1 h-7"
+                  >
+                    <span className="flex items-center">
+                      <Download size={14} className="mr-2" /> Last Message
+                      Received
+                      {lastWsReceived && `(${formatTime(lastWsReceived.time)})`}
+                    </span>
+                    <ChevronDown size={14} />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="bg-muted p-2 rounded-md overflow-x-auto whitespace-pre-wrap text-[10px] max-h-40">
+                    {lastWsReceived
+                      ? JSON.stringify(lastWsReceived.data, null, 2)
+                      : "No messages received"}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
 
               <div className="space-y-2">
                 <div className="font-medium">Test Tools</div>
