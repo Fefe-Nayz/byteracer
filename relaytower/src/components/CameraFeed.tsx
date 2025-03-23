@@ -15,11 +15,16 @@ export default function CameraFeed() {
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fullscreenContainerRef = useRef<HTMLDivElement>(null);
 
-  // Set URL when component mounts (and whenever hostname might change)
+  // Check for custom camera URL in localStorage
   useEffect(() => {
-    // This will work regardless of whether it's an IP address or hostname
-    const hostname = window.location.hostname;
-    setStreamUrl(`http://${hostname}:9000/mjpg`);
+    const customUrl = localStorage.getItem("debug_camera_url");
+    if (customUrl && customUrl.trim() !== "") {
+      setStreamUrl(customUrl);
+    } else {
+      // Use default URL
+      const hostname = window.location.hostname;
+      setStreamUrl(`http://${hostname}:9000/mjpg`);
+    }
   }, []);
 
   useEffect(() => {

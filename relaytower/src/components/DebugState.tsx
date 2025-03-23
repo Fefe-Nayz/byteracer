@@ -3,6 +3,7 @@ import { useGamepadContext } from "@/contexts/GamepadContext";
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Input } from "./ui/input";
 import {
   CollapsibleContent,
   Collapsible,
@@ -18,7 +19,18 @@ import {
   Info,
   Settings,
   AlertCircle,
+  Wrench,
+  Battery,
+  RefreshCw,
+  PowerOff,
+  RotateCw,
+  Wifi,
+  Server,
+  Code,
+  Camera,
+  Save,
 } from "lucide-react";
+import { Label } from "./ui/label";
 
 // Define proper types instead of any
 interface WebSocketMessage {
@@ -96,6 +108,10 @@ export default function DebugState() {
     updateTimes: [] as number[],
   });
   const [isClient, setIsClient] = useState(false);
+  const [wsUrl, setWsUrl] = useState<string>("");
+  const [cameraUrl, setCameraUrl] = useState<string>("");
+  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Check if we're in the browser environment
   useEffect(() => {
@@ -149,6 +165,90 @@ export default function DebugState() {
     return () => cancelAnimationFrame(frameId);
   }, [isClient]);
 
+  // Load saved URLs from localStorage when component mounts
+  useEffect(() => {
+    if (!isClient) return;
+    const savedWsUrl = localStorage.getItem("debug_ws_url");
+    const savedCameraUrl = localStorage.getItem("debug_camera_url");
+
+    if (savedWsUrl) setWsUrl(savedWsUrl);
+    if (savedCameraUrl) setCameraUrl(savedCameraUrl);
+  }, [isClient]);
+
+  // Save URLs to localStorage
+  const saveUrls = () => {
+    if (!isClient) return;
+    setIsSaving(true);
+
+    localStorage.setItem("debug_ws_url", wsUrl);
+    localStorage.setItem("debug_camera_url", cameraUrl);
+
+    // Dispatch event to notify WebSocketStatus component
+    window.dispatchEvent(
+      new CustomEvent("debug:update-urls", {
+        detail: { wsUrl, cameraUrl },
+      })
+    );
+
+    // Show saving indicator briefly
+    setTimeout(() => setIsSaving(false), 1000);
+  };
+
+  // Function to send WebSocket commands
+  const sendRobotCommand = (command: string) => {
+    window.dispatchEvent(
+      new CustomEvent("debug:send-robot-command", {
+        detail: { command },
+      })
+    );
+  };
+
+  // Listen for battery updates
+  useEffect(() => {
+    if (!isClient) return;
+
+    const handleBatteryUpdate = (e: CustomEvent) => {
+      setBatteryLevel(e.detail.level);
+    };
+
+    window.addEventListener(
+      "debug:battery-update",
+      handleBatteryUpdate as EventListener
+    );
+
+    // Request battery info when tab is selected
+    const handleTabChange = (e: CustomEvent) => {
+      if (e.detail.tab === "settings") {
+        window.dispatchEvent(new CustomEvent("debug:request-battery"));
+      }
+    };
+
+    window.addEventListener(
+      "debug:tab-change",
+      handleTabChange as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        "debug:battery-update",
+        handleBatteryUpdate as EventListener
+      );
+      window.removeEventListener(
+        "debug:tab-change",
+        handleTabChange as EventListener
+      );
+    };
+  }, [isClient]);
+
+  // Add this to the component
+  const handleTabChange = (value: string) => {
+    window.dispatchEvent(
+      new CustomEvent("debug:tab-change", {
+        detail: { tab: value },
+      })
+    );
+  };
+
   // Prevent rendering on server
   if (!isClient) return null;
 
@@ -172,7 +272,7 @@ export default function DebugState() {
         </CardTitle>
       </CardHeader>
       <CardContent className="text-xs font-mono">
-        <Tabs defaultValue="status">
+        <Tabs defaultValue="status" onValueChange={handleTabChange}>
           <TabsList className="mb-4">
             <TabsTrigger value="status" className="text-xs">
               <Info size={14} className="mr-1" /> Status
@@ -188,6 +288,9 @@ export default function DebugState() {
             </TabsTrigger>
             <TabsTrigger value="perf" className="text-xs">
               <Activity size={14} className="mr-1" /> Performance
+            </TabsTrigger>
+            <TabsTrigger value="settings" className="text-xs">
+              <Wrench size={14} className="mr-1" /> Settings
             </TabsTrigger>
           </TabsList>
 
@@ -614,6 +717,173 @@ export default function DebugState() {
                       title={`${time.toFixed(1)}ms`}
                     />
                   ))}
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="settings">
+            <div className="space-y-4">
+              <div className="font-medium flex items-center">
+                <Wrench size={16} className="mr-2" /> Robot Management
+              </div>
+              <div className="text-muted-foreground text-xs mb-2">
+                Control the robot's services and hardware
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("restart_robot")}
+                >
+                  <RotateCw size={14} className="mr-2" />
+                  Restart Robot
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("stop_robot")}
+                >
+                  <PowerOff size={14} className="mr-2" />
+                  Stop Robot
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("restart_all_services")}
+                >
+                  <RefreshCw size={14} className="mr-2" />
+                  Restart All Services
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("restart_websocket")}
+                >
+                  <Wifi size={14} className="mr-2" />
+                  Restart WebSocket
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("restart_web_server")}
+                >
+                  <Server size={14} className="mr-2" />
+                  Restart Web Server
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("restart_python_service")}
+                >
+                  <Code size={14} className="mr-2" />
+                  Restart Python Service
+                </Button>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("restart_camera_feed")}
+                >
+                  <Camera size={14} className="mr-2" />
+                  Restart Camera Feed
+                </Button>
+              </div>
+
+              <div className="font-medium flex items-center mt-4">
+                <Download size={16} className="mr-2" /> Software Management
+              </div>
+              <div className="text-muted-foreground text-xs mb-2">
+                Manage the robot's software
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center"
+                  onClick={() => sendRobotCommand("check_for_updates")}
+                >
+                  <Download size={14} className="mr-2" />
+                  Check for Updates
+                </Button>
+                <div className="flex items-center">
+                  <Battery
+                    size={16}
+                    className="mr-2"
+                    // Show appropriate battery level icon
+                    style={{
+                      color:
+                        batteryLevel === null
+                          ? "var(--muted-foreground)"
+                          : batteryLevel > 20
+                          ? "var(--primary)"
+                          : "var(--destructive)",
+                    }}
+                  />
+                  <span className="text-muted-foreground text-xs">
+                    Battery:{" "}
+                    {batteryLevel === null ? "Unknown" : `${batteryLevel}%`}
+                  </span>
+                </div>
+              </div>
+
+              <div className="font-medium flex items-center mt-4">
+                <Settings size={16} className="mr-2" /> Connection Settings
+              </div>
+              <div className="text-muted-foreground text-xs mb-2">
+                Customize WebSocket and Camera feed URLs
+              </div>
+              <div className="space-y-2">
+                <div className="space-y-1">
+                  <Label htmlFor="ws-url" className="text-xs">
+                    WebSocket URL
+                  </Label>
+                  <Input
+                    id="ws-url"
+                    type="text"
+                    placeholder="ws://hostname:port/ws"
+                    className="border rounded-md p-2 text-xs"
+                    value={wsUrl}
+                    onChange={(e) => setWsUrl(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="camera-url" className="text-xs">
+                    Camera Feed URL
+                  </Label>
+                  <Input
+                    id="camera-url"
+                    type="text"
+                    placeholder="http://hostname:port/mjpg"
+                    className="border rounded-md p-2 text-xs"
+                    value={cameraUrl}
+                    onChange={(e) => setCameraUrl(e.target.value)}
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-7 px-2 flex items-center mt-2"
+                  onClick={saveUrls}
+                  disabled={isSaving}
+                >
+                  <Save size={14} className="mr-2" />
+                  {isSaving ? "Saving..." : "Save URLs"}
+                </Button>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Note: URL changes require a page reload to take effect
                 </div>
               </div>
             </div>

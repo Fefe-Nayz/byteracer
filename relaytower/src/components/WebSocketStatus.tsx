@@ -43,6 +43,9 @@ export default function WebSocketStatus() {
   const [reconnectTrigger, setReconnectTrigger] = useState(0); // Add reconnect counter
   const pingTimestampRef = useRef<number>(0);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
+  const [customWsUrl, setCustomWsUrl] = useState<string | null>(null);
+  const [customCameraUrl, setCustomCameraUrl] = useState<string | null>(null);
 
   // Event listeners for debug controls
   useEffect(() => {
@@ -99,6 +102,120 @@ export default function WebSocketStatus() {
     };
   }, [socket]);
 
+  // Handle URL updates from settings
+  useEffect(() => {
+    const handleUrlUpdate = (e: CustomEvent) => {
+      setCustomWsUrl(e.detail.wsUrl);
+      setCustomCameraUrl(e.detail.cameraUrl);
+      console.log("URL settings updated:", e.detail);
+    };
+
+    window.addEventListener(
+      "debug:update-urls",
+      handleUrlUpdate as EventListener
+    );
+
+    // Load saved URLs on initial render
+    const savedWsUrl = localStorage.getItem("debug_ws_url");
+    const savedCameraUrl = localStorage.getItem("debug_camera_url");
+
+    if (savedWsUrl) setCustomWsUrl(savedWsUrl);
+    if (savedCameraUrl) setCustomCameraUrl(savedCameraUrl);
+
+    return () => {
+      window.removeEventListener(
+        "debug:update-urls",
+        handleUrlUpdate as EventListener
+      );
+    };
+  }, []);
+
+  // Handle robot command events
+  useEffect(() => {
+    const handleCommand = (e: CustomEvent) => {
+      const { command } = e.detail;
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const commandData = {
+          name: "robot_command",
+          data: {
+            command,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
+
+        socket.send(JSON.stringify(commandData));
+        trackWsMessage("sent", commandData);
+        console.log(`Robot command sent: ${command}`);
+      } else {
+        logError("Cannot send robot command", {
+          reason: "Socket not connected",
+          command,
+          readyState: socket?.readyState,
+        });
+      }
+    };
+
+    const handleBatteryRequest = () => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const batteryRequestData = {
+          name: "battery_request",
+          data: {
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
+
+        socket.send(JSON.stringify(batteryRequestData));
+        trackWsMessage("sent", batteryRequestData);
+      } else {
+        // If not connected, use dummy data
+        const dummyLevel = Math.round(65 + Math.random() * 25);
+        setBatteryLevel(dummyLevel);
+
+        window.dispatchEvent(
+          new CustomEvent("debug:battery-update", {
+            detail: { level: dummyLevel },
+          })
+        );
+      }
+    };
+
+    const handleTabChange = (e: CustomEvent) => {
+      if (e.detail.tab === "settings") {
+        handleBatteryRequest();
+      }
+    };
+
+    window.addEventListener(
+      "debug:send-robot-command",
+      handleCommand as EventListener
+    );
+    window.addEventListener(
+      "debug:request-battery",
+      handleBatteryRequest as EventListener
+    );
+    window.addEventListener(
+      "debug:tab-change",
+      handleTabChange as EventListener
+    );
+
+    return () => {
+      window.removeEventListener(
+        "debug:send-robot-command",
+        handleCommand as EventListener
+      );
+      window.removeEventListener(
+        "debug:request-battery",
+        handleBatteryRequest as EventListener
+      );
+      window.removeEventListener(
+        "debug:tab-change",
+        handleTabChange as EventListener
+      );
+    };
+  }, [socket]);
+
   // WebSocket connection effect - now depends on reconnectTrigger
   useEffect(() => {
     // Clean up any existing socket first
@@ -115,15 +232,24 @@ export default function WebSocketStatus() {
       }
     }
 
-    // Get the hostname dynamically from current window location
-    const hostname = window.location.hostname;
+    // Determine which WebSocket URL to use
+    let wsUrl;
+    if (customWsUrl && customWsUrl.trim() !== "") {
+      // Use the custom URL from settings
+      wsUrl = customWsUrl;
+    } else {
+      // Use the default URL based on window.location
+      const hostname = window.location.hostname;
+      wsUrl = `ws://${hostname}:3001/ws`;
+    }
+
     console.log(
-      `Connecting to WebSocket at ${hostname}:3001 (attempt #${reconnectTrigger})...`
+      `Connecting to WebSocket at ${wsUrl} (attempt #${reconnectTrigger})...`
     );
     setStatus("connecting");
 
-    // Connect to websocket using dynamic hostname
-    const ws = new WebSocket(`ws://${hostname}:3001/ws`);
+    // Connect to websocket using the determined URL
+    const ws = new WebSocket(wsUrl);
     setSocket(ws);
 
     ws.onopen = () => {
@@ -227,7 +353,46 @@ export default function WebSocketStatus() {
         ws.close();
       }
     };
-  }, [reconnectTrigger]); // Add reconnectTrigger and socket dependency
+  }, [reconnectTrigger, customWsUrl]); // Add reconnectTrigger and customWsUrl dependency
+
+  // WebSocket message handler - update to handle battery info
+  useEffect(() => {
+    if (!socket) return;
+
+    const originalOnMessage = socket.onmessage;
+
+    socket.onmessage = (message) => {
+      // Call the original handler
+      if (originalOnMessage) {
+        originalOnMessage.call(socket, message);
+      }
+
+      try {
+        const event = JSON.parse(message.data);
+
+        // Handle battery info
+        if (event.name === "battery_info") {
+          const level = event.data.level;
+          setBatteryLevel(level);
+
+          // Broadcast to other components
+          window.dispatchEvent(
+            new CustomEvent("debug:battery-update", {
+              detail: { level },
+            })
+          );
+        }
+      } catch (e) {
+        console.error("Error processing WebSocket message:", e);
+      }
+    };
+
+    return () => {
+      if (socket) {
+        socket.onmessage = originalOnMessage;
+      }
+    };
+  }, [socket]);
 
   // Wrap computeGamepadState in useCallback to prevent recreation on every render
   const computeGamepadState = useCallback(() => {
