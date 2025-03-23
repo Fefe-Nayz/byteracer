@@ -49,7 +49,7 @@ async def monitor_network_mode(tts):
     """
     Monitors the network mode by checking the IP address.
     If it detects a change (e.g., switching from Access Point mode to WiFi/Ethernet or vice-versa),
-    it announces the new mode and restarts the camera stream.
+    it announces the new mode.
     """
     last_mode = None
     while True:
@@ -62,27 +62,12 @@ async def monitor_network_mode(tts):
             current_mode = "WiFi/Ethernet mode"
         
         if current_mode != last_mode:
-            print(f"Network mode changed: {current_mode} with IP {ip_address}")
             tts.say(f"Network mode changed: {current_mode}")
-            
-            # Restart camera stream with new IP
-            try:
-                print("Restarting camera stream...")
-                Vilib.camera_close()
-                await asyncio.sleep(1)  # Give camera time to close properly
-                Vilib.camera_start(vflip=False, hflip=False)
-                Vilib.display(local=False, web=True)
-                
-            except Exception as e:
-                print(f"Error restarting camera: {e}")
-                tts.say("Warning: camera restart failed")
-            
-            # Announce connection instructions
             if current_mode == "Access Point mode":
-                tts.say("Please connect to the robot's WiFi hotspot and go to the address 192.168.50.5:3000")
+                tts.say("Please connect to the robot's WiFi hotspot and go to the adress 192.168.50.5:3000")
             else:
-                tts.say(f"Please connect to the robot's same network and go to the address {ip_address}:3000")
-            
+                tts.say(f"Please connet to the robot's same network and go to the adress {ip_address}:3000")
+            print(f"Network mode changed: {current_mode}")
             last_mode = current_mode
         
         await asyncio.sleep(5)
