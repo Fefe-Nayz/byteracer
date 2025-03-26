@@ -376,7 +376,7 @@ async def main():
 
     # Initialize Music (optional)
     music_player = Music()
-    #music_player.music_play("assets/Ado.mp3")
+    music_player.music_play("assets/Ado.mp3")
     # Create necessary script directories and files
     setup_script_files()
     
