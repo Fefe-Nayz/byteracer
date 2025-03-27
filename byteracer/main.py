@@ -254,18 +254,18 @@ async def sensor_loop():
 
         # 1) Ultrasonic distance
         dist = read_ultrasonic_distance()
-        if dist < 15.0:
-            print("Obstacle near - stopping.")
-            px.set_motor_speed(1, 0)
-            px.set_motor_speed(2, 0)
-            px.set_dir_servo_angle(0)
-            emergency_stop = True
-            if music_player:
-                music_player.sound_play_threading('assets/warning.mp3')
-        else:
-            if emergency_stop and dist > 20.0:
-                print("Clearing emergency stop.")
-                emergency_stop = False
+        # if dist < 15.0:
+        #     print("Obstacle near - stopping.")
+        #     px.set_motor_speed(1, 0)
+        #     px.set_motor_speed(2, 0)
+        #     px.set_dir_servo_angle(0)
+        #     emergency_stop = True
+        #     if music_player:
+        #         music_player.sound_play_threading('assets/warning.mp3')
+        # else:
+        #     if emergency_stop and dist > 20.0:
+        #         print("Clearing emergency stop.")
+        #         emergency_stop = False
 
         # 2) Line detection => treat as cliff detection if sum too low
         line_data = read_line_detection()
