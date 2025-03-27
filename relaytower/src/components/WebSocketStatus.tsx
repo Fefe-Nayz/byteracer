@@ -47,6 +47,9 @@ export default function WebSocketStatus() {
   const [customWsUrl, setCustomWsUrl] = useState<string | null>(null);
   const [customCameraUrl, setCustomCameraUrl] = useState<string | null>(null);
 
+  console.log(batteryLevel);
+  console.log(customCameraUrl);
+
   const [cameraStatus, setCameraStatus] = useState<{
     status: "normal" | "restarted" | "error";
     message: string;
