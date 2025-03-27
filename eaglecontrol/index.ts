@@ -4,17 +4,13 @@ import { createBunWebSocket } from "hono/bun";
 
 const app = new Hono();
 
-// Define data types for WebSocket
 type WSData = {
   id: string;
   type: "car" | "controller" | "viewer";
   connectedAt: number;
 };
-
-// Create the WebSocket handler with proper type
 const { upgradeWebSocket } = createBunWebSocket<WSData>();
 
-// Store all connected clients with their roles
 type Client = {
   ws: ServerWebSocket<WSData>;
   id: string;
@@ -22,142 +18,107 @@ type Client = {
   connectedAt: number;
 };
 
-// Maps to store different types of connections
 const cars = new Map<string, Client>();
 const controllers = new Map<string, Client>();
 const viewers = new Map<string, Client>();
 const allClients = new Map<ServerWebSocket<WSData>, Client>();
 
-// Update WebSocketEventName to include the new message types
-type WebSocketEventName =
-  | "ping"
-  | "pong"
-  | "car_ready"
-  | "gamepad_input"
-  | "client_register"
-  | "robot_command"     // New: For sending commands to the robot
-  | "command_response"  // New: For receiving command responses
-  | "battery_request"   // New: For requesting battery level
-  | "battery_info";     // New: For receiving battery information
-
-type WebSocketEvent = {
-  name: WebSocketEventName;
-  data: any;
-  createdAt: number;
-};
-
-// Broadcast function to send messages to clients
-function broadcast(message: string, excludeWs?: ServerWebSocket<WSData>) {
-  allClients.forEach((client, ws) => {
-    if (excludeWs && ws === excludeWs) return;
+function broadcast(msg: string, exclude?: ServerWebSocket<WSData>) {
+  for (const [ws, cl] of allClients.entries()) {
+    if (exclude && ws === exclude) continue;
     try {
-      ws.send(message);
-    } catch (err) {
-      console.error(`Error broadcasting to client ${client.id}:`, err);
-    }
-  });
+      ws.send(msg);
+    } catch { }
+  }
 }
 
-// Function to broadcast only to specific client types
-function broadcastToType(message: string, clientType: "car" | "controller" | "viewer", excludeWs?: ServerWebSocket<WSData>) {
-  const clientMap = clientType === "car" ? cars :
-    clientType === "controller" ? controllers : viewers;
-
-  clientMap.forEach((client) => {
-    if (excludeWs && client.ws === excludeWs) return;
-    try {
-      client.ws.send(message);
-    } catch (err) {
-      console.error(`Error broadcasting to ${clientType} ${client.id}:`, err);
-    }
-  });
-}
-
-// Define WebSocket handlers
 const wsHandlers = {
   open(ws: ServerWebSocket<WSData>) {
-    const clientId = crypto.randomUUID();
-
-    // Set data directly on WebSocket object
+    const cid = crypto.randomUUID();
     ws.data = {
-      id: clientId,
+      id: cid,
       type: "viewer",
-      connectedAt: Date.now()
+      connectedAt: Date.now(),
     };
-
     const client: Client = {
       ws,
-      id: clientId,
+      id: cid,
       type: "viewer",
-      connectedAt: Date.now()
+      connectedAt: Date.now(),
     };
-
     allClients.set(ws, client);
-    viewers.set(clientId, client);
+    viewers.set(cid, client);
+    console.log("New client:", cid);
 
-    console.log(`New client connected: ${clientId}`);
-
-    ws.send(JSON.stringify({
-      name: "welcome",
-      data: { clientId },
-      createdAt: Date.now()
-    }));
+    ws.send(
+      JSON.stringify({
+        name: "welcome",
+        data: { clientId: cid },
+        createdAt: Date.now(),
+      })
+    );
   },
 
   message(ws: ServerWebSocket<WSData>, message: string) {
     try {
-      const event = JSON.parse(message) as WebSocketEvent;
-      const client = allClients.get(ws);
-
-      if (!client) {
-        console.warn("Message received from unknown client");
-        return;
-      }
-
+      const event = JSON.parse(message);
+      const cl = allClients.get(ws);
+      if (!cl) return;
       switch (event.name) {
-        case "client_register":
+        case "client_register": {
           const { type, id } = event.data;
           if (type && ["car", "controller", "viewer"].includes(type)) {
-            if (client.type === "car") cars.delete(client.id);
-            else if (client.type === "controller") controllers.delete(client.id);
-            else viewers.delete(client.id);
+            if (cl.type === "car") cars.delete(cl.id);
+            else if (cl.type === "controller") controllers.delete(cl.id);
+            else viewers.delete(cl.id);
 
-            client.type = type;
-            client.id = id || client.id;
+            cl.type = type;
+            cl.id = id || cl.id;
             ws.data.type = type;
-            ws.data.id = id || client.id;
+            ws.data.id = id || cl.id;
 
-            if (type === "car") cars.set(client.id, client);
-            else if (type === "controller") controllers.set(client.id, client);
-            else viewers.set(client.id, client);
+            if (type === "car") cars.set(cl.id, cl);
+            else if (type === "controller") controllers.set(cl.id, cl);
+            else viewers.set(cl.id, cl);
 
-            console.log(`Client ${client.id} registered as ${type}`);
+            console.log(`Client ${cl.id} registered as ${type}`);
           }
           break;
-
-        case "car_ready":
+        }
+        case "car_ready": {
           console.log(`Car ready: ${event.data.id}`);
-          if (client.type !== "car") {
-            viewers.delete(client.id);
-            controllers.delete(client.id);
-
-            client.type = "car";
-            client.id = event.data.id;
+          if (cl.type !== "car") {
+            viewers.delete(cl.id);
+            controllers.delete(cl.id);
+            cl.type = "car";
+            cl.id = event.data.id;
             ws.data.type = "car";
             ws.data.id = event.data.id;
-            cars.set(event.data.id, client);
+            cars.set(event.data.id, cl);
           }
-
-          broadcastToType(message, "controller");
+          broadcast(message, ws);
           break;
-
-        case "gamepad_input":
-          broadcastToType(message, "car", ws);
-          broadcastToType(message, "viewer", ws);
-          console.log(message);
+        }
+        case "gamepad_input": {
+          // forward to cars
+          for (const c of cars.values()) {
+            c.ws.send(message);
+          }
+          // also forward to viewers
+          for (const v of viewers.values()) {
+            v.ws.send(message);
+          }
           break;
-
-        case "ping":
+        }
+        case "robot_command": {
+          // forward to cars
+          for (const c of cars.values()) {
+            c.ws.send(message);
+          }
+          
+          break;
+        }
+        case "ping": {
           const sentAt = event.data.sentAt;
           ws.send(
             JSON.stringify({
@@ -169,80 +130,85 @@ const wsHandlers = {
             })
           );
           break;
-
-        // New cases for handling robot commands and responses
-        case "robot_command":
-          console.log(`Robot command received: ${event.data.command}`);
-          // Forward command to all cars
-          broadcastToType(message, "car", ws);
+        }
+        case "battery_request": {
+          // forward to cars
+          for (const c of cars.values()) {
+            c.ws.send(message);
+          }
           break;
-
-        case "battery_request":
-          console.log("Battery level request received");
-          // Forward the request to all cars
-          broadcastToType(message, "car", ws);
+        }
+        case "sensor_update": {
+          // from car => pass to controllers & viewers
+          for (const ctrl of controllers.values()) {
+            ctrl.ws.send(message);
+          }
+          for (const vw of viewers.values()) {
+            vw.ws.send(message);
+          }
           break;
-
-        case "command_response":
-          console.log(`Command response: ${event.data.message}`);
-          // Forward the response to all controllers and viewers
-          broadcastToType(message, "controller", ws);
-          broadcastToType(message, "viewer", ws);
+        }
+        case "camera_status": {
+          // from car => pass to controllers/viewers
+          for (const ctrl of controllers.values()) {
+            ctrl.ws.send(message);
+          }
+          for (const vw of viewers.values()) {
+            vw.ws.send(message);
+          }
           break;
-
-        case "battery_info":
-          console.log(`Battery info received: ${event.data.level}%`);
-          // Forward battery info to all controllers and viewers
-          broadcastToType(message, "controller", ws);
-          broadcastToType(message, "viewer", ws);
+        }
+        case "command_response": {
+          // from car => forward to controllers/viewers
+          for (const ctrl of controllers.values()) {
+            ctrl.ws.send(message);
+          }
+          for (const vw of viewers.values()) {
+            vw.ws.send(message);
+          }
           break;
-
+        }
         default:
-          console.log("Unknown event type:", event.name);
-          console.log({ event });
-          break;
+          console.log("Unknown event:", event.name);
       }
-    } catch (err) {
-      console.error("Error processing WebSocket message:", err);
+    } catch (e) {
+      console.error("WS parse error", e);
     }
   },
 
   close(ws: ServerWebSocket<WSData>) {
-    const client = allClients.get(ws);
-    if (client) {
-      console.log(`Client disconnected: ${client.id} (${client.type})`);
-
+    const cl = allClients.get(ws);
+    if (cl) {
+      console.log(`Client disconnected: ${cl.id} (${cl.type})`);
       allClients.delete(ws);
-      if (client.type === "car") cars.delete(client.id);
-      else if (client.type === "controller") controllers.delete(client.id);
-      else viewers.delete(client.id);
-
-      const disconnectMsg = JSON.stringify({
-        name: "client_disconnected",
-        data: { id: client.id, type: client.type },
-        createdAt: Date.now()
-      });
-      broadcast(disconnectMsg);
+      if (cl.type === "car") cars.delete(cl.id);
+      else if (cl.type === "controller") controllers.delete(cl.id);
+      else viewers.delete(cl.id);
+      broadcast(
+        JSON.stringify({
+          name: "client_disconnected",
+          data: { id: cl.id, type: cl.type },
+          createdAt: Date.now(),
+        })
+      );
     }
-  }
+  },
 };
 
-// Define WebSocket route
-app.get('/ws', upgradeWebSocket((_c) => wsHandlers));
+app.get("/ws", upgradeWebSocket((_c) => wsHandlers));
 
-// Enhanced stats endpoint to include active connections
 app.get("/stats", (c) => {
   return c.json({
     cars: Array.from(cars.keys()),
     controllers: Array.from(controllers.keys()),
     viewers: Array.from(viewers.keys()),
     totalClients: allClients.size,
-    lastUpdated: new Date().toISOString()
+    lastUpdated: new Date().toISOString(),
   });
 });
 
 export default {
   fetch: app.fetch,
   port: 3001,
-  websocket: wsHandlers
+  websocket: wsHandlers,
 };

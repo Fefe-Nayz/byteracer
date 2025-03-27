@@ -3,7 +3,8 @@ import { useGamepadContext } from "@/contexts/GamepadContext";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Card } from "./ui/card";
 import { trackWsMessage, trackWsConnection, logError } from "./DebugState";
-import { ActionKey, ActionInfo } from "@/hooks/useGamepad"; // Add ActionInfo import
+import { ActionKey, ActionInfo } from "@/hooks/useGamepad";
+import { AlertTriangle } from "lucide-react";
 
 type GamepadStateValue = boolean | string | number;
 
@@ -14,24 +15,22 @@ export default function WebSocketStatus() {
     selectedGamepadId,
     mappings,
     ACTION_GROUPS,
-    ACTIONS, // Add ACTIONS from context
+    ACTIONS,
   } = useGamepadContext();
 
-  // Store function references in refs to avoid dependency issues
   const functionsRef = useRef({
     isActionActive,
     getAxisValueForAction,
     ACTION_GROUPS,
-    ACTIONS, // Add ACTIONS to the ref
+    ACTIONS,
   });
 
-  // Keep refs in sync with the latest functions
   useEffect(() => {
     functionsRef.current = {
       isActionActive,
       getAxisValueForAction,
       ACTION_GROUPS,
-      ACTIONS, // Update ACTIONS in ref when it changes
+      ACTIONS,
     };
   }, [isActionActive, getAxisValueForAction, ACTION_GROUPS, ACTIONS]);
 
@@ -40,12 +39,18 @@ export default function WebSocketStatus() {
   >("connecting");
   const [pingTime, setPingTime] = useState<number | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
-  const [reconnectTrigger, setReconnectTrigger] = useState(0); // Add reconnect counter
+  const [reconnectTrigger, setReconnectTrigger] = useState(0);
   const pingTimestampRef = useRef<number>(0);
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
   const [customWsUrl, setCustomWsUrl] = useState<string | null>(null);
   const [customCameraUrl, setCustomCameraUrl] = useState<string | null>(null);
+
+  const [cameraStatus, setCameraStatus] = useState<{
+    status: "normal" | "restarted" | "error";
+    message: string;
+  }>({ status: "normal", message: "" });
 
   // Event listeners for debug controls
   useEffect(() => {
@@ -59,7 +64,6 @@ export default function WebSocketStatus() {
           socket.close();
         }
       }
-      // Increment the reconnect trigger to force the connection useEffect to run
       setReconnectTrigger((prev) => prev + 1);
     };
 
@@ -84,10 +88,8 @@ export default function WebSocketStatus() {
     };
 
     const handleClearWsLogs = () => {
-      // This will reset the lastWsSent and lastWsReceived in DebugState.tsx
       trackWsMessage("sent", null);
       trackWsMessage("received", null);
-      // Force a re-render
       setStatus((prev) => (prev === "connected" ? "connected" : prev));
     };
 
@@ -109,21 +111,16 @@ export default function WebSocketStatus() {
       setCustomCameraUrl(e.detail.cameraUrl);
       console.log("URL settings updated:", e.detail);
     };
-
     window.addEventListener(
       "debug:update-urls",
       handleUrlUpdate as EventListener
     );
 
-    // Load saved URLs on initial render
     const savedWsUrl = localStorage.getItem("debug_ws_url");
     const savedCameraUrl = localStorage.getItem("debug_camera_url");
 
     if (savedWsUrl) setCustomWsUrl(savedWsUrl);
     if (savedCameraUrl) setCustomCameraUrl(savedCameraUrl);
-
-    console.log(batteryLevel);
-    console.log(customCameraUrl);
 
     return () => {
       window.removeEventListener(
@@ -133,23 +130,23 @@ export default function WebSocketStatus() {
     };
   }, []);
 
-  // Handle robot command events
+  // Handle robot commands
   useEffect(() => {
     const handleCommand = (e: CustomEvent) => {
-      const { command } = e.detail;
+      const { command, data } = e.detail;
       if (socket && socket.readyState === WebSocket.OPEN) {
         const commandData = {
           name: "robot_command",
           data: {
             command,
+            data: data || {},
             timestamp: Date.now(),
           },
           createdAt: Date.now(),
         };
-
         socket.send(JSON.stringify(commandData));
         trackWsMessage("sent", commandData);
-        console.log(`Robot command sent: ${command}`);
+        console.log(`Robot command sent: ${command}`, data || {});
       } else {
         logError("Cannot send robot command", {
           reason: "Socket not connected",
@@ -163,19 +160,14 @@ export default function WebSocketStatus() {
       if (socket && socket.readyState === WebSocket.OPEN) {
         const batteryRequestData = {
           name: "battery_request",
-          data: {
-            timestamp: Date.now(),
-          },
+          data: { timestamp: Date.now() },
           createdAt: Date.now(),
         };
-
         socket.send(JSON.stringify(batteryRequestData));
         trackWsMessage("sent", batteryRequestData);
       } else {
-        // If not connected, use dummy data
         const dummyLevel = Math.round(65 + Math.random() * 25);
         setBatteryLevel(dummyLevel);
-
         window.dispatchEvent(
           new CustomEvent("debug:battery-update", {
             detail: { level: dummyLevel },
@@ -219,9 +211,8 @@ export default function WebSocketStatus() {
     };
   }, [socket]);
 
-  // WebSocket connection effect - now depends on reconnectTrigger
+  // Connect or reconnect to WS
   useEffect(() => {
-    // Clean up any existing socket first
     if (socket) {
       if (
         socket.readyState === WebSocket.OPEN ||
@@ -235,34 +226,28 @@ export default function WebSocketStatus() {
       }
     }
 
-    // Determine which WebSocket URL to use
     let wsUrl;
     if (customWsUrl && customWsUrl.trim() !== "") {
-      // Use the custom URL from settings
       wsUrl = customWsUrl;
     } else {
-      // Use the default URL based on window.location
       const hostname = window.location.hostname;
       wsUrl = `ws://${hostname}:3001/ws`;
     }
-
     console.log(
       `Connecting to WebSocket at ${wsUrl} (attempt #${reconnectTrigger})...`
     );
-    setStatus("connecting");
 
-    // Connect to websocket using the determined URL
+    setStatus("connecting");
     const ws = new WebSocket(wsUrl);
     setSocket(ws);
 
     ws.onopen = () => {
       console.log("Connected to gamepad server");
       setStatus("connected");
-
-      // Track connection for debug state
       trackWsConnection("connect");
 
-      // Register as controller
+      setCameraStatus({ status: "normal", message: "" });
+
       const registerData = {
         name: "client_register",
         data: {
@@ -271,26 +256,17 @@ export default function WebSocketStatus() {
         },
         createdAt: Date.now(),
       };
-
       ws.send(JSON.stringify(registerData));
-
-      // Track message for debug
       trackWsMessage("sent", registerData);
 
-      // Only start ping loop after connection is established
       pingIntervalRef.current = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
           const pingData = {
             name: "ping",
-            data: {
-              sentAt: Date.now(),
-            },
+            data: { sentAt: Date.now() },
             createdAt: Date.now(),
           };
-
           ws.send(JSON.stringify(pingData));
-
-          // Track ping for debug
           trackWsMessage("sent", pingData);
         }
       }, 500);
@@ -299,11 +275,7 @@ export default function WebSocketStatus() {
     ws.onclose = () => {
       console.log("Disconnected from gamepad server");
       setStatus("disconnected");
-
-      // Track disconnection for debug state
       trackWsConnection("disconnect");
-
-      // Clear ping interval if connection closes
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
@@ -313,8 +285,6 @@ export default function WebSocketStatus() {
     ws.onerror = (error) => {
       console.error("WebSocket error:", error);
       setStatus("disconnected");
-
-      // Log error for debug state
       logError("WebSocket connection error", {
         message: "Connection error",
         errorType: error.type,
@@ -324,15 +294,39 @@ export default function WebSocketStatus() {
     ws.onmessage = (message) => {
       try {
         const event = JSON.parse(message.data);
-
-        // Track received message for debug
         trackWsMessage("received", event);
 
         if (event.name === "pong") {
-          // Calculate round-trip time in milliseconds
           const now = Date.now();
           const latency = now - event.data.sentAt;
           setPingTime(latency);
+        } else if (event.name === "battery_info") {
+          const level = event.data.level;
+          setBatteryLevel(level);
+          window.dispatchEvent(
+            new CustomEvent("debug:battery-update", {
+              detail: { level },
+            })
+          );
+        } else if (event.name === "camera_status") {
+          setCameraStatus({
+            status: event.data.status as "restarted" | "error",
+            message: event.data.message,
+          });
+          window.dispatchEvent(
+            new CustomEvent("debug:camera-status", {
+              detail: {
+                status: event.data.status,
+                message: event.data.message,
+              },
+            })
+          );
+        } else if (event.name === "command_response") {
+          window.dispatchEvent(
+            new CustomEvent("debug:command-response", {
+              detail: event.data,
+            })
+          );
         }
       } catch (e) {
         console.error("Error parsing websocket message:", e);
@@ -344,7 +338,6 @@ export default function WebSocketStatus() {
     };
 
     return () => {
-      // Clean up when effect runs again or component unmounts
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
@@ -356,73 +349,24 @@ export default function WebSocketStatus() {
         ws.close();
       }
     };
-  }, [reconnectTrigger, customWsUrl]); // Add reconnectTrigger and customWsUrl dependency
+  }, [reconnectTrigger, customWsUrl]);
 
-  // WebSocket message handler - update to handle battery info
-  useEffect(() => {
-    if (!socket) return;
-
-    const originalOnMessage = socket.onmessage;
-
-    socket.onmessage = (message) => {
-      // Call the original handler
-      if (originalOnMessage) {
-        originalOnMessage.call(socket, message);
-      }
-
-      try {
-        const event = JSON.parse(message.data);
-
-        // Handle battery info
-        if (event.name === "battery_info") {
-          const level = event.data.level;
-          setBatteryLevel(level);
-
-          // Broadcast to other components
-          window.dispatchEvent(
-            new CustomEvent("debug:battery-update", {
-              detail: { level },
-            })
-          );
-        }
-      } catch (e) {
-        console.error("Error processing WebSocket message:", e);
-      }
-    };
-
-    return () => {
-      if (socket) {
-        socket.onmessage = originalOnMessage;
-      }
-    };
-  }, [socket]);
-
-  // Wrap computeGamepadState in useCallback to prevent recreation on every render
+  // Send gamepad state periodically
   const computeGamepadState = useCallback(() => {
     const { isActionActive, getAxisValueForAction, ACTION_GROUPS, ACTIONS } =
       functionsRef.current;
-
     const gamepadState: Record<string, GamepadStateValue> = {};
-    const processedActions = new Set<ActionKey>(); // Track which actions we've already processed
+    const processedActions = new Set<ActionKey>();
 
-    // Process each action group to create a combined value
     ACTION_GROUPS.forEach((group) => {
-      // Only process groups with exactly 2 opposing actions (like forward/backward)
       if (group.actions.length === 2) {
         const [action1, action2] = group.actions;
-
-        // Get values for both actions in the group
         const value1 = getActionValue(action1);
         const value2 = getActionValue(action2);
-
-        // Combine the values (positive - negative)
         gamepadState[group.key] = (value1 - value2).toFixed(2);
-
-        // Mark these actions as processed
         processedActions.add(action1);
         processedActions.add(action2);
       } else {
-        // For groups with different number of actions, process individually
         group.actions.forEach((action) => {
           processAction(action);
           processedActions.add(action);
@@ -430,14 +374,12 @@ export default function WebSocketStatus() {
       }
     });
 
-    // Now process any remaining actions that weren't part of a group
     ACTIONS.forEach((actionInfo: ActionInfo) => {
       if (!processedActions.has(actionInfo.key)) {
         processAction(actionInfo.key);
       }
     });
 
-    // Function to process an individual action and add it to gamepadState
     function processAction(action: ActionKey) {
       const mapping = mappings[action];
       if (!mapping || mapping.index === -1) return;
@@ -445,71 +387,51 @@ export default function WebSocketStatus() {
       const actionInfo = ACTIONS.find((a: ActionInfo) => a.key === action);
       if (!actionInfo) return;
 
-      // Handle actions based on their type
       if (
         actionInfo.type === "button" ||
         (actionInfo.type === "both" && mapping.type === "button")
       ) {
-        // For button actions (or "both" mapped to button)
         gamepadState[action] = isActionActive(action);
       } else if (
         actionInfo.type === "axis" ||
         (actionInfo.type === "both" && mapping.type === "axis")
       ) {
-        // For axis actions (or "both" mapped to axis)
         const value = getAxisValueForAction(action);
         if (value !== undefined) {
           gamepadState[action] = value.toFixed(2);
         }
       }
     }
-
-    // Helper function to get normalized value for an action
     function getActionValue(action: ActionKey): number {
       const mapping = mappings[action];
-
-      if (!mapping || mapping.index === -1) {
-        return 0;
-      }
-
+      if (!mapping || mapping.index === -1) return 0;
       if (mapping.type === "button") {
         return isActionActive(action) ? 1 : 0;
       }
-
       if (mapping.type === "axis") {
         return getAxisValueForAction(action) ?? 0;
       }
-
       return 0;
     }
 
     return gamepadState;
   }, [mappings]);
 
-  // Send gamepad state periodically
   useEffect(() => {
-    // Only send data if connected to WebSocket AND have a selected gamepad
     if (!socket || status !== "connected" || !selectedGamepadId) return;
-
     const interval = setInterval(() => {
-      // Check connection state before sending
       if (socket.readyState === WebSocket.OPEN) {
         pingTimestampRef.current = Date.now();
-
-        // Get the comprehensive gamepad state
         const gamepadState = computeGamepadState();
-
         const message = {
           name: "gamepad_input",
           data: gamepadState,
           createdAt: pingTimestampRef.current,
         };
-
         socket.send(JSON.stringify(message));
         trackWsMessage("sent", message);
       }
-    }, 50); // Send updates at 20 Hz
-
+    }, 50);
     return () => clearInterval(interval);
   }, [socket, status, selectedGamepadId, computeGamepadState]);
 
@@ -539,6 +461,14 @@ export default function WebSocketStatus() {
         </div>
         {pingTime !== null && (
           <p className="text-xs text-gray-500">Ping: {pingTime} ms</p>
+        )}
+
+        {/* Camera error/warning */}
+        {cameraStatus.status === "error" && (
+          <div className="mt-2 p-2 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 rounded-md flex items-center">
+            <AlertTriangle size={14} className="mr-2 flex-shrink-0" />
+            <span className="text-xs">{cameraStatus.message}</span>
+          </div>
         )}
       </div>
     </Card>
