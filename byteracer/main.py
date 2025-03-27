@@ -269,13 +269,13 @@ async def sensor_loop():
 
         # 2) Line detection => treat as cliff detection if sum too low
         line_data = read_line_detection()
-        if sum(line_data) < 30:  # example threshold
-            print("Cliff or line-edge detected, stopping!")
-            px.set_motor_speed(1, 0)
-            px.set_motor_speed(2, 0)
-            emergency_stop = True
-            if music_player:
-                music_player.sound_play_threading('assets/warning.mp3')
+        # if sum(line_data) < 30:  # example threshold
+        #     print("Cliff or line-edge detected, stopping!")
+        #     px.set_motor_speed(1, 0)
+        #     px.set_motor_speed(2, 0)
+        #     emergency_stop = True
+        #     if music_player:
+        #         music_player.sound_play_threading('assets/warning.mp3')
 
         # 3) Accelerometer => naive integration for speed
         accel = read_accelerometer()
