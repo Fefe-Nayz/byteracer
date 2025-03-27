@@ -382,7 +382,7 @@ def switch_network_mode(mode):
             res = subprocess.run(['sudo','accesspopup'], check=True, capture_output=True)
         return {
             "success":True,
-            "message":f"Basculé en mode {'point d\'accès' if mode=='ap' else 'WiFi'}",
+            "message":f"Basculé en mode {'point d accès' if mode=='ap' else 'WiFi'}",
             "output": res.stdout.decode()
         }
     except Exception as e:
