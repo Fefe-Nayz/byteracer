@@ -91,13 +91,13 @@ def restart_camera_feed():
     """Stop & restart the camera feed in-process."""
     global camera_active
     try:
-        print("Restarting camera feed...")
-        Vilib.camera_close()
-        time.sleep(3)
-        Vilib.camera_start(vflip=False, hflip=False)
-        Vilib.display(local=False, web=True)
-        camera_active = True
-        print("Camera feed restarted successfully")
+        # print("Restarting camera feed...")
+        # Vilib.camera_close()
+        # time.sleep(3)
+        # Vilib.camera_start(vflip=False, hflip=False)
+        # Vilib.display(local=False, web=True)
+        # camera_active = True
+        # print("Camera feed restarted successfully")
         return True
     except Exception as e:
         print(f"Error restarting camera feed: {e}")
