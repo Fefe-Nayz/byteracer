@@ -5,7 +5,7 @@ set -e
 
 REPO_URL="https://github.com/nayzflux/byteracer.git"
 FOLDER_PATH="/home/pi/ByteRacer"
-BRANCH="main"
+BRANCH="working"
 
 TTS_SCRIPT="$FOLDER_PATH/byteracer/scripts/tts_feedback.py"
 
