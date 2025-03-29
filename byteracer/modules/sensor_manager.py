@@ -191,22 +191,25 @@ class SensorManager:
             self.emergency_active = True
             self._last_emergency_time = time.time()
             
+            # Force stop any current motion
+            self.px.forward(0)
+            await asyncio.sleep(0.1)
+            
             # Take emergency action based on the type
             if emergency in [EmergencyState.COLLISION_FRONT, EmergencyState.EDGE_DETECTED]:
-                # Stop and back up slightly
-                self.px.forward(0)
-                await asyncio.sleep(0.1)
+                # Override speed control temporarily
+                self._emergency_override = True
                 self.px.backward(30)
                 await asyncio.sleep(0.5)
                 self.px.forward(0)
+                self._emergency_override = False
                 
             elif emergency == EmergencyState.COLLISION_REAR:
-                # Stop and move forward slightly
-                self.px.forward(0)
-                await asyncio.sleep(0.1)
+                self._emergency_override = True
                 self.px.forward(30)
                 await asyncio.sleep(0.5)
                 self.px.forward(0)
+                self._emergency_override = False
                 
             elif emergency == EmergencyState.CLIENT_DISCONNECTED:
                 # Just stop all motion
@@ -252,22 +255,17 @@ class SensorManager:
             pass
     
     def update_motion(self, speed, turn_angle):
-        """
-        Update the current motion values.
-        
-        Args:
-            speed (float): Speed value (-1.0 to 1.0)
-            turn_angle (float): Turn angle (-1.0 to 1.0)
-            
-        Returns:
-            tuple: Modified (speed, turn_angle) if emergency is active
-        """
+        """Update the current motion values with safety checks"""
         # Register that we received a command
         self.last_input_time = time.time()
         
         # Store the requested values
         self.current_speed = speed
         self.current_turn = turn_angle
+        
+        # If emergency override is active, ignore input speed
+        if hasattr(self, '_emergency_override') and self._emergency_override:
+            return self.current_speed, turn_angle
         
         # If emergency is active, override motion commands
         if self.emergency_active:

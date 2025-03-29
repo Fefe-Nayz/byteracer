@@ -247,8 +247,8 @@ class ByteRacer:
                 logging.info(f"Received welcome message, client ID: {data['data']['clientId']}")
                 self.client_connected = True
                 
-                # Clear any pending IP announcements
-                self.tts_manager.clear_queue(min_priority=1)
+                # Clear any pending IP announcements but don't block
+                asyncio.create_task(self.tts_manager.clear_queue(min_priority=1))
                 if self.ip_speaking_task and not self.ip_speaking_task.done():
                     self.ip_speaking_task.cancel()
                 
