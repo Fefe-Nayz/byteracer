@@ -68,6 +68,11 @@ class LogManager:
         root_logger.addHandler(file_handler)
         root_logger.addHandler(console_handler)
         
+        # Reduce verbosity of specific third-party libraries
+        logging.getLogger('picamera2').setLevel(logging.INFO)
+        logging.getLogger('picamera2.picamera2').setLevel(logging.INFO)
+        logging.getLogger('vilib').setLevel(logging.INFO)
+        
         # Initial log message
         logging.info(f"Logging to {self.log_file_path}")
     
