@@ -23,7 +23,7 @@ speak "Starting ByteRacer boot sequence"
 # Configuration
 REPO_URL="https://github.com/nayzflux/byteracer.git"
 FOLDER_PATH="/home/pi/ByteRacer"
-BRANCH="main"
+BRANCH="working-2"
 
 # Create the parent directory if it doesn't exist
 mkdir -p "$(dirname "$FOLDER_PATH")"

@@ -24,6 +24,7 @@ class SensorManager:
     """
     def __init__(self, picarx_instance, emergency_callback=None):
         self.px = picarx_instance
+        self.px.set_cliff_reference([200, 200, 200])
         self.emergency_callback = emergency_callback
         
         # Emergency states
