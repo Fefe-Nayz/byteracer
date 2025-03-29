@@ -179,12 +179,8 @@ class CameraManager:
             bool: True if camera is healthy, False otherwise
         """
         try:
-            # This is a placeholder - replace with actual health check
-            # For example, you might check if recent frames were received
-            # or if vilib has some internal status
-            
-            # For now, assume the camera is healthy if we can access it
-            # You would need to adapt this to vilib's actual API
+            # libcamera-hello
+
             return True
         except Exception as e:
             logger.error(f"Camera health check error: {e}")

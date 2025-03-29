@@ -32,9 +32,9 @@ class ConfigManager:
             # Sound settings
             "sound": {
                 "enabled": True,
-                "volume": 80,
+                "volume": 100,
                 "tts_enabled": True,
-                "tts_volume": 80,
+                "tts_volume": 100,
                 "tts_language": "en-US",
             },
             
@@ -75,7 +75,7 @@ class ConfigManager:
                 "mode": "wifi",  # "wifi" or "ap"
                 "known_networks": [],
                 "ap_name": "ByteRacer",
-                "ap_password": "byteracer123",
+                "ap_password": "ByteRacerForever",
             },
         }
         
@@ -320,9 +320,9 @@ class ConfigManager:
             # Sound settings
             "sound": {
                 "enabled": True,
-                "volume": 80,
+                "volume": 100,
                 "tts_enabled": True,
-                "tts_volume": 80,
+                "tts_volume": 100,
                 "tts_language": "en-US",
             },
             

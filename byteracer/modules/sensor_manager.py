@@ -164,7 +164,7 @@ class SensorManager:
         if self.edge_detection_enabled:
             # Simple edge detection logic: if all line sensors read low values,
             # we might be approaching an edge
-            if all(sensor < self.edge_detection_threshold for sensor in self.line_sensors):
+            if self.px.get_cliff_status(self.line_sensors):
                 return EmergencyState.EDGE_DETECTED
         
         # Check for client disconnection if auto-stop is enabled

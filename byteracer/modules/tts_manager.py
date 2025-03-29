@@ -11,7 +11,7 @@ class TTSManager:
     Manages Text-to-Speech functionality with asynchronous operation.
     Prevents TTS operations from blocking the main program flow.
     """
-    def __init__(self, lang="en-US", enabled=True, volume=80):
+    def __init__(self, lang="en-US", enabled=True, volume=100):
         self.tts = TTS()
         self.tts.lang(lang)
         self.enabled = enabled

@@ -165,3 +165,5 @@ screen -dmS byteracer bash -c "cd $FOLDER_PATH/byteracer && sudo python3 main.py
 
 echo "All services have been started."
 speak "ByteRacer startup complete. Ready to drive."
+
+exit 0

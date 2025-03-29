@@ -16,7 +16,7 @@ class SoundManager:
     Manages sound effects and music for the robot.
     Handles acceleration, braking, drift sounds and custom sound effects.
     """
-    def __init__(self, assets_dir=None, enabled=True, volume=80):
+    def __init__(self, assets_dir=None, enabled=True, volume=100):
         self.music_player = Music()
         self.enabled = enabled
         self.volume = max(0, min(100, volume))

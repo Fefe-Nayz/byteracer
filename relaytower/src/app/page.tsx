@@ -14,6 +14,7 @@ import TextToSpeech from "@/components/TextToSpeech";
 import SoundEffects from "@/components/SoundEffects";
 import GptIntegration from "@/components/GptIntegration";
 import NetworkSettings from "@/components/NetworkSettings";
+import GamepadInputHandler from "@/components/GamepadInputHandler";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 function GamepadPage() {
@@ -22,6 +23,9 @@ function GamepadPage() {
   return (
     <div className="container mx-auto p-4 max-w-6xl">
       <h1 className="text-2xl font-bold mb-6">ByteRacer Control Panel</h1>
+
+      {/* GamepadInputHandler renders invisibly to process controller inputs */}
+      <GamepadInputHandler />
 
       <Tabs defaultValue="control" className="w-full">
         <TabsList className="mb-4">
