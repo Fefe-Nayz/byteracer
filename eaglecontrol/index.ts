@@ -35,10 +35,21 @@ type WebSocketEventName =
   | "car_ready"
   | "gamepad_input"
   | "client_register"
-  | "robot_command"     // New: For sending commands to the robot
-  | "command_response"  // New: For receiving command responses
-  | "battery_request"   // New: For requesting battery level
-  | "battery_info";     // New: For receiving battery information
+  | "robot_command"       // For sending commands to the robot
+  | "command_response"    // For receiving command responses
+  | "battery_request"     // For requesting battery level
+  | "battery_info"        // For receiving battery information
+  | "settings"            // For receiving settings from the robot
+  | "settings_update"     // For sending settings changes to the robot
+  | "sensor_data"         // For receiving sensor data
+  | "camera_status"       // For receiving camera status
+  | "speak_text"          // For sending text to be spoken
+  | "play_sound"          // For sending a sound to be played
+  | "gpt_command"         // For sending GPT commands
+  | "gpt_response"        // For receiving GPT responses
+  | "network_scan"        // For requesting network scan
+  | "network_list"        // For receiving network list
+  | "network_update";     // For updating network settings
 
 type WebSocketEvent = {
   name: WebSocketEventName;
@@ -154,7 +165,7 @@ const wsHandlers = {
         case "gamepad_input":
           broadcastToType(message, "car", ws);
           broadcastToType(message, "viewer", ws);
-          console.log(message);
+          // Reduced logging frequency for gamepad inputs to avoid console spam
           break;
 
         case "ping":
@@ -170,19 +181,21 @@ const wsHandlers = {
           );
           break;
 
-        // New cases for handling robot commands and responses
+        // Robot commands
         case "robot_command":
           console.log(`Robot command received: ${event.data.command}`);
           // Forward command to all cars
           broadcastToType(message, "car", ws);
           break;
 
+        // Battery requests
         case "battery_request":
           console.log("Battery level request received");
           // Forward the request to all cars
           broadcastToType(message, "car", ws);
           break;
 
+        // Command responses
         case "command_response":
           console.log(`Command response: ${event.data.message}`);
           // Forward the response to all controllers and viewers
@@ -190,11 +203,93 @@ const wsHandlers = {
           broadcastToType(message, "viewer", ws);
           break;
 
+        // Battery information
         case "battery_info":
-          console.log(`Battery info received: ${event.data.level}%`);
           // Forward battery info to all controllers and viewers
           broadcastToType(message, "controller", ws);
           broadcastToType(message, "viewer", ws);
+          break;
+
+        // Sensor data
+        case "sensor_data":
+          // Forward sensor data to all controllers and viewers
+          // No logging to avoid console spam
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Camera status
+        case "camera_status":
+          console.log(`Camera status: ${event.data.state}`);
+          // Forward camera status to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Settings from robot
+        case "settings":
+          console.log("Settings received from robot");
+          // Forward settings to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Settings updates from client
+        case "settings_update":
+          console.log("Settings update request received");
+          // Forward settings update to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Text to speak
+        case "speak_text":
+          console.log(`Text to speak: ${event.data.text}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Sound to play
+        case "play_sound":
+          console.log(`Sound to play: ${event.data.sound}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // GPT commands
+        case "gpt_command":
+          console.log(`GPT command: ${event.data.prompt}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // GPT responses
+        case "gpt_response":
+          console.log("GPT response received");
+          // Forward to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Network scan request
+        case "network_scan":
+          console.log("Network scan requested");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Network list update
+        case "network_list":
+          console.log("Network list received");
+          // Forward to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Network settings update
+        case "network_update":
+          console.log(`Network update request: ${event.data.action}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
           break;
 
         default:
