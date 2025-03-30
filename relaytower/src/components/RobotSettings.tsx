@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 
 export default function RobotSettings() {
-  const { status, settings, updateSettings } = useWebSocket();
+  const { status, settings, updateSettings, requestSettings } = useWebSocket();
   
   // Local state for settings (to avoid constant updates)
   const [localSettings, setLocalSettings] = useState<RobotSettingsType | null>(null);
@@ -25,6 +25,13 @@ export default function RobotSettings() {
     }
   }, [settings]);
   
+  // Request settings when component mounts or reconnects
+  useEffect(() => {
+    if (status === "connected") {
+      requestSettings();
+    }
+  }, [status, requestSettings]);
+
   // If no settings or not connected, show placeholder
   if (!localSettings || status !== "connected") {
     return (

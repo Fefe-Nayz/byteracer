@@ -13,7 +13,7 @@ type WifiNetwork = { ssid: string; password: string };
 export default function NetworkSettings() {
 
   const { toast } = useToast();
-  const { status, settings, updateSettings, scanNetworks, updateNetwork } = useWebSocket();
+  const { status, settings, updateSettings, scanNetworks, updateNetwork, requestSettings } = useWebSocket();
   
   // Local state for form values
   const [mode, setMode] = useState<NetworkMode>("wifi");
@@ -34,6 +34,13 @@ export default function NetworkSettings() {
       setKnownNetworks([...settings.network.known_networks]);
     }
   }, [settings]);
+  
+  // Request settings when component mounts or reconnects
+  useEffect(() => {
+    if (status === "connected") {
+      requestSettings();
+    }
+  }, [status, requestSettings]);
   
   // Listen for network scan results
   useEffect(() => {

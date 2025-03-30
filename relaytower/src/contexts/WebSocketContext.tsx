@@ -161,6 +161,7 @@ interface WebSocketContextValue {
   sendGamepadState: (gamepadState: Record<string, boolean | string | number>) => void;
   sendRobotCommand: (command: RobotCommand) => void;
   requestBatteryLevel: () => void;
+  requestSettings: () => void;
   updateSettings: (settings: Partial<RobotSettings>) => void;
   speakText: (text: string) => void;
   playSound: (sound: string) => void;
@@ -260,6 +261,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
       // Request battery level immediately after connection
       requestBatteryLevel();
+      
+      // Request settings immediately after connection
+      requestSettings();
 
       // Start ping interval
       pingIntervalRef.current = setInterval(() => {
@@ -468,6 +472,28 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  // Function to request settings data
+  const requestSettings = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const settingsRequestData = {
+        name: "settings",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(settingsRequestData));
+      trackWsMessage("sent", settingsRequestData);
+      console.log("Settings request sent");
+    } else {
+      logError("Cannot send settings request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
   // Function to update settings
   const updateSettings = useCallback((newSettings: Partial<RobotSettings>) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -635,6 +661,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     sendGamepadState,
     sendRobotCommand,
     requestBatteryLevel,
+    requestSettings,
     updateSettings,
     speakText,
     playSound,

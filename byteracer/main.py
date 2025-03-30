@@ -291,6 +291,11 @@ class ByteRacer:
                         "message": "Settings updated successfully"
                     })
             
+            elif data["name"] == "settings":
+                # Handle settings request
+                logging.info("Received settings request")
+                await self.send_settings_to_client()
+            
             elif data["name"] == "speak_text":
                 # Handle text to speak
                 if "text" in data["data"]:
