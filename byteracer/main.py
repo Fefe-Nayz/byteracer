@@ -725,14 +725,8 @@ class ByteRacer:
     async def periodic_tasks(self):
         """Run periodic tasks like sensor updates"""
         logging.info("Starting periodic tasks loop")
-        task_counter = 0
         while True:
             try:
-                task_counter += 1
-                # Log every 10 iterations to avoid excessive logging
-                if task_counter % 10 == 0:
-                    logging.info(f"Periodic tasks running (iteration {task_counter})")
-                
                 # Send sensor data every second if client is connected
                 if self.client_connected:
                     try:
@@ -745,7 +739,7 @@ class ByteRacer:
                 
                 # Always use a consistent update interval, don't slow down when idle
                 # This ensures continuous data flow
-                await asyncio.sleep(1)
+                await asyncio.sleep(0.1)
                 
             except asyncio.CancelledError:
                 logging.info("Periodic tasks cancelled")
