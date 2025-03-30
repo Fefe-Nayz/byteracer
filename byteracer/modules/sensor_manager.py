@@ -30,7 +30,7 @@ class SensorManager:
         self.current_emergency = EmergencyState.NONE
         self.emergency_active = False
         self._last_emergency_time = 0
-        self._emergency_cooldown = 2.0  # Seconds
+        self._emergency_cooldown = 0.1  # Seconds
         
         # Sensor readings
         self.ultrasonic_distance = float('inf')  # In cm
@@ -239,7 +239,7 @@ class SensorManager:
                 self.current_emergency = EmergencyState.NONE
         
         elif self.current_emergency == EmergencyState.EDGE_DETECTED:
-            if any(sensor > self.edge_detection_threshold for sensor in self.line_sensors):
+            if not self.px.get_cliff_status(self.line_sensors):
                 self.emergency_active = False
                 logger.info(f"Emergency cleared: {self.current_emergency}")
                 self.current_emergency = EmergencyState.NONE
@@ -278,36 +278,37 @@ class SensorManager:
         self.current_turn = turn_angle
         
         # If emergency is active, override motion commands more strictly
-        if self.emergency_active:
-            now = time.time()
-            time_in_emergency = now - self._last_emergency_time
+        # if self.emergency_active:
+            # now = time.time()
+            # time_in_emergency = now - self._last_emergency_time
             
-            # Different emergency types need different handling
-            if self.current_emergency == EmergencyState.COLLISION_FRONT:
-                # For front collision, only allow backward motion
-                if time_in_emergency < 1.0:
-                    return -0.2, turn_angle  # Force small backup
-                return min(speed, 0), turn_angle  # Allow only backward motion
+            # # Different emergency types need different handling
+            # if self.current_emergency == EmergencyState.COLLISION_FRONT:
+            #     # For front collision, only allow backward motion
+            #     if time_in_emergency < 1.0:
+            #         return -0.2, turn_angle  # Force small backup
+            #     return min(speed, 0), turn_angle  # Allow only backward motion
                 
-            elif self.current_emergency == EmergencyState.EDGE_DETECTED:
-                # For edge detection, force backup
-                if time_in_emergency < 1.5:
-                    return -0.2, turn_angle  # Force backup
-                else:
-                    return 0, turn_angle  # Then stop
+            # elif self.current_emergency == EmergencyState.EDGE_DETECTED:
+            #     # For edge detection, force backup
+            #     if time_in_emergency < 1.5:
+            #         return -0.2, turn_angle  # Force backup
+            #     else:
+            #         return 0, turn_angle  # Then stop
                     
-            elif self.current_emergency in [
-                EmergencyState.CLIENT_DISCONNECTED,
-                EmergencyState.MANUAL_STOP
-            ]:
-                # Complete stop for these emergencies
-                return 0, turn_angle
+            # elif self.current_emergency in [
+            #     EmergencyState.CLIENT_DISCONNECTED,
+            #     EmergencyState.MANUAL_STOP
+            # ]:
+            #     # Complete stop for these emergencies
+            #     return 0, turn_angle
                 
-            elif self.current_emergency == EmergencyState.LOW_BATTERY:
-                # For low battery, still allow motion but at reduced power
-                return speed * 0.5, turn_angle
+            # elif self.current_emergency == EmergencyState.LOW_BATTERY:
+            #     # For low battery, still allow motion but at reduced power
+            #     return speed * 0.5, turn_angle
+
         
-        return speed, turn_angle
+        return speed, turn_angle, self.emergency_active
     
     def register_client_connection(self):
         """Register that a client connected"""

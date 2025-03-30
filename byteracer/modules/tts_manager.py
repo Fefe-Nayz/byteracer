@@ -21,6 +21,9 @@ class TTSManager:
         self._lock = threading.Lock()
         self._running = True
         self._task = None
+        # Create a single TTS instance - like the example code
+        self._tts = TTS()
+        self._tts.lang(self.lang)
         logger.info("TTS Manager initialized")
     
     async def start(self):
@@ -94,25 +97,20 @@ class TTSManager:
                 await asyncio.sleep(1)  # Avoid tight loop on error
     
     def _speak(self, text):
-        """Execute the actual TTS operation"""
+        """Execute the actual TTS operation - simplified to match example code"""
         try:
             logger.debug(f"Speaking: '{text}'")
-            # Create a fresh TTS instance and explicitly initialize it
-            tts = TTS()
-            
-            # Small delay to ensure previous TTS operations are completed
-            time.sleep(0.1)
-            
-            # Explicitly reset and reinitialize TTS
-            tts.end()  # End any previous TTS operation
-            time.sleep(0.1)
-            tts = TTS()  # Create a completely new instance
-            tts.lang(self.lang)
-            tts.say(text)
-            
+            # Use the single TTS instance instead of creating new ones
+            self._tts.say(text)
             return True
         except Exception as e:
             logger.error(f"TTS error while speaking '{text}': {e}")
+            # If we get an error, try to reset the TTS instance
+            try:
+                self._tts = TTS()
+                self._tts.lang(self.lang)
+            except Exception:
+                pass
             return False
     
     def is_speaking(self):
@@ -171,4 +169,6 @@ class TTSManager:
     def set_language(self, lang):
         """Set the TTS language"""
         self.lang = lang
+        with self._lock:
+            self._tts.lang(self.lang)
         logger.info(f"TTS language set to {lang}")

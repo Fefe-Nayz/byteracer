@@ -354,7 +354,10 @@ class ByteRacer:
         self.previous_use_state = use_button
         
         # Pass inputs through sensor manager to handle safety overrides
-        speed_value, turn_value = self.sensor_manager.update_motion(speed_value, turn_value)
+        speed_value, turn_value, emergency = self.sensor_manager.update_motion(speed_value, turn_value)
+
+        if emergency:
+            return
         
         # Set motor speeds with safety constraints applied
         max_speed = self.config_manager.get("drive.max_speed")

@@ -1,20 +1,18 @@
 #!/bin/bash
-# Modified startup script with TTS notifications
+# Modified startup script WITHOUT TTS notifications for troubleshooting
 
 # Exit if any command fails
 set -e
 
 # Project paths
 BYTERACER_PATH="/home/pi/ByteRacer"
-TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
+# TTS_SCRIPT commented out for testing
+# TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
 
-# Function to speak with TTS
+# Function to speak with TTS - temporarily disabled
 speak() {
-    if [ -f "$TTS_SCRIPT" ]; then
-        python3 "$TTS_SCRIPT" "$1"
-    else
-        echo "TTS script not found: $TTS_SCRIPT"
-    fi
+    # Disabled for troubleshooting
+    echo "TTS disabled for troubleshooting: $1"
 }
 
 echo "=== ByteRacer Startup Script ==="
@@ -165,7 +163,3 @@ screen -dmS byteracer bash -c "cd $FOLDER_PATH/byteracer && sudo python3 main.py
 
 echo "All services have been started."
 speak "ByteRacer startup complete. Ready to drive."
-
-pkill -f "python3.*speak.py" || true
-
-exit 0
