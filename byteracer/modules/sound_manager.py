@@ -43,8 +43,8 @@ class SoundManager:
             "custom": self._load_sounds("custom"),
         }
         
-        # Keep track of currently playing sounds
-        self.current_sounds = {}
+        # Keep track of currently playing sounds - modified to support multiple sounds per type
+        self.current_sounds = {category: [] for category in self.sounds.keys()}
         self._running = True
         self._lock = threading.Lock()
         
@@ -100,11 +100,6 @@ class SoundManager:
             sound_file = random.choice(sound_files)
         
         with self._lock:
-            # Stop previous sound of this type if exists
-            if sound_type in self.current_sounds and self.current_sounds[sound_type] is not None:
-                if pygame.mixer.Channel(self.current_sounds[sound_type]).get_busy():
-                    pygame.mixer.Channel(self.current_sounds[sound_type]).stop()
-            
             # Find an available channel
             for channel_id in range(pygame.mixer.get_num_channels()):
                 if not pygame.mixer.Channel(channel_id).get_busy():
@@ -112,8 +107,13 @@ class SoundManager:
                     sound = pygame.mixer.Sound(str(sound_file))
                     sound.set_volume(self.volume / 100.0)
                     pygame.mixer.Channel(channel_id).play(sound, loops=-1 if loop else 0)
-                    self.current_sounds[sound_type] = channel_id
-                    logger.debug(f"Playing {sound_type} sound: {sound_file.name}")
+                    
+                    # Add to the list of current sounds for this type
+                    if sound_type not in self.current_sounds:
+                        self.current_sounds[sound_type] = []
+                    self.current_sounds[sound_type].append(channel_id)
+                    
+                    logger.debug(f"Playing {sound_type} sound: {sound_file.name} on channel {channel_id}")
                     return channel_id
         
         logger.warning("No available sound channels")
@@ -133,20 +133,23 @@ class SoundManager:
                     pygame.mixer.Channel(channel_id).stop()
                     logger.debug(f"Stopped sound on channel {channel_id}")
                     # Remove from current_sounds
-                    for k, v in list(self.current_sounds.items()):
-                        if v == channel_id:
-                            self.current_sounds[k] = None
+                    for sound_type, channels in self.current_sounds.items():
+                        if channel_id in channels:
+                            self.current_sounds[sound_type].remove(channel_id)
             
             elif sound_type is not None:
-                if sound_type in self.current_sounds and self.current_sounds[sound_type] is not None:
-                    pygame.mixer.Channel(self.current_sounds[sound_type]).stop()
-                    logger.debug(f"Stopped {sound_type} sound")
-                    self.current_sounds[sound_type] = None
+                if sound_type in self.current_sounds:
+                    # Stop all sounds of this type
+                    for channel_id in self.current_sounds[sound_type]:
+                        if 0 <= channel_id < pygame.mixer.get_num_channels():
+                            pygame.mixer.Channel(channel_id).stop()
+                    logger.debug(f"Stopped all {sound_type} sounds")
+                    self.current_sounds[sound_type] = []
             
             else:
                 # Stop all sounds
                 pygame.mixer.stop()
-                self.current_sounds = {}
+                self.current_sounds = {category: [] for category in self.sounds.keys()}
                 logger.debug("Stopped all sounds")
     
     def update_driving_sounds(self, speed, turn_value, acceleration):
@@ -202,6 +205,10 @@ class SoundManager:
             channel_id = pygame.mixer.find_channel()
             if channel_id:
                 channel_id.play(sound)
+                
+                # Track the channel
+                self.current_sounds["alerts"].append(channel_id.get_id())
+                
                 logger.debug(f"Playing alert sound: {alert_name}")
                 return True
         
