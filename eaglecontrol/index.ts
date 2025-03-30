@@ -213,7 +213,7 @@ const wsHandlers = {
         // Sensor data
         case "sensor_data":
           // Forward sensor data to all controllers and viewers
-          // No logging to avoid console spam
+          console.log(message);
           broadcastToType(message, "controller", ws);
           broadcastToType(message, "viewer", ws);
           break;
