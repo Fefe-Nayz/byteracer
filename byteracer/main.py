@@ -623,11 +623,32 @@ class ByteRacer:
         """Send sensor data to the client"""
         if self.websocket and self.client_connected:
             try:
+                # Get raw sensor data
                 sensor_data = self.sensor_manager.get_sensor_data()
+                
+                # Transform sensor data to match client expectations
+                transformed_data = {
+                    "ultrasonicDistance": sensor_data["ultrasonic"],
+                    "lineFollowLeft": sensor_data["line_sensors"][0],
+                    "lineFollowMiddle": sensor_data["line_sensors"][1],
+                    "lineFollowRight": sensor_data["line_sensors"][2],
+                    "emergencyState": sensor_data["emergency"]["type"] if sensor_data["emergency"]["active"] else None,
+                    "batteryLevel": sensor_data["battery"],
+                    "isCollisionAvoidanceActive": sensor_data["settings"]["collision_avoidance"],
+                    "isEdgeDetectionActive": sensor_data["settings"]["edge_detection"],
+                    "isAutoStopActive": sensor_data["settings"]["auto_stop"],
+                    "isTrackingActive": sensor_data["settings"]["tracking_enabled"],
+                    "isCircuitModeActive": sensor_data["settings"]["circuit_mode_enabled"],
+                    "clientConnected": self.client_connected,
+                    "lastClientActivity": int(self.last_activity_time * 1000),  # Convert to milliseconds
+                    "speed": sensor_data["speed"],  # Add speed value
+                    "turn": sensor_data["turn"],    # Add turn value
+                    "acceleration": sensor_data["acceleration"]  # Add acceleration value
+                }
                 
                 await self.websocket.send(json.dumps({
                     "name": "sensor_data",
-                    "data": sensor_data,
+                    "data": transformed_data,
                     "createdAt": int(time.time() * 1000)
                 }))
                 logging.debug("Sent sensor data to client")
@@ -683,20 +704,23 @@ class ByteRacer:
             try:
                 # Send sensor data every second if client is connected
                 if self.client_connected:
-                    await self.send_sensor_data_to_client()
-                
-                # Check for client timeout
-                if time.time() - self.last_activity_time > 60:
-                    # Send updates less frequently when idle
-                    await asyncio.sleep(5)
+                    try:
+                        await self.send_sensor_data_to_client()
+                        logging.debug("Periodic sensor data sent")
+                    except Exception as e:
+                        logging.error(f"Error sending periodic sensor data: {e}")
                 else:
-                    await asyncio.sleep(1)
+                    logging.debug("Client not connected, skipping sensor data")
+                
+                # Always use a consistent update interval, don't slow down when idle
+                # This ensures continuous data flow
+                await asyncio.sleep(1)
                 
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logging.error(f"Error in periodic tasks: {e}")
-                await asyncio.sleep(5)  # Longer sleep on error
+                await asyncio.sleep(2)  # Shorter sleep on error
 
 async def main():
     """Main entry point for ByteRacer"""

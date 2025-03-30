@@ -131,6 +131,66 @@ export default function SensorData() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* Motion data - New section for speed, turn, and acceleration */}
+        <div className="p-3 rounded-md bg-gray-50">
+          <div className="flex items-center mb-2">
+            <Car className="h-4 w-4 mr-2" />
+            <span className="text-sm font-medium">Motion Data:</span>
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span>Speed:</span>
+              <span className={`font-medium ${Math.abs(sensorData.speed || 0) > 0.1 ? 'text-blue-500' : 'text-gray-500'}`}>
+                {((sensorData.speed || 0) * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div 
+                className={`absolute left-0 top-0 bottom-0 ${(sensorData.speed || 0) > 0 ? 'bg-blue-500' : 'bg-orange-500'}`}
+                style={{ 
+                  width: `${Math.min(100, Math.abs((sensorData.speed || 0) * 100))}%`,
+                  left: (sensorData.speed || 0) < 0 ? 'auto' : '0',
+                  right: (sensorData.speed || 0) < 0 ? '0' : 'auto'
+                }}
+              ></div>
+            </div>
+            
+            <div className="flex items-center justify-between text-xs mt-3">
+              <span>Turn:</span>
+              <span className={`font-medium ${Math.abs(sensorData.turn || 0) > 0.1 ? 'text-green-500' : 'text-gray-500'}`}>
+                {((sensorData.turn || 0) * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div 
+                className={`absolute left-0 top-0 bottom-0 ${(sensorData.turn || 0) > 0 ? 'bg-green-500' : 'bg-purple-500'}`}
+                style={{ 
+                  width: `${Math.min(100, Math.abs((sensorData.turn || 0) * 100))}%`,
+                  left: (sensorData.turn || 0) < 0 ? 'auto' : '0',
+                  right: (sensorData.turn || 0) < 0 ? '0' : 'auto'
+                }}
+              ></div>
+            </div>
+            
+            <div className="flex items-center justify-between text-xs mt-3">
+              <span>Acceleration:</span>
+              <span className={`font-medium ${Math.abs(sensorData.acceleration || 0) > 0.5 ? 'text-amber-500' : 'text-gray-500'}`}>
+                {((sensorData.acceleration || 0) * 100).toFixed(0)}%
+              </span>
+            </div>
+            <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div 
+                className={`absolute top-0 bottom-0 bg-amber-500`}
+                style={{ 
+                  width: `${Math.min(100, Math.abs((sensorData.acceleration || 0) * 50))}%`,
+                  left: '50%',
+                  transform: `translateX(${(sensorData.acceleration || 0) >= 0 ? '0' : '-100%'})`,
+                }}
+              ></div>
+            </div>
+          </div>
+        </div>
+        
         {/* Safety status - New consolidated indicator */}
         <div className={`p-3 rounded-md ${isSafetyActive ? 'bg-green-50' : 'bg-gray-50'}`}>
           <div className="flex items-center mb-1">
@@ -148,6 +208,18 @@ export default function SensorData() {
             <div className="flex items-center">
               <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isEdgeDetectionActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
               <span>Edge Detection</span>
+            </div>
+            <div className="flex items-center">
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isAutoStopActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <span>Auto Stop</span>
+            </div>
+            <div className="flex items-center">
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isTrackingActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <span>Tracking</span>
+            </div>
+            <div className="flex items-center">
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isCircuitModeActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <span>Circuit Mode</span>
             </div>
           </div>
         </div>

@@ -70,8 +70,14 @@ export interface SensorData {
   batteryLevel: number;
   isCollisionAvoidanceActive: boolean;
   isEdgeDetectionActive: boolean;
+  isAutoStopActive: boolean;
+  isTrackingActive: boolean;
+  isCircuitModeActive: boolean;
   clientConnected: boolean;
   lastClientActivity: number;
+  speed: number;
+  turn: number;
+  acceleration: number;
 }
 
 // Define camera status interface
