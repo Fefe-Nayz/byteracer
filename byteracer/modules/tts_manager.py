@@ -96,16 +96,13 @@ class TTSManager:
         """Execute the actual TTS operation"""
         try:
             logger.debug(f"Speaking: '{text}'")
-            # Create a fresh TTS instance and explicitly initialize it
+            # Create a fresh TTS instance
             tts = TTS()
             
             # Small delay to ensure previous TTS operations are completed
             time.sleep(0.1)
             
-            # Explicitly reset and reinitialize TTS
-            tts.end()  # End any previous TTS operation
-            time.sleep(0.1)
-            tts = TTS()  # Create a completely new instance
+            # Set language and speak
             tts.lang(self.lang)
             tts.say(text)
             
