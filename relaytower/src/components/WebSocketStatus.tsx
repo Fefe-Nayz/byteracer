@@ -2,6 +2,7 @@
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { useEffect } from "react";
 import { Card } from "./ui/card";
+import { Button } from "./ui/button";
 import { Battery } from "lucide-react";
 
 export default function WebSocketStatus() {
@@ -68,12 +69,12 @@ export default function WebSocketStatus() {
         )}
 
         {status !== "connected" && (
-          <button
+          <Button
             onClick={() => connect()}
-            className="text-xs bg-blue-500 hover:bg-blue-600 text-white rounded px-2 py-1 mt-1"
+            size={'sm'}
           >
             Reconnect
-          </button>
+          </Button>
         )}
 
         {batteryLevel !== null && (

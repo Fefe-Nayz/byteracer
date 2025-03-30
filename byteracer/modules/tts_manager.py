@@ -12,7 +12,6 @@ class TTSManager:
     Prevents TTS operations from blocking the main program flow.
     """
     def __init__(self, lang="en-US", enabled=True, volume=80):
-        self.lang = lang
         self.enabled = enabled
         self.volume = max(0, min(100, volume))  # Ensure volume is 0-100
         self._queue = asyncio.Queue()
@@ -21,10 +20,31 @@ class TTSManager:
         self._lock = threading.Lock()
         self._running = True
         self._task = None
+        
+        # Initialize TTS engine
         self._tts = TTS(engine=TTS.ESPEAK)
-        self._tts.lang(self.lang)
-        self._tts.espeak_params(amp=self.volume * 2)
-        logger.info("TTS Manager initialized")
+        
+        # Set language safely
+        supported_langs = self._tts.supported_lang()
+        if lang in supported_langs:
+            self.lang = lang
+            self._tts.lang(lang)
+        else:
+            # If requested language not supported, use first available language
+            self.lang = supported_langs[0] if supported_langs else "en-US"
+            logger.warning(f"Requested language '{lang}' not supported. Using '{self.lang}' instead.")
+            try:
+                self._tts.lang(self.lang)
+            except Exception as e:
+                logger.error(f"Error setting initial language: {e}")
+        
+        # Set volume
+        try:
+            self._tts.espeak_params(amp=self.volume * 2)
+        except Exception as e:
+            logger.error(f"Failed to set initial TTS volume: {e}")
+            
+        logger.info(f"TTS Manager initialized with language: {self.lang}, volume: {self.volume}")
     
     async def start(self):
         """Start the TTS processing loop"""
@@ -180,7 +200,20 @@ class TTSManager:
     
     def set_language(self, lang):
         """Set the TTS language"""
-        self.lang = lang
-        with self._lock:
-            self._tts.lang(self.lang)
-        logger.info(f"TTS language set to {lang}")
+        try:
+            # Check if language is supported first
+            supported_langs = self._tts.supported_lang()
+            if lang not in supported_langs:
+                logger.error(f"Language '{lang}' is not supported. Supported languages: {', '.join(supported_langs)}")
+                return False
+            
+            # Set language with proper error handling - ensure it's passed as a plain string, not a tuple
+            self.lang = lang
+            with self._lock:
+                # Pass the language as a plain string to avoid the tuple issue
+                self._tts.lang(lang)
+            logger.info(f"TTS language set to {lang}")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting TTS language to {lang}: {e}")
+            return False

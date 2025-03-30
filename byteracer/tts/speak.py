@@ -19,7 +19,20 @@ def main():
     
     # Initialize TTS
     tts = TTS()
-    tts.lang(args.lang)
+    
+    # Check if the requested language is supported
+    supported_langs = tts.supported_lang()
+    if args.lang not in supported_langs:
+        print(f"Error: Language '{args.lang}' is not supported.", file=sys.stderr)
+        print(f"Supported languages: {', '.join(supported_langs)}", file=sys.stderr)
+        return 1
+    
+    # Set language properly
+    try:
+        tts.lang(args.lang)
+    except ValueError as e:
+        print(f"Error setting language: {e}", file=sys.stderr)
+        return 1
     
     # Get text from file or command line
     if args.file:
