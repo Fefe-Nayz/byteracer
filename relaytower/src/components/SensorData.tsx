@@ -38,6 +38,9 @@ export default function SensorData() {
         setEmergencyAlert(false);
       }, 5000);
       return () => clearTimeout(timer);
+    } else {
+      // Reset emergency alert if emergency state is cleared
+      setEmergencyAlert(false);
     }
   }, [sensorData?.emergencyState]);
 
@@ -101,8 +104,10 @@ export default function SensorData() {
   // Check if safety system is active
   const isSafetyActive = sensorData.isCollisionAvoidanceActive || sensorData.isEdgeDetectionActive;
 
+  console.log("Sensor Data:", sensorData); // Debugging log
+
   return (
-    <Card className={`p-4 ${emergencyAlert ? 'bg-red-50 border-red-200' : ''}`}>
+    <Card className={`p-4 ${emergencyAlert ? 'bg-red-50 border-red-200' : 'border-gray-200 bg-white'}`}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-bold">Sensor Data</h3>
         
@@ -249,17 +254,17 @@ export default function SensorData() {
           </div>
           <div className="flex justify-between items-center">
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowLeft > 0.5 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowLeft < 200 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowLeft)}</div>
               <div className="text-xs text-gray-500">Left</div>
             </div>
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowMiddle > 0.5 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowMiddle < 200 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowMiddle)}</div>
               <div className="text-xs text-gray-500">Middle</div>
             </div>
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowRight > 0.5 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowRight < 200 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowRight)}</div>
               <div className="text-xs text-gray-500">Right</div>
             </div>

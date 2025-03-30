@@ -25,15 +25,13 @@ export default function SoundEffects() {
     });
     
     // Reset after delay (assuming most sounds are short)
-    setTimeout(() => {
-      setIsPlaying(null);
-    }, 2000);
+    setIsPlaying(null);
   };
   
   // Define available sound effects
   const soundEffects = [
     { id: "fart", name: "Fart", icon: "💨" },
-    { id: "horn", name: "Horn", icon: "📢" },
+    { id: "klaxon", name: "Klaxon", icon: "📢" },
     { id: "alarm", name: "Alarm", icon: "🚨" },
     { id: "wow", name: "Wow", icon: "🤩" },
     { id: "laugh", name: "Laugh", icon: "😂" },
@@ -57,7 +55,7 @@ export default function SoundEffects() {
             key={sound.id}
             variant="outline"
             onClick={() => handlePlaySound(sound.id)}
-            disabled={status !== "connected" || !soundEnabled || !!isPlaying}
+            disabled={status !== "connected" || !soundEnabled }
             className={`h-auto py-3 ${isPlaying === sound.id ? 'bg-primary/20' : ''}`}
           >
             <div className="flex flex-col items-center">
