@@ -262,8 +262,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       // Request battery level immediately after connection
       requestBatteryLevel();
       
-      // Request settings immediately after connection
-      requestSettings();
+      // Request settings immediately after connection - directly send the request
+      // instead of calling requestSettings() to avoid closure issues
+      const settingsRequestData = {
+        name: "settings",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      ws.send(JSON.stringify(settingsRequestData));
+      trackWsMessage("sent", settingsRequestData);
+      console.log("Settings request sent directly after connection");
 
       // Start ping interval
       pingIntervalRef.current = setInterval(() => {

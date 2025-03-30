@@ -228,10 +228,16 @@ const wsHandlers = {
 
         // Settings from robot
         case "settings":
-          console.log("Settings received from robot");
-          // Forward settings to all controllers and viewers
-          broadcastToType(message, "controller", ws);
-          broadcastToType(message, "viewer", ws);
+          console.log("Settings received from: " + client.type);
+          if (client.type === "car") {
+            // Forward settings from car to all controllers and viewers
+            broadcastToType(message, "controller", ws);
+            broadcastToType(message, "viewer", ws);
+          } else if (client.type === "controller" || client.type === "viewer") {
+            // Forward settings request from controller/viewer to all cars
+            console.log("Forwarding settings request to cars");
+            broadcastToType(message, "car", ws);
+          }
           break;
 
         // Settings updates from client
