@@ -247,8 +247,8 @@ class ByteRacer:
                 logging.info(f"Received welcome message, client ID: {data['data']['clientId']}")
                 self.client_connected = True
                 
-                # Clear any pending IP announcements but don't block
-                asyncio.create_task(self.tts_manager.clear_queue(min_priority=1))
+                # Clear any pending IP announcements
+                self.tts_manager.clear_queue(min_priority=1)
                 if self.ip_speaking_task and not self.ip_speaking_task.done():
                     self.ip_speaking_task.cancel()
                 
@@ -382,8 +382,6 @@ class ByteRacer:
         # Provide feedback via TTS
         if emergency == EmergencyState.COLLISION_FRONT:
             await self.tts_manager.say("Emergency stop. Obstacle detected ahead. Backing up.", priority=2)
-        elif emergency == EmergencyState.COLLISION_REAR:
-            await self.tts_manager.say("Emergency stop. Obstacle detected behind. Moving forward.", priority=2)
         elif emergency == EmergencyState.EDGE_DETECTED:
             await self.tts_manager.say("Emergency stop. Edge detected. Backing up.", priority=2)
         elif emergency == EmergencyState.CLIENT_DISCONNECTED:

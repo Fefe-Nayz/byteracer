@@ -11,7 +11,6 @@ class EmergencyState(Enum):
     """Enum representing different emergency states"""
     NONE = auto()
     COLLISION_FRONT = auto()
-    COLLISION_REAR = auto()
     EDGE_DETECTED = auto()
     CLIENT_DISCONNECTED = auto()
     LOW_BATTERY = auto()
@@ -24,6 +23,7 @@ class SensorManager:
     """
     def __init__(self, picarx_instance, emergency_callback=None):
         self.px = picarx_instance
+        self.px.set_cliff_reference([200, 200, 200])
         self.emergency_callback = emergency_callback
         
         # Emergency states
@@ -154,17 +154,19 @@ class SensorManager:
         # Check for obstacles if collision avoidance is enabled
         if self.collision_avoidance_enabled and self.ultrasonic_distance < self.collision_threshold:
             # If moving forward and obstacle in front
-            if self.current_speed > 0:
-                return EmergencyState.COLLISION_FRONT
-            # If moving backward and obstacle behind
-            elif self.current_speed < 0:
-                return EmergencyState.COLLISION_REAR
+            return EmergencyState.COLLISION_FRONT
         
         # Check for edges if edge detection is enabled
         if self.edge_detection_enabled:
-            # Simple edge detection logic: if all line sensors read low values,
-            # we might be approaching an edge
-            if all(sensor < self.edge_detection_threshold for sensor in self.line_sensors):
+            # Enhanced edge detection:
+            # Check if any sensor reads extremely low (cliff/edge) while others don't
+            # This approach is more sensitive to edges than requiring all sensors to be low
+            min_sensor = min(self.line_sensors)
+            max_sensor = max(self.line_sensors)
+            
+            # If we have a significant difference between sensors or all sensors are very low
+            if (max_sensor - min_sensor > 0.5 and min_sensor < self.edge_detection_threshold) or \
+               all(sensor < self.edge_detection_threshold for sensor in self.line_sensors):
                 return EmergencyState.EDGE_DETECTED
         
         # Check for client disconnection if auto-stop is enabled
@@ -191,20 +193,33 @@ class SensorManager:
             self._last_emergency_time = time.time()
             
             # Take emergency action based on the type
-            if emergency in [EmergencyState.COLLISION_FRONT, EmergencyState.EDGE_DETECTED]:
-                # Stop and back up slightly
+            if emergency == EmergencyState.COLLISION_FRONT:
+                # Calculate safe distance to back up (threshold + 5cm)
+                safe_distance = self.collision_threshold + 5
+                # Stop immediately
+                self.px.forward(0)
+                await asyncio.sleep(0.1)
+                
+                # Start backing up at consistent speed
+                self.px.backward(30)
+                
+                # Continue backing up until we reach safe distance
+                start_time = time.time()
+                max_backup_time = 3.0  # Safety timeout
+                
+                while (self.ultrasonic_distance < safe_distance and 
+                      (time.time() - start_time) < max_backup_time):
+                    await asyncio.sleep(0.1)
+                    
+                # Stop after reaching safe distance or timeout
+                self.px.forward(0)
+                
+            elif emergency == EmergencyState.EDGE_DETECTED:
+                # For edge detection, stop then back up a fixed amount
                 self.px.forward(0)
                 await asyncio.sleep(0.1)
                 self.px.backward(30)
-                await asyncio.sleep(0.5)
-                self.px.forward(0)
-                
-            elif emergency == EmergencyState.COLLISION_REAR:
-                # Stop and move forward slightly
-                self.px.forward(0)
-                await asyncio.sleep(0.1)
-                self.px.forward(30)
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)  # Back up for a second
                 self.px.forward(0)
                 
             elif emergency == EmergencyState.CLIENT_DISCONNECTED:
@@ -223,7 +238,7 @@ class SensorManager:
     async def _clear_emergency(self):
         """Clear current emergency state if conditions are safe"""
         # Only clear specific emergencies when conditions are safe
-        if self.current_emergency in [EmergencyState.COLLISION_FRONT, EmergencyState.COLLISION_REAR]:
+        if self.current_emergency in [EmergencyState.COLLISION_FRONT]:
             if self.ultrasonic_distance > self.collision_threshold + 10:  # Add buffer
                 self.emergency_active = False
                 logger.info(f"Emergency cleared: {self.current_emergency}")
@@ -276,15 +291,9 @@ class SensorManager:
             # Different emergency types need different handling
             if self.current_emergency == EmergencyState.COLLISION_FRONT:
                 # For front collision, only allow backward motion
-                if speed >= 0 or time_in_emergency < 1.0:
+                if time_in_emergency < 1.0:
                     return -0.2, turn_angle  # Force small backup
                 return min(speed, 0), turn_angle  # Allow only backward motion
-                
-            elif self.current_emergency == EmergencyState.COLLISION_REAR:
-                # For rear collision, only allow forward motion
-                if speed <= 0 or time_in_emergency < 1.0:
-                    return 0.2, turn_angle  # Force small forward movement
-                return max(speed, 0), turn_angle  # Allow only forward motion
                 
             elif self.current_emergency == EmergencyState.EDGE_DETECTED:
                 # For edge detection, force backup
