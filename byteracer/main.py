@@ -71,6 +71,11 @@ class ByteRacer:
         # Load settings from config
         await self.apply_config_settings()
         
+        # Start periodic sensor data task immediately
+        logging.info("Starting periodic sensor data task")
+        self.periodic_task = asyncio.create_task(self.periodic_tasks())
+        logging.info(f"Periodic task created: {self.periodic_task}")
+        
         # Start TTS introduction
         await self.tts_manager.say("ByteRacer robot controller started successfully", priority=1)
         
