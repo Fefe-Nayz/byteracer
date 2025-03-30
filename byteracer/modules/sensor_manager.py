@@ -158,15 +158,9 @@ class SensorManager:
         
         # Check for edges if edge detection is enabled
         if self.edge_detection_enabled:
-            # Enhanced edge detection:
-            # Check if any sensor reads extremely low (cliff/edge) while others don't
-            # This approach is more sensitive to edges than requiring all sensors to be low
-            min_sensor = min(self.line_sensors)
-            max_sensor = max(self.line_sensors)
-            
-            # If we have a significant difference between sensors or all sensors are very low
-            if (max_sensor - min_sensor > 0.5 and min_sensor < self.edge_detection_threshold) or \
-               all(sensor < self.edge_detection_threshold for sensor in self.line_sensors):
+            # Simple edge detection logic: if all line sensors read low values,
+            # we might be approaching an edge
+            if self.px.get_cliff_status(self.line_sensors):
                 return EmergencyState.EDGE_DETECTED
         
         # Check for client disconnection if auto-stop is enabled
