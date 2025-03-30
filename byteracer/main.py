@@ -242,6 +242,9 @@ class ByteRacer:
         try:
             data = json.loads(message)
             
+            # Log all received message types for debugging
+            logging.debug(f"Received message type: {data['name']}")
+            
             if data["name"] == "welcome":
                 # Handle welcome message
                 logging.info(f"Received welcome message, client ID: {data['data']['clientId']}")
@@ -259,6 +262,17 @@ class ByteRacer:
                 await self.send_sensor_data_to_client()
                 await self.send_camera_status_to_client()
             
+            elif data["name"] == "client_register":
+                # Also set client_connected when we receive a register message
+                logging.info(f"Received client register message, type: {data['data'].get('type', 'unknown')}")
+                self.client_connected = True
+                self.sensor_manager.register_client_connection()
+                self.last_activity_time = time.time()
+                
+                # Send initial data
+                await self.send_sensor_data_to_client()
+                await self.send_camera_status_to_client()
+            
             elif data["name"] == "gamepad_input":
                 # Handle gamepad input
                 await self.handle_gamepad_input(data["data"])
@@ -266,6 +280,11 @@ class ByteRacer:
                 # Update client activity time for safety monitoring
                 self.sensor_manager.register_client_input()
                 self.last_activity_time = time.time()
+                
+                # Ensure client is marked as connected when we receive input
+                if not self.client_connected:
+                    logging.info("Received gamepad input from client, marking as connected")
+                    self.client_connected = True
             
             elif data["name"] == "robot_command":
                 # Handle robot commands
