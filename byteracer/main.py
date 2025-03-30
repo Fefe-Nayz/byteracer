@@ -71,21 +71,19 @@ class ByteRacer:
         # Load settings from config
         await self.apply_config_settings()
         
-        # Start periodic sensor data task immediately
-        logging.info("Starting periodic sensor data task")
-        self.periodic_task = asyncio.create_task(self.periodic_tasks())
-        logging.info(f"Periodic task created: {self.periodic_task}")
-        
         # Start TTS introduction
         await self.tts_manager.say("ByteRacer robot controller started successfully", priority=1)
         
         # Start IP announcement if no client is connected
         self.ip_speaking_task = asyncio.create_task(self.announce_ip_periodically())
         
-        # Connect to WebSocket server
+        # Connect to WebSocket server in a separate task so it doesn't block
         url = f"ws://{SERVER_HOST}/ws"
         logging.info(f"Connecting to WebSocket server at {url}")
-        await self.connect_to_websocket(url)
+        self.websocket_task = asyncio.create_task(self.connect_to_websocket(url))
+        
+        # Return so other code can run
+        return
 
     async def stop(self):
         """Stop all services and prepare for shutdown"""

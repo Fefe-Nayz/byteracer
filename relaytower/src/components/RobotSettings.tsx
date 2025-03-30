@@ -60,6 +60,8 @@ export default function RobotSettings() {
       
       // Update the specific setting
       updated[category][key] = value;
+
+      console.log("Updated settings:", updated);
       
       return updated;
     });
