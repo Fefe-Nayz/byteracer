@@ -163,7 +163,7 @@ class ByteRacer:
         try:
             while not self.client_connected:
                 ip_address = self.get_ip()
-                port = SERVER_HOST.split(":")[1] if ":" in SERVER_HOST else "3000"
+                port = "3000"
                 
                 # Speak the IP address
                 await self.tts_manager.say(f"My IP address is {ip_address}. Connect to {ip_address} port {port}", priority=0)
@@ -372,13 +372,6 @@ class ByteRacer:
         
         # Update driving sounds
         self.sound_manager.update_driving_sounds(speed_value, turn_value, acceleration)
-        
-        # Handle the "use" button for custom sounds
-        if use_button and not getattr(self, 'previous_use_state', False):
-            self.sound_manager.play_custom_sound('fart')
-        
-        # Save previous state
-        self.previous_use_state = use_button
         
         # Pass inputs through sensor manager to handle safety overrides
         speed_value, turn_value, emergency = self.sensor_manager.update_motion(speed_value, turn_value)

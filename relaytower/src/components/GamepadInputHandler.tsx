@@ -1,7 +1,7 @@
 "use client";
 import { useGamepadContext } from "@/contexts/GamepadContext";
 import { useWebSocket } from "@/contexts/WebSocketContext";
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { ActionKey, ActionInfo } from "@/hooks/useGamepad";
 
 // Type for gamepad state values
@@ -17,7 +17,25 @@ export default function GamepadInputHandler() {
     ACTIONS,
   } = useGamepadContext();
 
-  const { status, sendGamepadState } = useWebSocket();
+  const { status, sendGamepadState, playSound } = useWebSocket();
+  const [selectedSound, setSelectedSound] = useState<string>("fart");
+  const [lastUseState, setLastUseState] = useState<boolean>(false);
+
+  // Track whether the "use" button was previously pressed
+  const useButtonRef = useRef<boolean>(false);
+  
+  // Listen for sound selection updates from SoundEffects component
+  useEffect(() => {
+    const handleSoundUpdate = (event: CustomEvent) => {
+      setSelectedSound(event.detail.selectedSound);
+    };
+    
+    window.addEventListener("sound:selected-update", handleSoundUpdate as EventListener);
+    
+    return () => {
+      window.removeEventListener("sound:selected-update", handleSoundUpdate as EventListener);
+    };
+  }, []);
 
   // Store function references in refs to avoid dependency issues
   const functionsRef = useRef({
@@ -126,6 +144,23 @@ export default function GamepadInputHandler() {
     }
   }, [mappings]);
 
+  // Check for "use" button press and trigger sound playback
+  useEffect(() => {
+    if (status !== "connected" || !selectedGamepadId) return;
+    
+    // Check if the "use" button state changed from not pressed to pressed
+    const useButtonActive = isActionActive("use");
+    
+    if (useButtonActive && !useButtonRef.current) {
+      // Button just pressed, play the selected sound
+      playSound(selectedSound);
+    }
+    
+    // Update the ref with current state for next comparison
+    useButtonRef.current = useButtonActive;
+    
+  }, [isActionActive, selectedGamepadId, selectedSound, status, playSound]);
+
   // Send gamepad state periodically
   useEffect(() => {
     // Only send data if connected to WebSocket AND have a selected gamepad
@@ -135,12 +170,18 @@ export default function GamepadInputHandler() {
       // Get the comprehensive gamepad state
       const gamepadState = computeGamepadState();
       
+      // Check if the "use" button state changed
+      const currentUseState = isActionActive("use");
+      if (currentUseState !== lastUseState) {
+        setLastUseState(currentUseState);
+      }
+      
       // Send the state via WebSocket
       sendGamepadState(gamepadState);
     }, 50); // Send updates at 20 Hz
 
     return () => clearInterval(interval);
-  }, [status, selectedGamepadId, computeGamepadState, sendGamepadState]);
+  }, [status, selectedGamepadId, computeGamepadState, sendGamepadState, isActionActive, lastUseState]);
 
   // This component doesn't render anything visible
   return null;

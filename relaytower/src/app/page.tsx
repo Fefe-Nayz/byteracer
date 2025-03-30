@@ -51,6 +51,7 @@ function GamepadPage() {
               <GamepadList />
               <WebSocketStatus />
               <RobotControls />
+              <GptIntegration />
             </div>
           </div>
 

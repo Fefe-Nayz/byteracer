@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
 import { Music } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { VolumeX } from "lucide-react";
+import { Gamepad } from "lucide-react";
+import { useLocalStorage } from "@/hooks/useLocalStorage";
 
 export default function SoundEffects() {
   const [isPlaying, setIsPlaying] = useState<string | null>(null);
+  const [selectedSound, setSelectedSound] = useLocalStorage<string>("gamepad-selected-sound", "fart");
   const { status, playSound, settings } = useWebSocket();
   const { toast } = useToast();
   
@@ -28,6 +31,27 @@ export default function SoundEffects() {
     setIsPlaying(null);
   };
   
+  const handleSelectSound = (sound: string) => {
+    setSelectedSound(sound);
+    
+    // Show toast notification
+    toast({
+      title: "Quick Sound Selected",
+      description: `"${sound}" will play when using gamepad action button`,
+      duration: 2000,
+    });
+  };
+  
+  // Expose selected sound for GamepadInputHandler through window event
+  useEffect(() => {
+    // Create custom event to share selected sound with GamepadInputHandler
+    window.dispatchEvent(
+      new CustomEvent("sound:selected-update", {
+        detail: { selectedSound },
+      })
+    );
+  }, [selectedSound]);
+  
   // Define available sound effects
   const soundEffects = [
     { id: "fart", name: "Fart", icon: "💨" },
@@ -44,9 +68,15 @@ export default function SoundEffects() {
   
   return (
     <Card className="p-4">
-      <div className="flex items-center space-x-2 mb-3">
-        <Music className="h-5 w-5" />
-        <h3 className="font-bold">Sound Effects</h3>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-2">
+          <Music className="h-5 w-5" />
+          <h3 className="font-bold">Sound Effects</h3>
+        </div>
+        <div className="text-xs flex items-center">
+          <Gamepad className="h-4 w-4 mr-1" />
+          <span>Quick Control: {selectedSound}</span>
+        </div>
       </div>
       
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -55,15 +85,29 @@ export default function SoundEffects() {
             key={sound.id}
             variant="outline"
             onClick={() => handlePlaySound(sound.id)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              handleSelectSound(sound.id);
+              return false;
+            }}
             disabled={status !== "connected" || !soundEnabled }
-            className={`h-auto py-3 ${isPlaying === sound.id ? 'bg-primary/20' : ''}`}
+            className={`h-auto py-3 relative ${isPlaying === sound.id ? 'bg-primary/20' : ''} ${selectedSound === sound.id ? 'border-2 border-primary' : ''}`}
           >
             <div className="flex flex-col items-center">
               <span className="text-xl mb-1">{sound.icon}</span>
               <span className="text-xs">{sound.name}</span>
+              {selectedSound === sound.id && (
+                <span className="absolute top-0 right-0">
+                  <Gamepad className="h-3 w-3 text-primary" />
+                </span>
+              )}
             </div>
           </Button>
         ))}
+      </div>
+      
+      <div className="mt-3 text-xs text-muted-foreground">
+        <p>Right-click to set as gamepad quick sound</p>
       </div>
       
       {!soundEnabled && status === "connected" && (
