@@ -454,9 +454,14 @@ class ByteRacer:
             if "tts_enabled" in sound:
                 self.config_manager.set("sound.tts_enabled", sound["tts_enabled"])
                 self.tts_manager.set_enabled(sound["tts_enabled"])
-            
+
             if "tts_volume" in sound:
                 self.config_manager.set("sound.tts_volume", sound["tts_volume"])
+                self.tts_manager.set_volume(sound["tts_volume"])
+            
+            if "tts_language" in sound:
+                self.config_manager.set("sound.tts_language", sound["tts_language"])
+                self.tts_manager.set_language(sound["tts_language"])
         
         if "camera" in settings:
             camera = settings["camera"]
@@ -469,6 +474,14 @@ class ByteRacer:
             if "hflip" in camera:
                 self.config_manager.set("camera.hflip", camera["hflip"])
                 restart_needed |= self.camera_manager.update_settings(hflip=camera["hflip"])
+
+            if "local_display" in camera:
+                self.config_manager.set("camera.local_display", camera["local_display"])
+                restart_needed |= self.camera_manager.update_settings(local=camera["local_display"])
+
+            if "web_display" in camera:
+                self.config_manager.set("camera.web_display", camera["web_display"])
+                restart_needed |= self.camera_manager.update_settings(web=camera["web_display"])
             
             if restart_needed:
                 await self.camera_manager.restart()
@@ -478,14 +491,26 @@ class ByteRacer:
             if "collision_avoidance" in safety:
                 self.config_manager.set("safety.collision_avoidance", safety["collision_avoidance"])
                 self.sensor_manager.set_collision_avoidance(safety["collision_avoidance"])
+
+            if "collision_threshold" in safety:
+                self.config_manager.set("safety.collision_threshold", safety["collision_threshold"])
+                self.sensor_manager.collision_threshold = safety["collision_threshold"]
             
             if "edge_detection" in safety:
                 self.config_manager.set("safety.edge_detection", safety["edge_detection"])
                 self.sensor_manager.set_edge_detection(safety["edge_detection"])
+
+            if "edge_threshold" in safety:
+                self.config_manager.set("safety.edge_threshold", safety["edge_threshold"])
+                self.sensor_manager.edge_detection_threshold = safety["edge_threshold"]
             
             if "auto_stop" in safety:
                 self.config_manager.set("safety.auto_stop", safety["auto_stop"])
                 self.sensor_manager.set_auto_stop(safety["auto_stop"])
+
+            if "client_timeout" in safety:
+                self.config_manager.set("safety.client_timeout", safety["client_timeout"])
+                self.sensor_manager.client_timeout = safety["client_timeout"]
         
         if "modes" in settings:
             modes = settings["modes"]
@@ -496,6 +521,35 @@ class ByteRacer:
             if "circuit_mode_enabled" in modes:
                 self.config_manager.set("modes.circuit_mode_enabled", modes["circuit_mode_enabled"])
                 self.sensor_manager.set_circuit_mode(modes["circuit_mode_enabled"])
+
+            if "demo_mode_enabled" in modes:
+                self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])
+                self.sensor_manager.set_demo_mode(modes["demo_mode_enabled"])
+
+        if "drive" in settings:
+            drive = settings["drive"]
+            if "max_speed" in drive:
+                self.config_manager.set("drive.max_speed", drive["max_speed"])
+            
+            if "max_turn_angle" in drive:
+                self.config_manager.set("drive.max_turn_angle", drive["max_turn_angle"])
+
+            if "acceleration_factor" in drive:
+                self.config_manager.set("drive.acceleration_factor", drive["acceleration_factor"])
+
+        if "network" in settings:
+            network = settings["network"]
+            if "mode" in network:
+                self.config_manager.set("network.mode", network["mode"])
+            
+            if "ap_name" in network:
+                self.config_manager.set("network.ap_name", network["ap_name"])
+            
+            if "ap_password" in network:
+                self.config_manager.set("network.ap_password", network["ap_password"])
+
+            if "known_networks" in network:
+                self.config_manager.set("network.known_networks", network["known_networks"])
         
         # Save settings
         await self.save_config_settings()

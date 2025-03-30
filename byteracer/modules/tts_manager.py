@@ -3,6 +3,9 @@ import threading
 from robot_hat import TTS
 import time
 import logging
+import os
+import uuid
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -11,16 +14,18 @@ class TTSManager:
     Manages Text-to-Speech functionality with asynchronous operation.
     Prevents TTS operations from blocking the main program flow.
     """
-    def __init__(self, lang="en-US", enabled=True):
+    def __init__(self, lang="en-US", enabled=True, volume=80):
         self.lang = lang
         self.enabled = enabled
+        self.volume = volume
         self._queue = asyncio.Queue()
         self._speaking = False
         self._current_priority = 0
         self._lock = threading.Lock()
         self._running = True
         self._task = None
-        logger.info("TTS Manager initialized")
+        self._clear_temp_files()
+        logger.info(f"TTS Manager initialized (lang={lang}, volume={volume})")
     
     async def start(self):
         """Start the TTS processing loop"""
@@ -95,21 +100,84 @@ class TTSManager:
     def _speak(self, text):
         """Execute the actual TTS operation"""
         try:
-            logger.debug(f"Speaking: '{text}'")
-            # Create a fresh TTS instance
-            tts = TTS()
+            logger.debug(f"Speaking: '{text}' (volume: {self.volume})")
             
-            # Small delay to ensure previous TTS operations are completed
-            time.sleep(0.1)
+            # Generate a unique temp file name for this specific TTS operation
+            temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
             
-            # Set language and speak
-            tts.lang(self.lang)
-            tts.say(text)
+            # Generate the TTS wave file - without background execution
+            pico_cmd = f'pico2wave -l {self.lang} -w {temp_file} "{text}"'
+            
+            # Execute command and wait for it to complete
+            pico_process = subprocess.run(pico_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if pico_process.returncode != 0:
+                logger.error(f"TTS pico2wave error: {pico_process.stderr.decode()}")
+                return False
+            
+            # Apply volume adjustment if needed
+            if self.volume != 100:
+                # Calculate volume multiplier (0-1 range for sox)
+                vol_multiplier = max(0.0, min(1.0, self.volume / 100.0))
+                
+                # Create a new temporary file with adjusted volume
+                volume_file = f"/tmp/tts_vol_{uuid.uuid4().hex}.wav"
+                
+                # Use sox to adjust volume (create a new file instead of playing directly)
+                vol_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier}'
+                logger.debug(f"Adjusting volume with sox: multiplier {vol_multiplier}")
+                
+                vol_process = subprocess.run(vol_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if vol_process.returncode != 0:
+                    logger.error(f"Volume adjustment error: {vol_process.stderr.decode()}")
+                    # If volume adjustment fails, fall back to the original file
+                    play_cmd = f'aplay {temp_file}'
+                else:
+                    # Play the volume-adjusted file and then clean it up
+                    play_cmd = f'aplay {volume_file}'
+                    
+                    # We'll clean up the original temp file now, volume file later
+                    try:
+                        os.remove(temp_file)
+                        temp_file = volume_file  # For cleanup in finally block
+                    except Exception as e:
+                        logger.warning(f"Failed to remove original TTS file: {e}")
+            else:
+                # Just play the original file at full volume
+                play_cmd = f'aplay {temp_file}'
+                logger.debug("Playing with standard aplay (full volume)")
+            
+            # Play the audio file
+            play_process = subprocess.run(play_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if play_process.returncode != 0:
+                logger.error(f"Audio playback error: {play_process.stderr.decode()}")
             
             return True
         except Exception as e:
             logger.error(f"TTS error while speaking '{text}': {e}")
             return False
+        finally:
+            # Clean up temp files
+            try:
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+            except Exception as e:
+                logger.warning(f"Failed to remove temporary TTS file: {e}")
+    
+    def _clear_temp_files(self):
+        """Clear any temporary TTS files that might be left over from previous runs"""
+        try:
+            # Clear default temp file that might be used by startup.sh
+            if os.path.exists("/tmp/tts.wav"):
+                os.remove("/tmp/tts.wav")
+                logger.debug("Removed default TTS temp file")
+            
+            # Clear any of our own temp files that may be left over
+            for filename in os.listdir("/tmp"):
+                if filename.startswith("tts_") and filename.endswith(".wav"):
+                    os.remove(os.path.join("/tmp", filename))
+                    logger.debug(f"Removed leftover TTS temp file: {filename}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up TTS temp files: {e}")
     
     def is_speaking(self):
         """Check if TTS is currently speaking"""
@@ -163,3 +231,19 @@ class TTSManager:
         """Set the TTS language"""
         self.lang = lang
         logger.info(f"TTS language set to {lang}")
+        
+    def set_volume(self, volume):
+        """
+        Set the TTS volume level
+        
+        Args:
+            volume (int): Volume level from 0 (mute) to 100 (max)
+        """
+        # Ensure volume is between 0 and 100
+        self.volume = max(0, min(100, volume))
+        logger.info(f"TTS volume set to {self.volume}%")
+        return self.volume
+        
+    def get_volume(self):
+        """Get the current TTS volume level"""
+        return self.volume

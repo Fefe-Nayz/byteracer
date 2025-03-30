@@ -34,6 +34,7 @@ class ConfigManager:
                 "enabled": True,
                 "volume": 80,
                 "tts_enabled": True,
+                "tts_volume": 80,
                 "tts_language": "en-US",
             },
             
@@ -321,6 +322,7 @@ class ConfigManager:
                 "enabled": True,
                 "volume": 80,
                 "tts_enabled": True,
+                "tts_volume": 80,
                 "tts_language": "en-US",
             },
             

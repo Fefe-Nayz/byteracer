@@ -22,6 +22,7 @@ export default function RobotSettings() {
   useEffect(() => {
     if (settings) {
       setLocalSettings(settings);
+      console.log("Received settings:", settings);
     }
   }, [settings]);
   
@@ -139,6 +140,23 @@ export default function RobotSettings() {
                 checked={localSettings.sound.tts_enabled}
                 onCheckedChange={(checked) => 
                   updateSetting("sound", "tts_enabled", checked)
+                }
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs">
+                <span>TTS Volume</span>
+                <span>{localSettings.sound.tts_volume}%</span>
+              </div>
+              <Slider 
+                value={[localSettings.sound.tts_volume]}
+                min={0}
+                max={100}
+                step={1}
+                disabled={!localSettings.sound.tts_enabled}
+                onValueChange={(value) => 
+                  updateSetting("sound", "tts_volume", value[0])
                 }
               />
             </div>

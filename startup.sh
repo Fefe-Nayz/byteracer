@@ -1,18 +1,17 @@
 #!/bin/bash
-# Modified startup script WITHOUT TTS notifications for troubleshooting
+# Startup script with improved TTS functionality that prevents conflicts
 
 # Exit if any command fails
 set -e
 
 # Project paths
 BYTERACER_PATH="/home/pi/ByteRacer"
-# TTS_SCRIPT commented out for testing
-# TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
+TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
 
-# Function to speak with TTS - temporarily disabled
+# Function to speak with TTS
 speak() {
-    # Disabled for troubleshooting
-    echo "TTS disabled for troubleshooting: $1"
+    # Use the improved speak.py script with unique temp files
+    python3 "${TTS_SCRIPT}" "$1"
 }
 
 echo "=== ByteRacer Startup Script ==="
@@ -144,6 +143,10 @@ fi
 
 # Create necessary directories
 mkdir -p "$FOLDER_PATH/byteracer/logs" "$FOLDER_PATH/byteracer/config" 2>/dev/null || true
+
+# Clean up any leftover TTS temporary files before launching services
+echo "Cleaning up temporary TTS files..."
+rm -f /tmp/tts.wav /tmp/tts_*.wav
 
 # Launch the three services in detached screen sessions.
 echo "Starting services in screen sessions..."
