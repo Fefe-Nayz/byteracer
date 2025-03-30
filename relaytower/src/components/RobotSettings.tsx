@@ -141,23 +141,6 @@ export default function RobotSettings() {
               />
             </div>
             
-            <div className="space-y-2">
-              <div className="flex justify-between text-xs">
-                <span>TTS Volume</span>
-                <span>{localSettings.sound.tts_volume}%</span>
-              </div>
-              <Slider 
-                value={[localSettings.sound.tts_volume]}
-                min={0}
-                max={100}
-                step={1}
-                disabled={!localSettings.sound.tts_enabled}
-                onValueChange={(value) => 
-                  updateSetting("sound", "tts_volume", value[0])
-                }
-              />
-            </div>
-            
             <div>
               <div className="mb-1 text-xs">TTS Language</div>
               <Select 

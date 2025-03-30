@@ -128,7 +128,6 @@ class ByteRacer:
         
         # Apply TTS settings
         self.tts_manager.set_enabled(settings["sound"]["tts_enabled"])
-        self.tts_manager.set_volume(settings["sound"]["tts_volume"])
         self.tts_manager.set_language(settings["sound"]["tts_language"])
         
         # Apply camera settings

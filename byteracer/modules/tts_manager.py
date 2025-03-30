@@ -11,40 +11,16 @@ class TTSManager:
     Manages Text-to-Speech functionality with asynchronous operation.
     Prevents TTS operations from blocking the main program flow.
     """
-    def __init__(self, lang="en-US", enabled=True, volume=80):
+    def __init__(self, lang="en-US", enabled=True):
+        self.lang = lang
         self.enabled = enabled
-        self.volume = max(0, min(100, volume))  # Ensure volume is 0-100
         self._queue = asyncio.Queue()
         self._speaking = False
         self._current_priority = 0
         self._lock = threading.Lock()
         self._running = True
         self._task = None
-        
-        # Initialize TTS engine
-        self._tts = TTS(engine=TTS.ESPEAK)
-        
-        # Set language safely
-        supported_langs = self._tts.supported_lang()
-        if lang in supported_langs:
-            self.lang = lang
-            self._tts.lang(lang)
-        else:
-            # If requested language not supported, use first available language
-            self.lang = supported_langs[0] if supported_langs else "en-US"
-            logger.warning(f"Requested language '{lang}' not supported. Using '{self.lang}' instead.")
-            try:
-                self._tts.lang(self.lang)
-            except Exception as e:
-                logger.error(f"Error setting initial language: {e}")
-        
-        # Set volume
-        try:
-            self._tts.espeak_params(amp=self.volume * 2)
-        except Exception as e:
-            logger.error(f"Failed to set initial TTS volume: {e}")
-            
-        logger.info(f"TTS Manager initialized with language: {self.lang}, volume: {self.volume}")
+        logger.info("TTS Manager initialized")
     
     async def start(self):
         """Start the TTS processing loop"""
@@ -117,22 +93,25 @@ class TTSManager:
                 await asyncio.sleep(1)  # Avoid tight loop on error
     
     def _speak(self, text):
-        """Execute the actual TTS operation - simplified to match example code"""
+        """Execute the actual TTS operation"""
         try:
             logger.debug(f"Speaking: '{text}'")
-            # Use the single TTS instance instead of creating new ones
-            self._tts.say(text)
+            # Create a fresh TTS instance and explicitly initialize it
+            tts = TTS()
+            
+            # Small delay to ensure previous TTS operations are completed
+            time.sleep(0.1)
+            
+            # Explicitly reset and reinitialize TTS
+            tts.end()  # End any previous TTS operation
+            time.sleep(0.1)
+            tts = TTS()  # Create a completely new instance
+            tts.lang(self.lang)
+            tts.say(text)
+            
             return True
         except Exception as e:
             logger.error(f"TTS error while speaking '{text}': {e}")
-            # If we get an error, try to reset the TTS instance
-            try:
-                self._tts = TTS(engine=TTS.ESPEAK)
-                self._tts.lang(self.lang)
-                # Reapply the current volume setting
-                self._tts.espeak_params(amp=self.volume * 2)
-            except Exception:
-                pass
             return False
     
     def is_speaking(self):
@@ -183,37 +162,7 @@ class TTSManager:
         if not enabled:
             self.clear_queue()
     
-    def set_volume(self, volume):
-        """Set the TTS volume (0-100) and update the underlying TTS engine if possible"""
-        self.volume = max(0, min(100, volume))
-        logger.info(f"TTS volume set to {self.volume}")
-        # If using an engine that supports espeak parameters, update the amplitude
-        if hasattr(self._tts, 'espeak_params'):
-            # Multiply by 2 to convert 0-100 to 0-200
-            try:
-                self._tts.espeak_params(amp=self.volume * 2)
-                logger.debug(f"Updated TTS engine amplitude to {self.volume * 2}")
-            except Exception as e:
-                logger.error(f"Failed to update TTS volume: {e}")
-        else:
-            logger.warning("Current TTS engine does not support volume adjustment.")
-    
     def set_language(self, lang):
         """Set the TTS language"""
-        try:
-            # Check if language is supported first
-            supported_langs = self._tts.supported_lang()
-            if lang not in supported_langs:
-                logger.error(f"Language '{lang}' is not supported. Supported languages: {', '.join(supported_langs)}")
-                return False
-            
-            # Set language with proper error handling - ensure it's passed as a plain string, not a tuple
-            self.lang = lang
-            with self._lock:
-                # Pass the language as a plain string to avoid the tuple issue
-                self._tts.lang(lang)
-            logger.info(f"TTS language set to {lang}")
-            return True
-        except Exception as e:
-            logger.error(f"Error setting TTS language to {lang}: {e}")
-            return False
+        self.lang = lang
+        logger.info(f"TTS language set to {lang}")
