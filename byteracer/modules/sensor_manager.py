@@ -209,10 +209,7 @@ class SensorManager:
                 self.px.forward(0)
                 
             elif emergency == EmergencyState.EDGE_DETECTED:
-                # For edge detection, stop then back up a fixed amount
-                self.px.forward(0)
-                await asyncio.sleep(0.1)
-                self.px.backward(30)
+                self.px.backward(100)
                 await asyncio.sleep(1.0)  # Back up for a second
                 self.px.forward(0)
                 
