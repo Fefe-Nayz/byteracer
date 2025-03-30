@@ -458,7 +458,6 @@ class ByteRacer:
             
             if "tts_volume" in sound:
                 self.config_manager.set("sound.tts_volume", sound["tts_volume"])
-                self.tts_manager.set_volume(sound["tts_volume"])
         
         if "camera" in settings:
             camera = settings["camera"]
