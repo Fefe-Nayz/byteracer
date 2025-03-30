@@ -150,21 +150,22 @@ mkdir -p "$FOLDER_PATH/byteracer/logs" "$FOLDER_PATH/byteracer/config" 2>/dev/nu
 # Launch the three services in detached screen sessions.
 echo "Starting services in screen sessions..."
 speak "Starting ByteRacer services."
-pkill -f "python3.*speak.py" || true
 
 # Start eaglecontrol service.
-# speak "Starting WebSocket service."
+speak "Starting WebSocket service."
 screen -dmS eaglecontrol bash -c "cd $FOLDER_PATH/eaglecontrol && bun run start; exec bash"
 
 # Start relaytower service.
-# speak "Starting web server."
+speak "Starting web server."
 screen -dmS relaytower bash -c "cd $FOLDER_PATH/relaytower && bun run start; exec bash"
 
 # Start byteracer service.
-# speak "Starting robot controller."
+speak "Starting robot controller."
 screen -dmS byteracer bash -c "cd $FOLDER_PATH/byteracer && sudo python3 main.py; exec bash"
 
 echo "All services have been started."
-# speak "ByteRacer startup complete. Ready to drive."
+speak "ByteRacer startup complete. Ready to drive."
+
+pkill -f "python3.*speak.py" || true
 
 exit 0

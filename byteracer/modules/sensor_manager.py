@@ -24,7 +24,6 @@ class SensorManager:
     """
     def __init__(self, picarx_instance, emergency_callback=None):
         self.px = picarx_instance
-        self.px.set_cliff_reference([200, 200, 200])
         self.emergency_callback = emergency_callback
         
         # Emergency states
@@ -165,7 +164,7 @@ class SensorManager:
         if self.edge_detection_enabled:
             # Simple edge detection logic: if all line sensors read low values,
             # we might be approaching an edge
-            if self.px.get_cliff_status(self.line_sensors):
+            if all(sensor < self.edge_detection_threshold for sensor in self.line_sensors):
                 return EmergencyState.EDGE_DETECTED
         
         # Check for client disconnection if auto-stop is enabled
@@ -191,25 +190,22 @@ class SensorManager:
             self.emergency_active = True
             self._last_emergency_time = time.time()
             
-            # Force stop any current motion
-            self.px.forward(0)
-            await asyncio.sleep(0.1)
-            
             # Take emergency action based on the type
             if emergency in [EmergencyState.COLLISION_FRONT, EmergencyState.EDGE_DETECTED]:
-                # Override speed control temporarily
-                self._emergency_override = True
+                # Stop and back up slightly
+                self.px.forward(0)
+                await asyncio.sleep(0.1)
                 self.px.backward(30)
                 await asyncio.sleep(0.5)
                 self.px.forward(0)
-                self._emergency_override = False
                 
             elif emergency == EmergencyState.COLLISION_REAR:
-                self._emergency_override = True
+                # Stop and move forward slightly
+                self.px.forward(0)
+                await asyncio.sleep(0.1)
                 self.px.forward(30)
                 await asyncio.sleep(0.5)
                 self.px.forward(0)
-                self._emergency_override = False
                 
             elif emergency == EmergencyState.CLIENT_DISCONNECTED:
                 # Just stop all motion
@@ -255,7 +251,16 @@ class SensorManager:
             pass
     
     def update_motion(self, speed, turn_angle):
-        """Update the current motion values with safety checks"""
+        """
+        Update the current motion values.
+        
+        Args:
+            speed (float): Speed value (-1.0 to 1.0)
+            turn_angle (float): Turn angle (-1.0 to 1.0)
+            
+        Returns:
+            tuple: Modified (speed, turn_angle) if emergency is active
+        """
         # Register that we received a command
         self.last_input_time = time.time()
         
@@ -263,20 +268,41 @@ class SensorManager:
         self.current_speed = speed
         self.current_turn = turn_angle
         
-        # If emergency override is active, ignore input speed
-        if hasattr(self, '_emergency_override') and self._emergency_override:
-            return self.current_speed, turn_angle
-        
-        # If emergency is active, override motion commands
+        # If emergency is active, override motion commands more strictly
         if self.emergency_active:
-            if self.current_emergency in [
-                EmergencyState.COLLISION_FRONT, 
-                EmergencyState.COLLISION_REAR,
-                EmergencyState.EDGE_DETECTED,
+            now = time.time()
+            time_in_emergency = now - self._last_emergency_time
+            
+            # Different emergency types need different handling
+            if self.current_emergency == EmergencyState.COLLISION_FRONT:
+                # For front collision, only allow backward motion
+                if speed >= 0 or time_in_emergency < 1.0:
+                    return -0.2, turn_angle  # Force small backup
+                return min(speed, 0), turn_angle  # Allow only backward motion
+                
+            elif self.current_emergency == EmergencyState.COLLISION_REAR:
+                # For rear collision, only allow forward motion
+                if speed <= 0 or time_in_emergency < 1.0:
+                    return 0.2, turn_angle  # Force small forward movement
+                return max(speed, 0), turn_angle  # Allow only forward motion
+                
+            elif self.current_emergency == EmergencyState.EDGE_DETECTED:
+                # For edge detection, force backup
+                if time_in_emergency < 1.5:
+                    return -0.2, turn_angle  # Force backup
+                else:
+                    return 0, turn_angle  # Then stop
+                    
+            elif self.current_emergency in [
                 EmergencyState.CLIENT_DISCONNECTED,
                 EmergencyState.MANUAL_STOP
             ]:
-                return 0, turn_angle  # Stop but keep steering
+                # Complete stop for these emergencies
+                return 0, turn_angle
+                
+            elif self.current_emergency == EmergencyState.LOW_BATTERY:
+                # For low battery, still allow motion but at reduced power
+                return speed * 0.5, turn_angle
         
         return speed, turn_angle
     

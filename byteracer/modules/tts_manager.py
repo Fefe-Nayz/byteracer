@@ -11,9 +11,8 @@ class TTSManager:
     Manages Text-to-Speech functionality with asynchronous operation.
     Prevents TTS operations from blocking the main program flow.
     """
-    def __init__(self, lang="en-US", enabled=True, volume=100):
-        self.tts = TTS()
-        self.tts.lang(lang)
+    def __init__(self, lang="en-US", enabled=True, volume=80):
+        self.lang = lang
         self.enabled = enabled
         self.volume = volume
         self._queue = asyncio.Queue()
@@ -98,7 +97,10 @@ class TTSManager:
         """Execute the actual TTS operation"""
         try:
             logger.debug(f"Speaking: '{text}'")
-            self.tts.say(text)
+            # Create a new TTS instance each time to avoid state issues
+            tts = TTS()
+            tts.lang(self.lang)
+            tts.say(text)
             return True
         except Exception as e:
             logger.error(f"TTS error while speaking '{text}': {e}")
@@ -159,5 +161,5 @@ class TTSManager:
     
     def set_language(self, lang):
         """Set the TTS language"""
-        self.tts.lang(lang)
+        self.lang = lang
         logger.info(f"TTS language set to {lang}")
