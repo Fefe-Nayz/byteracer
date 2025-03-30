@@ -248,32 +248,33 @@ class ByteRacer:
             logging.debug(f"Received message type: {data['name']}")
             
             if data["name"] == "welcome":
-                # Handle welcome message
-                logging.info(f"Received welcome message, client ID: {data['data']['clientId']}")
-                self.client_connected = True
+                # Handle welcome message from server (not a client connection)
+                logging.info(f"Received welcome message from server, server assigned ID: {data['data']['clientId']}")
                 
-                # Clear any pending IP announcements
-                self.tts_manager.clear_queue(min_priority=1)
-                if self.ip_speaking_task and not self.ip_speaking_task.done():
-                    self.ip_speaking_task.cancel()
+                # This is just the server's welcome, not a client connecting to us
+                # We should NOT stop IP announcements here or set client_connected
                 
-                # Update client connection time for safety monitoring
-                self.sensor_manager.register_client_connection()
-                
-                # Send an initial data update
-                await self.send_sensor_data_to_client()
-                await self.send_camera_status_to_client()
+                # After receiving welcome from server, register as a car
+                await self.register_as_car()
             
             elif data["name"] == "client_register":
-                # Also set client_connected when we receive a register message
-                logging.info(f"Received client register message, type: {data['data'].get('type', 'unknown')}")
-                self.client_connected = True
-                self.sensor_manager.register_client_connection()
-                self.last_activity_time = time.time()
-                
-                # Send initial data
-                await self.send_sensor_data_to_client()
-                await self.send_camera_status_to_client()
+                # Only set client_connected when a controller connects to the server
+                if data["data"].get("type") == "controller":
+                    logging.info(f"Received client register message from controller, client ID: {data['data'].get('id', 'unknown')}")
+                    self.client_connected = True
+                    self.sensor_manager.register_client_connection()
+                    self.last_activity_time = time.time()
+                    
+                    # Now that a controller is connected, clear IP announcements
+                    self.tts_manager.clear_queue(min_priority=1)
+                    if self.ip_speaking_task and not self.ip_speaking_task.done():
+                        self.ip_speaking_task.cancel()
+                    
+                    # Send initial data
+                    await self.send_sensor_data_to_client()
+                    await self.send_camera_status_to_client()
+                else:
+                    logging.info(f"Received client register message, type: {data['data'].get('type', 'unknown')}")
             
             elif data["name"] == "gamepad_input":
                 # Handle gamepad input
@@ -304,7 +305,7 @@ class ByteRacer:
             
             elif data["name"] == "settings_update":
                 # Handle settings update
-                logging.info("Received settings update")
+                logging.info(f'Received settings update request: {data["data"]}')
                 if "settings" in data["data"]:
                     await self.update_settings(data["data"]["settings"])
                     await self.send_command_response({
