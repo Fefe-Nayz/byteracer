@@ -142,6 +142,8 @@ const wsHandlers = {
             else if (type === "controller") controllers.set(client.id, client);
             else viewers.set(client.id, client);
 
+            broadcastToType(message, "car", ws);
+
             console.log(`Client ${client.id} registered as ${type}`);
           }
           break;

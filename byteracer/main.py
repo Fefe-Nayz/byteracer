@@ -255,7 +255,7 @@ class ByteRacer:
                 # We should NOT stop IP announcements here or set client_connected
                 
                 # After receiving welcome from server, register as a car
-                await self.register_as_car()
+                # await self.register_as_car()
             
             elif data["name"] == "client_register":
                 # Only set client_connected when a controller connects to the server
