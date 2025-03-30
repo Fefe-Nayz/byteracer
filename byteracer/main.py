@@ -637,8 +637,8 @@ class ByteRacer:
                     "isCollisionAvoidanceActive": sensor_data["settings"]["collision_avoidance"],
                     "isEdgeDetectionActive": sensor_data["settings"]["edge_detection"],
                     "isAutoStopActive": sensor_data["settings"]["auto_stop"],
-                    "isTrackingActive": sensor_data["settings"]["tracking_enabled"],
-                    "isCircuitModeActive": sensor_data["settings"]["circuit_mode_enabled"],
+                    "isTrackingActive": sensor_data["settings"]["tracking"],
+                    "isCircuitModeActive": sensor_data["settings"]["circuit_mode"],
                     "clientConnected": self.client_connected,
                     "lastClientActivity": int(self.last_activity_time * 1000),  # Convert to milliseconds
                     "speed": sensor_data["speed"],  # Add speed value
