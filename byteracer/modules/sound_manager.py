@@ -70,13 +70,14 @@ class SoundManager:
         logger.info(f"Loaded {len(sound_files)} sounds for category '{category}'")
         return sound_files
     
-    def play_sound(self, sound_type, loop=False):
+    def play_sound(self, sound_type, loop=False, name=None):
         """
         Play a sound of the specified type.
         
         Args:
             sound_type (str): Type of sound to play (acceleration, braking, drift, alerts, custom)
             loop (bool): Whether to loop the sound
+            name (str): Optional specific sound name to play
         """
         if not self.enabled:
             return None
@@ -86,8 +87,17 @@ class SoundManager:
             logger.warning(f"No sounds available for category '{sound_type}'")
             return None
         
-        # Select a random sound from the category
-        sound_file = random.choice(sound_files)
+        # Select a specific sound by name if provided, otherwise choose randomly
+        if name:
+            matching_files = [f for f in sound_files if f.stem == name]
+            if matching_files:
+                sound_file = matching_files[0]
+            else:
+                logger.warning(f"Sound '{name}' not found in category '{sound_type}', using random sound")
+                sound_file = random.choice(sound_files)
+        else:
+            # Select a random sound from the category
+            sound_file = random.choice(sound_files)
         
         with self._lock:
             # Stop previous sound of this type if exists
@@ -202,7 +212,7 @@ class SoundManager:
         """Play a custom sound by name"""
         custom_files = [f for f in self.sounds["custom"] if f.stem == sound_name]
         if custom_files:
-            self.play_sound("custom")
+            self.play_sound("custom", loop=False, name=sound_name)
             return True
         
         logger.warning(f"Custom sound not found: {sound_name}")
