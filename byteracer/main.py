@@ -719,8 +719,15 @@ class ByteRacer:
     
     async def periodic_tasks(self):
         """Run periodic tasks like sensor updates"""
+        logging.info("Starting periodic tasks loop")
+        task_counter = 0
         while True:
             try:
+                task_counter += 1
+                # Log every 10 iterations to avoid excessive logging
+                if task_counter % 10 == 0:
+                    logging.info(f"Periodic tasks running (iteration {task_counter})")
+                
                 # Send sensor data every second if client is connected
                 if self.client_connected:
                     try:
@@ -736,9 +743,10 @@ class ByteRacer:
                 await asyncio.sleep(1)
                 
             except asyncio.CancelledError:
+                logging.info("Periodic tasks cancelled")
                 break
             except Exception as e:
-                logging.error(f"Error in periodic tasks: {e}")
+                logging.error(f"Error in periodic tasks: {e}", exc_info=True)
                 await asyncio.sleep(2)  # Shorter sleep on error
 
 async def main():
@@ -748,8 +756,21 @@ async def main():
         robot = ByteRacer()
         await robot.start()
         
-        # Start periodic task for sending updates
+        # Start periodic task for sending updates and ensure it's running
+        logging.info("Creating periodic task for sensor updates")
         periodic_task = asyncio.create_task(robot.periodic_tasks())
+        
+        # Register task exception callback to detect if it fails
+        def handle_task_exception(task):
+            try:
+                # This will re-raise any exception that occurred in the task
+                task.result()
+            except Exception as e:
+                logging.critical(f"Periodic task failed with error: {e}", exc_info=True)
+                # Restart the task
+                asyncio.create_task(robot.periodic_tasks())
+                
+        periodic_task.add_done_callback(handle_task_exception)
         
         # Wait for keyboard interrupt
         try:
