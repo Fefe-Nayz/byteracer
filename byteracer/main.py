@@ -466,11 +466,6 @@ class ByteRacer:
     async def handle_emergency(self, emergency):
         """Handle emergency situations"""
         logging.warning(f"Emergency callback triggered: {emergency.name}")
-        
-        # Play alert sound immediately
-        self.sound_manager.play_alert("emergency")
-
-        await asyncio.sleep(2.1)
 
         # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
@@ -483,6 +478,9 @@ class ByteRacer:
             await self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2)
         elif emergency == EmergencyState.MANUAL_STOP:
             await self.tts_manager.say("Emergency stop activated.", priority=2)
+
+                # Play alert sound immediately
+        self.sound_manager.play_alert("emergency")
         
         # Send emergency status to client if connected
         await self.send_sensor_data_to_client()
