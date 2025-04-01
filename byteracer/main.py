@@ -436,17 +436,17 @@ class ByteRacer:
         # Play alert sound immediately
         self.sound_manager.play_alert("emergency")
         
-        # Provide feedback via TTS immediately
+        # Provide feedback via TTS immediately - don't use asyncio.create_task
         if emergency == EmergencyState.COLLISION_FRONT:
-            asyncio.create_task(self.tts_manager.say("Emergency. Obstacle detected ahead. Maintaining safe distance.", priority=2))
+            self.tts_manager.say("Emergency. Obstacle detected ahead. Maintaining safe distance.", priority=2)
         elif emergency == EmergencyState.EDGE_DETECTED:
-            asyncio.create_task(self.tts_manager.say("Emergency. Edge detected. Backing up.", priority=2))
+            self.tts_manager.say("Emergency. Edge detected. Backing up.", priority=2)
         elif emergency == EmergencyState.CLIENT_DISCONNECTED:
-            asyncio.create_task(self.tts_manager.say("Emergency stop. Client disconnected.", priority=2))
+            self.tts_manager.say("Emergency stop. Client disconnected.", priority=2)
         elif emergency == EmergencyState.LOW_BATTERY:
-            asyncio.create_task(self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2))
+            self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2)
         elif emergency == EmergencyState.MANUAL_STOP:
-            asyncio.create_task(self.tts_manager.say("Emergency stop activated.", priority=2))
+            self.tts_manager.say("Emergency stop activated.", priority=2)
         
         # Send emergency status to client if connected
         await self.send_sensor_data_to_client()

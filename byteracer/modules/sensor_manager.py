@@ -184,9 +184,10 @@ class SensorManager:
             return EmergencyState.NONE
         
         # Check for obstacles if collision avoidance is enabled
-        if self.collision_avoidance_enabled and self.ultrasonic_distance < self.collision_threshold:
-            # If moving forward and obstacle in front
-            if self.current_speed > 0:
+        if self.collision_avoidance_enabled:
+            # Modified to trigger on close obstacles regardless of motion
+            # This helps respond to objects moving toward a stationary robot
+            if self.ultrasonic_distance < self.collision_threshold:
                 return EmergencyState.COLLISION_FRONT
         
         # Check for edges if edge detection is enabled
@@ -222,35 +223,39 @@ class SensorManager:
             # Take emergency action based on the type
             if emergency == EmergencyState.COLLISION_FRONT:
                 # For collision, we want to maintain a minimum safe distance
-                safe_distance = self.collision_threshold + self.safe_distance_buffer
+                safe_distance = self.collision_threshold + 5  # Use fixed 5cm buffer for better consistency
                 
                 # Stop immediately first
                 self.px.forward(0)
                 await asyncio.sleep(0.1)
                 
-                # Back up gradually until safe distance is reached
+                # Back up continuously until safe distance is reached
+                # This is a single continuous backup motion, not stop-and-go
+                self.px.backward(40)  # Fixed speed for smoother motion
+                
                 while self.emergency_active and self.ultrasonic_distance < safe_distance:
                     # Check if emergency was cleared manually
                     if self.current_emergency != EmergencyState.COLLISION_FRONT:
                         break
                     
-                    # Continue backing up at a moderate speed if user isn't controlling backward motion
-                    if self.current_speed >= 0:  # If user isn't already going backward
-                        self.px.backward(30)
-                    
-                    # Keep updating sensor readings to check distance
+                    # Update sensor readings continuously during backup
                     await self._update_sensor_readings()
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.05)  # Faster checks for more responsive stopping
                 
-                # Stop after reaching safe distance if user isn't controlling motion
-                if self.current_speed == 0:
-                    self.px.forward(0)
+                # Stop after reaching safe distance
+                self.px.forward(0)
+                logger.info(f"Backup complete - Safe distance reached: {self.ultrasonic_distance} cm")
+                
+                # Clear emergency once we've reached a safe distance
+                if self.current_emergency == EmergencyState.COLLISION_FRONT:
+                    self.emergency_active = False
+                    self.current_emergency = EmergencyState.NONE
                 
             elif emergency == EmergencyState.EDGE_DETECTED:
                 # Record when we start backing up
                 self.edge_recovery_start_time = time.time()
                 
-                # Start backing up
+                # Start backing up - continuous motion
                 self.px.backward(50)
                 
                 # Continue backing up until edge is no longer detected plus a small buffer time
@@ -279,10 +284,16 @@ class SensorManager:
                         # Reset the clear time if edge is detected again
                         last_edge_clear_time = 0
                     
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.05)  # Faster checks for more responsive stopping
                 
                 # Stop after reaching safe position
                 self.px.forward(0)
+                logger.info("Edge recovery complete")
+                
+                # Clear emergency
+                if self.current_emergency == EmergencyState.EDGE_DETECTED:
+                    self.emergency_active = False
+                    self.current_emergency = EmergencyState.NONE
                 
             elif emergency == EmergencyState.CLIENT_DISCONNECTED:
                 # Just stop all motion
@@ -298,6 +309,7 @@ class SensorManager:
                 # Just wait for warning interval to pass
                 await asyncio.sleep(self.low_battery_warning_interval)
                 self.emergency_active = False
+                self.current_emergency = EmergencyState.NONE
             
             elif emergency == EmergencyState.MANUAL_STOP:
                 # Manual stop just stops motion and waits for explicit clear
@@ -310,12 +322,17 @@ class SensorManager:
         
         except asyncio.CancelledError:
             logger.info(f"Emergency handling for {emergency.name} was cancelled")
+            # Make sure to stop if we're cancelled
+            self.px.forward(0)
             raise
         except Exception as e:
             logger.error(f"Error in emergency handling for {emergency.name}: {e}")
+            # Make sure to stop on errors
+            self.px.forward(0)
         finally:
             # Only clear the emergency if it hasn't been changed to a different one
-            if self.current_emergency == emergency:
+            # and wasn't already cleared in the handler
+            if self.current_emergency == emergency and self.emergency_active:
                 logger.info(f"Emergency handling completed for: {emergency.name}")
                 self.emergency_active = False
                 self.current_emergency = EmergencyState.NONE
