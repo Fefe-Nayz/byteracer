@@ -397,6 +397,32 @@ export default function RobotSettings() {
                 }
               />
             </div>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm">Enhanced Turning</span>
+                <span className="text-xs text-gray-500">(differential steering)</span>
+              </div>
+              <Switch 
+                checked={localSettings.drive.enhanced_turning}
+                onCheckedChange={(checked) => 
+                  updateSetting("drive", "enhanced_turning", checked)
+                }
+              />
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <span className="text-sm">Turn in Place</span>
+                <span className="text-xs text-gray-500">(rotate on spot when stationary)</span>
+              </div>
+              <Switch 
+                checked={localSettings.drive.turn_in_place}
+                onCheckedChange={(checked) => 
+                  updateSetting("drive", "turn_in_place", checked)
+                }
+              />
+            </div>
           </div>
         </div>
         

@@ -423,11 +423,45 @@ class ByteRacer:
         # Set motor speeds with safety constraints applied
         max_speed = self.config_manager.get("drive.max_speed")
         max_turn = self.config_manager.get("drive.max_turn_angle")
+        enhanced_turning = self.config_manager.get("drive.enhanced_turning")
+        turn_in_place = self.config_manager.get("drive.turn_in_place")
         
-        # Apply motor commands - emergency overrides already applied to speed_value and turn_value
-        self.px.set_motor_speed(1, speed_value * max_speed)  # normal motor
-        self.px.set_motor_speed(2, speed_value * -max_speed)  # reversed motor
-        self.px.set_dir_servo_angle(turn_value * max_turn)
+        # Apply motor commands based on drive settings
+        abs_turn = abs(turn_value)
+        abs_speed = abs(speed_value)
+        turn_direction = 1 if turn_value > 0 else -1 if turn_value < 0 else 0
+        
+        # Check if we should do in-place rotation (when there's turning but no forward/backward motion)
+        if turn_in_place and abs_turn > 0.1 and abs_speed < 0.1:
+            # Turn in place by driving wheels in opposite directions
+            turning_power = turn_value * max_speed
+            self.px.set_motor_speed(1, turning_power)        # Left motor
+            self.px.set_motor_speed(2, turning_power)        # Right motor (same direction - reversed in hardware)
+            self.px.set_dir_servo_angle(0)                   # Center the steering
+        
+        # Otherwise use differential steering if enabled or regular steering if not
+        else:
+            if enhanced_turning and abs_turn > 0.1:
+                # Differential steering: Reduce speed of inner wheel based on turn amount
+                turn_factor = abs_turn * 0.7  # How much to reduce inner wheel speed (max 70% reduction)
+                
+                # Calculate per-wheel speeds
+                if turn_direction > 0:  # Turning right
+                    left_speed = speed_value  # Outer wheel at full speed
+                    right_speed = speed_value * (1 - turn_factor)  # Inner wheel slowed
+                else:  # Turning left or straight
+                    left_speed = speed_value * (1 - (turn_factor if turn_direction < 0 else 0))  # Inner wheel slowed if turning left
+                    right_speed = speed_value  # Outer wheel at full speed
+                
+                # Apply speeds to motors
+                self.px.set_motor_speed(1, left_speed * max_speed)    # Left motor
+                self.px.set_motor_speed(2, -right_speed * max_speed)  # Right motor (reversed in hardware)
+                self.px.set_dir_servo_angle(turn_value * max_turn)    # Still use steering for sharper turns
+            else:
+                # Regular steering (no differential)
+                self.px.set_motor_speed(1, speed_value * max_speed)   # Left motor at full speed
+                self.px.set_motor_speed(2, speed_value * -max_speed)  # Right motor at full speed (reversed)
+                self.px.set_dir_servo_angle(turn_value * max_turn)    # Use steering only
     
     async def handle_emergency(self, emergency):
         """Handle emergency situations"""
@@ -436,17 +470,17 @@ class ByteRacer:
         # Play alert sound immediately
         self.sound_manager.play_alert("emergency")
         
-        # Provide feedback via TTS immediately - don't use asyncio.create_task
+        # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
-            self.tts_manager.say("Emergency. Obstacle detected ahead. Maintaining safe distance.", priority=2)
+            await self.tts_manager.say("Emergency. Obstacle detected ahead. Maintaining safe distance.", priority=2)
         elif emergency == EmergencyState.EDGE_DETECTED:
-            self.tts_manager.say("Emergency. Edge detected. Backing up.", priority=2)
+            await self.tts_manager.say("Emergency. Edge detected. Backing up.", priority=2)
         elif emergency == EmergencyState.CLIENT_DISCONNECTED:
-            self.tts_manager.say("Emergency stop. Client disconnected.", priority=2)
+            await self.tts_manager.say("Emergency stop. Client disconnected.", priority=2)
         elif emergency == EmergencyState.LOW_BATTERY:
-            self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2)
+            await self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2)
         elif emergency == EmergencyState.MANUAL_STOP:
-            self.tts_manager.say("Emergency stop activated.", priority=2)
+            await self.tts_manager.say("Emergency stop activated.", priority=2)
         
         # Send emergency status to client if connected
         await self.send_sensor_data_to_client()
@@ -563,6 +597,12 @@ class ByteRacer:
 
             if "acceleration_factor" in drive:
                 self.config_manager.set("drive.acceleration_factor", drive["acceleration_factor"])
+
+            if "enhanced_turning" in drive:
+                self.config_manager.set("drive.enhanced_turning", drive["enhanced_turning"])
+            
+            if "turn_in_place" in drive:
+                self.config_manager.set("drive.turn_in_place", drive["turn_in_place"])
 
         if "network" in settings:
             network = settings["network"]

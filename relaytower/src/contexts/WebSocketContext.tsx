@@ -121,6 +121,8 @@ export interface RobotSettings {
     max_speed: number;
     max_turn_angle: number;
     acceleration_factor: number;
+    enhanced_turning: boolean;
+    turn_in_place: boolean;
   };
   modes: {
     tracking_enabled: boolean;

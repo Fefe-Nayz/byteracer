@@ -14,21 +14,8 @@ class ConfigManager:
     Handles loading/saving settings to JSON and synchronizing with clients.
     """
     def __init__(self, config_dir=None):
-        # Set config directory
-        if config_dir is None:
-            # Default to config directory in the project
-            self.config_dir = Path(__file__).parent.parent / "config"
-        else:
-            self.config_dir = Path(config_dir)
-        
-        # Ensure config directory exists
-        self.config_dir.mkdir(exist_ok=True)
-        
-        # Config file path
-        self.config_file = self.config_dir / "settings.json"
-        
-        # Default settings
-        self.settings = {
+        # Default configuration settings
+        self._defaults = {
             # Sound settings
             "sound": {
                 "enabled": True,
@@ -61,6 +48,8 @@ class ConfigManager:
                 "max_speed": 100,
                 "max_turn_angle": 30,
                 "acceleration_factor": 0.8,
+                "enhanced_turning": True,    # Enable differential steering for better turning
+                "turn_in_place": True,       # Allow turning in place when no forward/backward motion
             },
             
             # Special modes
@@ -78,6 +67,19 @@ class ConfigManager:
                 "ap_password": "byteracer123",
             },
         }
+        
+        # Set config directory
+        if config_dir is None:
+            # Default to config directory in the project
+            self.config_dir = Path(__file__).parent.parent / "config"
+        else:
+            self.config_dir = Path(config_dir)
+        
+        # Ensure config directory exists
+        self.config_dir.mkdir(exist_ok=True)
+        
+        # Config file path
+        self.config_file = self.config_dir / "settings.json"
         
         # Lock for thread safety
         self._lock = threading.Lock()
@@ -349,6 +351,8 @@ class ConfigManager:
                 "max_speed": 100,
                 "max_turn_angle": 30,
                 "acceleration_factor": 0.8,
+                "enhanced_turning": True,    # Enable differential steering for better turning
+                "turn_in_place": True,       # Allow turning in place when no forward/backward motion
             },
             
             # Special modes
