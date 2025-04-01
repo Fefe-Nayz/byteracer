@@ -168,12 +168,19 @@ class SoundManager:
         abs_speed = abs(speed)
         abs_turn = abs(turn_value)
         
-        # Acceleration sound
-        if abs_speed > 0.1 and acceleration > 0.05:
+        # Debug logging to trace values
+        logger.debug(f"Driving sounds update - speed: {speed:.2f}, abs_speed: {abs_speed:.2f}, "
+                    f"acceleration: {acceleration:.2f}, is_accelerating: {self.is_accelerating}")
+        
+        # Acceleration sound - lowered threshold and added more conditions
+        if abs_speed > 0.05 and acceleration > 0.02:
             if not self.is_accelerating:
-                self.play_sound("acceleration", loop=True)
+                channel_id = self.play_sound("acceleration", loop=True)
+                logger.info(f"Started acceleration sound on channel {channel_id}, "
+                          f"speed={abs_speed:.2f}, acceleration={acceleration:.2f}")
                 self.is_accelerating = True
-        elif self.is_accelerating:
+        elif self.is_accelerating and (abs_speed < 0.05 or acceleration <= 0.01):
+            logger.info(f"Stopping acceleration sound, speed={abs_speed:.2f}, acceleration={acceleration:.2f}")
             self.stop_sound("acceleration")
             self.is_accelerating = False
         
