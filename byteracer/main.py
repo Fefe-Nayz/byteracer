@@ -443,7 +443,7 @@ class ByteRacer:
         else:
             if enhanced_turning and abs_turn > 0.1:
                 # Differential steering: Reduce speed of inner wheel based on turn amount
-                turn_factor = abs_turn * 0.7  # How much to reduce inner wheel speed (max 70% reduction)
+                turn_factor = abs_turn * 0.9  # How much to reduce inner wheel speed (max 90% reduction)
                 
                 # Calculate per-wheel speeds
                 if turn_direction > 0:  # Turning right
@@ -469,7 +469,11 @@ class ByteRacer:
         
         # Play alert sound immediately
         self.sound_manager.play_alert("emergency")
+
+        await asyncio.sleep(2.1)
         
+        self.tts_manager.clear_queue()
+
         # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
             await self.tts_manager.say("Emergency. Obstacle detected ahead. Maintaining safe distance.", priority=2)

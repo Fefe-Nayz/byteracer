@@ -232,7 +232,7 @@ class SensorManager:
                     await asyncio.sleep(0.05)
                 
                 # Start backing up immediately at a consistent speed
-                backup_speed = 50  # Use a higher consistent speed for smoother backup
+                backup_speed = 30  # Use a higher consistent speed for smoother backup
                 
                 # Back up continuously until reaching safe distance
                 while self.emergency_active and self.current_emergency == EmergencyState.COLLISION_FRONT:
@@ -265,7 +265,7 @@ class SensorManager:
                 self.edge_recovery_start_time = time.time()
                 
                 # Start backing up - continuous motion
-                self.px.backward(50)
+                self.px.backward(100)
                 
                 # Continue backing up until edge is no longer detected plus a small buffer time
                 last_edge_clear_time = 0
@@ -290,7 +290,7 @@ class SensorManager:
                         last_edge_clear_time = 0
                     
                     # Keep backing up - don't rely on user motion control
-                    self.px.backward(50)
+                    self.px.backward(100)
                     
                     # Check frequently but allow other tasks to run
                     await asyncio.sleep(0.05)
@@ -394,8 +394,8 @@ class SensorManager:
         if self.emergency_active:
             if self.current_emergency == EmergencyState.COLLISION_FRONT:
                 # For collision, only prevent forward motion
-                if speed > 0:
-                    speed = 0
+                if speed >= -30:
+                    speed = -30
                 # Allow steering and backward motion
             
             elif self.current_emergency == EmergencyState.EDGE_DETECTED:
