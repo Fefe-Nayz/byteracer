@@ -171,14 +171,12 @@ class SoundManager:
         abs_speed = abs(speed)
         abs_turn = abs(turn_value)
         
-        # Acceleration sound
-        if abs_speed > 0.1 and acceleration > 0.05:
-            if not self.is_accelerating:
-                self.play_sound("acceleration")
-                self.is_accelerating = True
-        elif self.is_accelerating:
-            # self.stop_sound("acceleration")
-            self.is_accelerating = False
+        # Acceleration sound - plays once when acceleration happens, with cooldown
+        current_time = time.time()
+        if abs_speed > 0.1 and acceleration > 0.05 and current_time > self.acceleration_cooldown:
+            logger.info(f"Playing acceleration sound, speed={abs_speed:.2f}, acceleration={acceleration:.2f}")
+            self.play_sound("acceleration")  # Play without looping
+            self.acceleration_cooldown = current_time + 2.0  # Prevent replaying for 2 seconds
         
         # Braking sound
         if abs_speed > 0.1 and acceleration < -0.05:
