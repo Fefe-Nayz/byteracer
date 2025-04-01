@@ -107,8 +107,6 @@ class SoundManager:
                     sound = pygame.mixer.Sound(str(sound_file))
                     sound.set_volume(self.volume / 100.0)
                     pygame.mixer.Channel(channel_id).play(sound, loops=-1 if loop else 0)
-
-                    logger.info(f"Playing sound: {sound_file.name} on channel {channel_id}")
                     
                     # Add to the list of current sounds for this type
                     if sound_type not in self.current_sounds:
@@ -127,35 +125,24 @@ class SoundManager:
         
         Args:
             sound_type (str): Type of sound to stop
-            channel_id (int or Channel): Specific channel ID or Channel object to stop
+            channel_id (int): Specific channel ID to stop
         """
         with self._lock:
             if channel_id is not None:
-                # Handle both Channel objects and integer channel IDs
-                if isinstance(channel_id, pygame.mixer.Channel):
-                    # Direct Channel object
-                    channel_id.stop()
-                    logger.debug(f"Stopped sound on Channel object")
-                elif 0 <= channel_id < pygame.mixer.get_num_channels():
-                    # Integer channel ID
+                if 0 <= channel_id < pygame.mixer.get_num_channels():
                     pygame.mixer.Channel(channel_id).stop()
                     logger.debug(f"Stopped sound on channel {channel_id}")
-                
-                # Remove from current_sounds
-                for sound_type, channels in self.current_sounds.items():
-                    if channel_id in channels:
-                        self.current_sounds[sound_type].remove(channel_id)
+                    # Remove from current_sounds
+                    for sound_type, channels in self.current_sounds.items():
+                        if channel_id in channels:
+                            self.current_sounds[sound_type].remove(channel_id)
             
             elif sound_type is not None:
                 if sound_type in self.current_sounds:
                     # Stop all sounds of this type
-                    for ch in self.current_sounds[sound_type]:
-                        if isinstance(ch, pygame.mixer.Channel):
-                            # Direct Channel object
-                            ch.stop()
-                        elif 0 <= ch < pygame.mixer.get_num_channels():
-                            # Integer channel ID
-                            pygame.mixer.Channel(ch).stop()
+                    for channel_id in self.current_sounds[sound_type]:
+                        if 0 <= channel_id < pygame.mixer.get_num_channels():
+                            pygame.mixer.Channel(channel_id).stop()
                     logger.debug(f"Stopped all {sound_type} sounds")
                     self.current_sounds[sound_type] = []
             
@@ -219,8 +206,8 @@ class SoundManager:
             if channel_id:
                 channel_id.play(sound)
                 
-                # Track the channel - store the channel object directly
-                self.current_sounds["alerts"].append(channel_id)
+                # Track the channel
+                self.current_sounds["alerts"].append(channel_id.get_id())
                 
                 logger.debug(f"Playing alert sound: {alert_name}")
                 return True
