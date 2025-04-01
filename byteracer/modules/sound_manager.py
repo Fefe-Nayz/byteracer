@@ -173,7 +173,7 @@ class SoundManager:
         
         # Acceleration sound - plays once when acceleration happens, with cooldown
         current_time = time.time()
-        if abs_speed > 0.1 and acceleration > 0.05 and current_time > self.acceleration_cooldown:
+        if speed > 0.1 and acceleration > 0.05 and current_time > self.acceleration_cooldown:
             logger.info(f"Playing acceleration sound, speed={abs_speed:.2f}, acceleration={acceleration:.2f}")
             self.play_sound("acceleration")  # Play without looping
             self.acceleration_cooldown = current_time + 2.0  # Prevent replaying for 2 seconds

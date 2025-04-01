@@ -107,21 +107,23 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 ---
 
 # TODO:
-- les messages TTS d'emergency ou d'information de démarrage de script doivent être exécutés avant la dite action (ex. je fait en même temps la recovery et le TTS, pas après)
 - Implémenter les paramètres réseaux
 - Revérifier le code de redémarrage de la caméra et le code de redémarrage du python (voir si il y a pas de problème de redémarrage du python) et tester les autres
 - Le status de la caméra doit être visible sur le client
 - Meilleur suivi de l'état de mise à jour sur le client
 - Implémenter l'intégration avec chatGPT
-- Ajouter les différents sons (accélération, freinage, drift) et les sons customisables
 - Implémenter un affichage de la vitesse qui dépends de l'integration de l'accélération grâce à l'accéléromètre (si il existe)
+- Implémenter les drive settings (max speed, acceleration, turn speed, etc.)
+- Changer de branche bouton
+- Reset mappings/settings
+- Change volume for different types
+- overlay full screen
+- Ajouter un mode nuit pour l'interface utilisateur
+
+Gerardo :
 - Implémenter le mode démo (envoi de commandes préenregistrées au robot pour le faire avancer, tourner, reculer, freiner, etc.)
 - Implémenter le suivi de personne (détection de visage et suivi de la personne avec la caméra)
 - Implémenter le mode circuit (détection de panneaux, feux et obstacles et sortie de route -suivi de ligne-)
-- Implémenter les drive settings (max speed, acceleration, turn speed, etc.) et créer une nouvelle option: rotation améliorée qui permet de tourner sur place (en utilisant les moteurs de manière opposée)
-- Revérifier le code de timeout client qui ne semble pas fonctionner super
-- Refonte des contrôles utilisateurs lors des emmergency et refonte de l'application des emergency
-
 
 ## Conclusion
 
