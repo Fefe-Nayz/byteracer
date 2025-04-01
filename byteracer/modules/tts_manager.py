@@ -100,7 +100,7 @@ class TTSManager:
     def _speak(self, text):
         """Execute the actual TTS operation"""
         try:
-            logger.debug(f"Speaking: '{text}' (volume: {self.volume})")
+            logger.info(f"Speaking: '{text}' (volume: {self.volume})")
             
             # Generate a unique temp file name for this specific TTS operation
             temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
@@ -217,6 +217,7 @@ class TTSManager:
                         self._queue.task_done()
                     except:
                         break
+                logger.debug("TTS queue cleared")
         
         logger.debug(f"TTS queue cleared (min_priority={min_priority})")
     
