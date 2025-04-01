@@ -60,40 +60,68 @@ export default function GamepadInputHandler() {
     const { isActionActive, getAxisValueForAction, ACTION_GROUPS, ACTIONS } =
       functionsRef.current;
 
-    const gamepadState: Record<string, GamepadStateValue> = {};
-    const processedActions = new Set<ActionKey>(); // Track which actions we've already processed
+    // Debug the current raw gamepad state
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    const activePad = Array.from(pads).find(
+      (g) => g && g.id === selectedGamepadId
+    );
+    
+    // Create a basic gamepad state that will always have these values
+    // This ensures we're always sending something, even if no buttons are pressed
+    const gamepadState: Record<string, GamepadStateValue> = {
+      timestamp: Date.now(),
+      connected: !!activePad,
+      // Default values for the main control axes
+      speed: "0.00",
+      turn: "0.00"
+    };
+    
+    if (activePad) {
+      // Process raw gamepad data
+      const axes = Array.from(activePad.axes);
+      const buttons = Array.from(activePad.buttons).map(b => b.pressed);
+      
+      // Add raw values to state for debugging
+      gamepadState._raw_axes = JSON.stringify(axes);
+      gamepadState._raw_buttons = JSON.stringify(buttons);
+      
+      // Process through the action groups and mappings...
+      const processedActions = new Set<ActionKey>(); // Track which actions we've already processed
 
-    // Process each action group to create a combined value
-    ACTION_GROUPS.forEach((group) => {
-      // Only process groups with exactly 2 opposing actions (like forward/backward)
-      if (group.actions.length === 2) {
-        const [action1, action2] = group.actions;
+      // Process each action group to create a combined value
+      ACTION_GROUPS.forEach((group) => {
+        // Only process groups with exactly 2 opposing actions (like forward/backward)
+        if (group.actions.length === 2) {
+          const [action1, action2] = group.actions;
 
-        // Get values for both actions in the group
-        const value1 = getActionValue(action1);
-        const value2 = getActionValue(action2);
+          // Get values for both actions in the group
+          const value1 = getActionValue(action1);
+          const value2 = getActionValue(action2);
 
-        // Combine the values (positive - negative)
-        gamepadState[group.key] = (value1 - value2).toFixed(2);
+          // Combine the values (positive - negative)
+          gamepadState[group.key] = (value1 - value2).toFixed(2);
 
-        // Mark these actions as processed
-        processedActions.add(action1);
-        processedActions.add(action2);
-      } else {
-        // For groups with different number of actions, process individually
-        group.actions.forEach((action) => {
-          processAction(action);
-          processedActions.add(action);
-        });
-      }
-    });
+          // Mark these actions as processed
+          processedActions.add(action1);
+          processedActions.add(action2);
+        } else {
+          // For groups with different number of actions, process individually
+          group.actions.forEach((action) => {
+            processAction(action);
+            processedActions.add(action);
+          });
+        }
+      });
 
-    // Now process any remaining actions that weren't part of a group
-    ACTIONS.forEach((actionInfo: ActionInfo) => {
-      if (!processedActions.has(actionInfo.key)) {
-        processAction(actionInfo.key);
-      }
-    });
+      // Now process any remaining actions that weren't part of a group
+      ACTIONS.forEach((actionInfo: ActionInfo) => {
+        if (!processedActions.has(actionInfo.key)) {
+          processAction(actionInfo.key);
+        }
+      });
+    } else {
+      console.log("No active gamepad found despite selectedGamepadId being set:", selectedGamepadId);
+    }
 
     return gamepadState;
 
@@ -142,7 +170,7 @@ export default function GamepadInputHandler() {
 
       return 0;
     }
-  }, [mappings]);
+  }, [mappings, selectedGamepadId]);
 
   // Check for "use" button press and trigger sound playback
   useEffect(() => {
@@ -164,11 +192,20 @@ export default function GamepadInputHandler() {
   // Send gamepad state periodically
   useEffect(() => {
     // Only send data if connected to WebSocket AND have a selected gamepad
-    if (status !== "connected" || !selectedGamepadId) return;
+    if (status !== "connected" || !selectedGamepadId) {
+      console.log(`Not sending gamepad data: WebSocket status=${status}, selectedGamepadId=${selectedGamepadId}`);
+      return;
+    }
 
-    const interval = setInterval(() => {
+    console.log("Setting up gamepad interval - will send data every 50ms");
+    
+    // Force an immediate send of gamepad state
+    const sendGamepadUpdate = () => {
       // Get the comprehensive gamepad state
       const gamepadState = computeGamepadState();
+      
+      // Log the gamepad state being sent (uncomment for debugging)
+      // console.log("Sending gamepad state:", gamepadState);
       
       // Check if the "use" button state changed
       const currentUseState = isActionActive("use");
@@ -176,11 +213,21 @@ export default function GamepadInputHandler() {
         setLastUseState(currentUseState);
       }
       
-      // Send the state via WebSocket
+      // Always send the state even if it appears empty
+      // This ensures continuous updates are sent to the robot
       sendGamepadState(gamepadState);
-    }, 50); // Send updates at 20 Hz
+    };
+    
+    // Send initial state immediately
+    sendGamepadUpdate();
+    
+    // Then set up interval
+    const interval = setInterval(sendGamepadUpdate, 50); // Send updates at 20 Hz
 
-    return () => clearInterval(interval);
+    return () => {
+      console.log("Cleaning up gamepad interval");
+      clearInterval(interval);
+    };
   }, [status, selectedGamepadId, computeGamepadState, sendGamepadState, isActionActive, lastUseState]);
 
   // This component doesn't render anything visible

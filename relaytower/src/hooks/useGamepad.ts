@@ -561,25 +561,17 @@ export function useGamepad() {
     const map = mappings[action];
     if (!map || map.index === -1) return false; // Check for -1 (unmapped)
 
-    // Find the action info to check if it's "both" type
-
     if (map.type === "button") {
       const id = `button-${map.index}`;
       return gamepadState.pressedInputs.has(id);
+    } else if (map.type === "axis") {
+      // For axis mapping, we need to process the axis value
+      const val = gamepadState.axisValues[map.index] ?? 0;
+      const deadzone = map.axisConfig?.deadzone ?? 0.1;
+      
+      // Apply deadzone threshold
+      return Math.abs(val) > deadzone;
     }
-    // } else if (map.type === "axis") {
-    //   // For axis
-    //   const val = gamepadState.axisValues[map.index] ?? 0;
-
-    //   // For turn actions, use different thresholds
-    //   if (action === "turn") {
-    //     return Math.abs(val) > 0.2;
-    //   } else if (action === "turnCameraX" || action === "turnCameraY") {
-    //     return Math.abs(val) > 0.2;
-    //   }
-
-    //   return Math.abs(val) > 0.2;
-    // }
 
     // Should never reach here, but better safe
     return false;
