@@ -14,8 +14,21 @@ class ConfigManager:
     Handles loading/saving settings to JSON and synchronizing with clients.
     """
     def __init__(self, config_dir=None):
-        # Default configuration settings
-        self._defaults = {
+        # Set config directory
+        if config_dir is None:
+            # Default to config directory in the project
+            self.config_dir = Path(__file__).parent.parent / "config"
+        else:
+            self.config_dir = Path(config_dir)
+        
+        # Ensure config directory exists
+        self.config_dir.mkdir(exist_ok=True)
+        
+        # Config file path
+        self.config_file = self.config_dir / "settings.json"
+        
+        # Default settings
+        self.settings = {
             # Sound settings
             "sound": {
                 "enabled": True,
@@ -67,19 +80,6 @@ class ConfigManager:
                 "ap_password": "byteracer123",
             },
         }
-        
-        # Set config directory
-        if config_dir is None:
-            # Default to config directory in the project
-            self.config_dir = Path(__file__).parent.parent / "config"
-        else:
-            self.config_dir = Path(config_dir)
-        
-        # Ensure config directory exists
-        self.config_dir.mkdir(exist_ok=True)
-        
-        # Config file path
-        self.config_file = self.config_dir / "settings.json"
         
         # Lock for thread safety
         self._lock = threading.Lock()
