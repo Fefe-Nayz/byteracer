@@ -53,6 +53,9 @@ class SoundManager:
         self.is_braking = False
         self.is_drifting = False
         
+        # Cooldown timers for non-looping sounds that shouldn't repeat too quickly
+        self.acceleration_cooldown = 0
+        
         logger.info(f"Sound Manager initialized with {sum(len(s) for s in self.sounds.values())} sounds")
     
     def _load_sounds(self, category):
@@ -168,20 +171,13 @@ class SoundManager:
         abs_speed = abs(speed)
         abs_turn = abs(turn_value)
         
-        # Debug logging to trace values
-        logger.debug(f"Driving sounds update - speed: {speed:.2f}, abs_speed: {abs_speed:.2f}, "
-                    f"acceleration: {acceleration:.2f}, is_accelerating: {self.is_accelerating}")
-        
-        # Acceleration sound - lowered threshold and added more conditions
-        if abs_speed > 0.05 and acceleration > 0.02:
+        # Acceleration sound
+        if abs_speed > 0.1 and acceleration > 0.05:
             if not self.is_accelerating:
-                channel_id = self.play_sound("acceleration", loop=True)
-                logger.info(f"Started acceleration sound on channel {channel_id}, "
-                          f"speed={abs_speed:.2f}, acceleration={acceleration:.2f}")
+                self.play_sound("acceleration")
                 self.is_accelerating = True
-        elif self.is_accelerating and (abs_speed < 0.05 or acceleration <= 0.01):
-            logger.info(f"Stopping acceleration sound, speed={abs_speed:.2f}, acceleration={acceleration:.2f}")
-            self.stop_sound("acceleration")
+        elif self.is_accelerating:
+            # self.stop_sound("acceleration")
             self.is_accelerating = False
         
         # Braking sound
