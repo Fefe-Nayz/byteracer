@@ -41,6 +41,8 @@ class SensorManager:
         
         # Safety thresholds
         self.collision_threshold = 20  # cm
+        # Hardcoded safe distance buffer - not configurable via settings
+        self.safe_distance_buffer = 10  # Additional cm to add to collision threshold for safe distance
         self.edge_detection_threshold = 0.2  # Normalized line sensor reading
         self.client_timeout = 15  # seconds
         self.low_battery_threshold = 15  # percentage
@@ -54,6 +56,14 @@ class SensorManager:
         self.tracking_enabled = False
         self.circuit_mode_enabled = False
         
+        # Client state
+        self.client_ever_connected = False
+        self.client_currently_connected = False
+
+        # Edge recovery state
+        self.edge_recovery_start_time = 0
+        self.edge_recovery_min_time = 0.5  # Minimum backup time after edge is no longer detected
+
         # Tracking data
         self.current_speed = 0.0
         self.current_turn = 0.0
@@ -65,6 +75,7 @@ class SensorManager:
         # Tasks
         self._running = True
         self._sensors_task = None
+        self._emergency_task = None
         self._lock = threading.Lock()
         
         logger.info("Sensor Manager initialized")
@@ -84,6 +95,13 @@ class SensorManager:
             except asyncio.CancelledError:
                 pass
         
+        if self._emergency_task and not self._emergency_task.done():
+            self._emergency_task.cancel()
+            try:
+                await self._emergency_task
+            except asyncio.CancelledError:
+                pass
+        
         logger.info("Sensor monitoring stopped")
     
     async def _monitor_sensors(self):
@@ -94,18 +112,25 @@ class SensorManager:
                 # Update sensor readings
                 await self._update_sensor_readings()
                 
-                # Check for emergencies
-                emergency = self._check_emergency_conditions()
-                
-                # Handle any detected emergency
-                if emergency != EmergencyState.NONE:
-                    await self._handle_emergency(emergency)
-                elif self.emergency_active:
-                    # Clear emergency if conditions are safe
-                    await self._clear_emergency()
+                # Check for emergencies - only if client has connected at least once
+                if self.client_ever_connected:
+                    emergency = self._check_emergency_conditions()
+                    
+                    # Handle any detected emergency
+                    if emergency != EmergencyState.NONE and emergency != self.current_emergency:
+                        # Call emergency callback immediately
+                        if self.emergency_callback:
+                            # Create a new task for the callback so it runs in parallel
+                            asyncio.create_task(self.emergency_callback(emergency))
+                        
+                        # Start the emergency handling process
+                        self._emergency_task = asyncio.create_task(self._handle_emergency(emergency))
+                    elif self.emergency_active:
+                        # Check if we can clear the emergency
+                        await self._check_emergency_clearance()
                 
                 # Short delay to avoid CPU overuse
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)  # Slightly faster updates for better responsiveness
                 
             except asyncio.CancelledError:
                 logger.info("Sensor monitoring loop cancelled")
@@ -151,10 +176,18 @@ class SensorManager:
         if now - self._last_emergency_time < self._emergency_cooldown:
             return EmergencyState.NONE
         
+        # Only check emergencies if client is currently connected
+        if not self.client_currently_connected and self.auto_stop_enabled:
+            # Exception: check for client disconnection only if client was previously connected
+            if self.client_ever_connected and now - self.last_client_seen > self.client_timeout:
+                return EmergencyState.CLIENT_DISCONNECTED
+            return EmergencyState.NONE
+        
         # Check for obstacles if collision avoidance is enabled
         if self.collision_avoidance_enabled and self.ultrasonic_distance < self.collision_threshold:
             # If moving forward and obstacle in front
-            return EmergencyState.COLLISION_FRONT
+            if self.current_speed > 0:
+                return EmergencyState.COLLISION_FRONT
         
         # Check for edges if edge detection is enabled
         if self.edge_detection_enabled:
@@ -164,7 +197,7 @@ class SensorManager:
                 return EmergencyState.EDGE_DETECTED
         
         # Check for client disconnection if auto-stop is enabled
-        if self.auto_stop_enabled:
+        if self.auto_stop_enabled and self.client_ever_connected:
             if now - self.last_client_seen > self.client_timeout:
                 return EmergencyState.CLIENT_DISCONNECTED
         
@@ -179,81 +212,138 @@ class SensorManager:
     
     async def _handle_emergency(self, emergency):
         """Handle an emergency situation"""
-        # Only handle the emergency if it's new or different
-        if emergency != self.current_emergency or not self.emergency_active:
-            logger.warning(f"Emergency detected: {emergency}")
-            self.current_emergency = emergency
-            self.emergency_active = True
-            self._last_emergency_time = time.time()
-            
+        # Mark emergency as active
+        logger.warning(f"Emergency detected: {emergency}")
+        self.current_emergency = emergency
+        self.emergency_active = True
+        self._last_emergency_time = time.time()
+        
+        try:
             # Take emergency action based on the type
             if emergency == EmergencyState.COLLISION_FRONT:
-                # Calculate safe distance to back up (threshold + 5cm)
-                safe_distance = self.collision_threshold + 5
-                # Stop immediately
+                # For collision, we want to maintain a minimum safe distance
+                safe_distance = self.collision_threshold + self.safe_distance_buffer
+                
+                # Stop immediately first
                 self.px.forward(0)
                 await asyncio.sleep(0.1)
                 
-                # Start backing up at consistent speed
-                self.px.backward(30)
-                
-                # Continue backing up until we reach safe distance
-                start_time = time.time()
-                max_backup_time = 3.0  # Safety timeout
-                
-                while (self.ultrasonic_distance < safe_distance and 
-                      (time.time() - start_time) < max_backup_time):
-                    await asyncio.sleep(0.1)
+                # Back up gradually until safe distance is reached
+                while self.emergency_active and self.ultrasonic_distance < safe_distance:
+                    # Check if emergency was cleared manually
+                    if self.current_emergency != EmergencyState.COLLISION_FRONT:
+                        break
                     
-                # Stop after reaching safe distance or timeout
-                self.px.forward(0)
+                    # Continue backing up at a moderate speed if user isn't controlling backward motion
+                    if self.current_speed >= 0:  # If user isn't already going backward
+                        self.px.backward(30)
+                    
+                    # Keep updating sensor readings to check distance
+                    await self._update_sensor_readings()
+                    await asyncio.sleep(0.1)
+                
+                # Stop after reaching safe distance if user isn't controlling motion
+                if self.current_speed == 0:
+                    self.px.forward(0)
                 
             elif emergency == EmergencyState.EDGE_DETECTED:
-                self.px.backward(100)
-                await asyncio.sleep(1.0)  # Back up for a second
+                # Record when we start backing up
+                self.edge_recovery_start_time = time.time()
+                
+                # Start backing up
+                self.px.backward(50)
+                
+                # Continue backing up until edge is no longer detected plus a small buffer time
+                last_edge_clear_time = 0
+                
+                while self.emergency_active:
+                    # Check if emergency was cleared manually
+                    if self.current_emergency != EmergencyState.EDGE_DETECTED:
+                        break
+                    
+                    # Update sensor readings
+                    await self._update_sensor_readings()
+                    
+                    # Check if edge is still detected
+                    edge_detected = self.px.get_cliff_status(self.line_sensors)
+                    
+                    if not edge_detected:
+                        # If this is the first time we're clear, record the time
+                        if last_edge_clear_time == 0:
+                            last_edge_clear_time = time.time()
+                        
+                        # If we've been clear for the minimum buffer time, stop backing up
+                        if time.time() - last_edge_clear_time >= self.edge_recovery_min_time:
+                            break
+                    else:
+                        # Reset the clear time if edge is detected again
+                        last_edge_clear_time = 0
+                    
+                    await asyncio.sleep(0.1)
+                
+                # Stop after reaching safe position
                 self.px.forward(0)
                 
             elif emergency == EmergencyState.CLIENT_DISCONNECTED:
                 # Just stop all motion
                 self.px.forward(0)
                 self.px.set_dir_servo_angle(0)
+                
+                # Wait until client reconnects or emergency is cleared manually
+                while self.emergency_active and self.current_emergency == EmergencyState.CLIENT_DISCONNECTED:
+                    await asyncio.sleep(0.5)
             
             elif emergency == EmergencyState.LOW_BATTERY:
                 # No specific motion action for low battery
-                pass
-            
-            # Call emergency callback if registered
-            if self.emergency_callback:
-                await self.emergency_callback(emergency)
-    
-    async def _clear_emergency(self):
-        """Clear current emergency state if conditions are safe"""
-        # Only clear specific emergencies when conditions are safe
-        if self.current_emergency in [EmergencyState.COLLISION_FRONT]:
-            if self.ultrasonic_distance > self.collision_threshold + 10:  # Add buffer
+                # Just wait for warning interval to pass
+                await asyncio.sleep(self.low_battery_warning_interval)
                 self.emergency_active = False
+            
+            elif emergency == EmergencyState.MANUAL_STOP:
+                # Manual stop just stops motion and waits for explicit clear
+                self.px.forward(0)
+                self.px.set_dir_servo_angle(0)
+                
+                # Wait until manual stop is cleared
+                while self.emergency_active and self.current_emergency == EmergencyState.MANUAL_STOP:
+                    await asyncio.sleep(0.5)
+        
+        except asyncio.CancelledError:
+            logger.info(f"Emergency handling for {emergency.name} was cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in emergency handling for {emergency.name}: {e}")
+        finally:
+            # Only clear the emergency if it hasn't been changed to a different one
+            if self.current_emergency == emergency:
+                logger.info(f"Emergency handling completed for: {emergency.name}")
+                self.emergency_active = False
+                self.current_emergency = EmergencyState.NONE
+    
+    async def _check_emergency_clearance(self):
+        """Check if current emergency conditions are cleared"""
+        # Only apply to automatic clearance conditions
+        if self.current_emergency == EmergencyState.COLLISION_FRONT:
+            # Clear if distance is now safe
+            safe_distance = self.collision_threshold + self.safe_distance_buffer
+            if self.ultrasonic_distance > safe_distance:
                 logger.info(f"Emergency cleared: {self.current_emergency}")
+                self.emergency_active = False
                 self.current_emergency = EmergencyState.NONE
         
         elif self.current_emergency == EmergencyState.EDGE_DETECTED:
-            if not self.px.get_cliff_status(self.line_sensors):
-                self.emergency_active = False
-                logger.info(f"Emergency cleared: {self.current_emergency}")
-                self.current_emergency = EmergencyState.NONE
+            # Already handled in _handle_emergency
+            pass
         
         elif self.current_emergency == EmergencyState.CLIENT_DISCONNECTED:
+            # Clear if client is seen again
             if time.time() - self.last_client_seen < self.client_timeout:
-                self.emergency_active = False
                 logger.info(f"Emergency cleared: {self.current_emergency}")
+                self.emergency_active = False
                 self.current_emergency = EmergencyState.NONE
         
         elif self.current_emergency == EmergencyState.LOW_BATTERY:
-            # Low battery is handled by the warning interval
-            self.emergency_active = False
-            self.current_emergency = EmergencyState.NONE
-        
-        elif self.current_emergency == EmergencyState.MANUAL_STOP:
-            # Manual stops must be explicitly cleared
+            # Already handled in _handle_emergency
             pass
     
     def update_motion(self, speed, turn_angle):
@@ -265,7 +355,7 @@ class SensorManager:
             turn_angle (float): Turn angle (-1.0 to 1.0)
             
         Returns:
-            tuple: Modified (speed, turn_angle) if emergency is active
+            tuple: Modified (speed, turn_angle, emergency_active)
         """
         # Register that we received a command
         self.last_input_time = time.time()
@@ -274,42 +364,41 @@ class SensorManager:
         self.current_speed = speed
         self.current_turn = turn_angle
         
-        # If emergency is active, override motion commands more strictly
-        # if self.emergency_active:
-            # now = time.time()
-            # time_in_emergency = now - self._last_emergency_time
+        # Handle emergency overrides based on emergency type
+        if self.emergency_active:
+            if self.current_emergency == EmergencyState.COLLISION_FRONT:
+                # For collision, only prevent forward motion
+                if speed > 0:
+                    speed = 0
+                # Allow steering and backward motion
             
-            # # Different emergency types need different handling
-            # if self.current_emergency == EmergencyState.COLLISION_FRONT:
-            #     # For front collision, only allow backward motion
-            #     if time_in_emergency < 1.0:
-            #         return -0.2, turn_angle  # Force small backup
-            #     return min(speed, 0), turn_angle  # Allow only backward motion
-                
-            # elif self.current_emergency == EmergencyState.EDGE_DETECTED:
-            #     # For edge detection, force backup
-            #     if time_in_emergency < 1.5:
-            #         return -0.2, turn_angle  # Force backup
-            #     else:
-            #         return 0, turn_angle  # Then stop
-                    
-            # elif self.current_emergency in [
-            #     EmergencyState.CLIENT_DISCONNECTED,
-            #     EmergencyState.MANUAL_STOP
-            # ]:
-            #     # Complete stop for these emergencies
-            #     return 0, turn_angle
-                
-            # elif self.current_emergency == EmergencyState.LOW_BATTERY:
-            #     # For low battery, still allow motion but at reduced power
-            #     return speed * 0.5, turn_angle
-
+            elif self.current_emergency == EmergencyState.EDGE_DETECTED:
+                # For edge detection, completely control wheel speed for safety
+                # But allow steering to continue working
+                speed = -0.5  # Force backing up
+            
+            elif self.current_emergency in [EmergencyState.CLIENT_DISCONNECTED, EmergencyState.MANUAL_STOP]:
+                # Complete stop for these emergencies
+                speed = 0
+                turn_angle = 0  # Also stop steering
+            
+            elif self.current_emergency == EmergencyState.LOW_BATTERY:
+                # For low battery, still allow motion but at reduced power
+                speed = speed * 0.5
         
         return speed, turn_angle, self.emergency_active
+    
+    def update_client_status(self, connected, ever_connected):
+        """Update the client connection status"""
+        self.client_currently_connected = connected
+        if ever_connected:
+            self.client_ever_connected = True
     
     def register_client_connection(self):
         """Register that a client connected"""
         self.last_client_seen = time.time()
+        self.client_ever_connected = True
+        self.client_currently_connected = True
         logger.info("Client connection registered")
     
     def register_client_input(self):
@@ -318,7 +407,9 @@ class SensorManager:
     
     def client_disconnect(self):
         """Handle client disconnection"""
-        self.trigger_emergency(EmergencyState.CLIENT_DISCONNECTED)
+        self.client_currently_connected = False
+        if self.client_ever_connected:
+            self.trigger_emergency(EmergencyState.CLIENT_DISCONNECTED)
     
     def manual_emergency_stop(self):
         """Trigger manual emergency stop"""
@@ -336,6 +427,16 @@ class SensorManager:
         self.current_emergency = emergency
         self.emergency_active = True
         self._last_emergency_time = time.time()
+        
+        # Start emergency handling in a task
+        if self._emergency_task and not self._emergency_task.done():
+            self._emergency_task.cancel()
+        self._emergency_task = asyncio.create_task(self._handle_emergency(emergency))
+        
+        # Call callback immediately if it exists
+        if self.emergency_callback:
+            asyncio.create_task(self.emergency_callback(emergency))
+            
         logger.warning(f"Manually triggered emergency: {emergency}")
     
     def update_battery_level(self, level):
@@ -390,3 +491,8 @@ class SensorManager:
         """Enable or disable circuit mode"""
         self.circuit_mode_enabled = enabled
         logger.info(f"Circuit mode {'enabled' if enabled else 'disabled'}")
+    
+    def set_demo_mode(self, enabled):
+        """Enable or disable demo mode"""
+        # Implementation depends on what demo mode does
+        logger.info(f"Demo mode {'enabled' if enabled else 'disabled'}")

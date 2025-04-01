@@ -179,7 +179,8 @@ class CameraManager:
             bool: True if camera is healthy, False otherwise
         """
         try:
-            # libcamera-hello
+            # check if the camera feed (localhost:9000/mjpeg) is accessible and not frozen
+
 
             return True
         except Exception as e:

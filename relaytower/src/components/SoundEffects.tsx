@@ -61,7 +61,11 @@ export default function SoundEffects() {
     { id: "laugh", name: "Laugh", icon: "😂" },
     { id: "bruh", name: "Bruh", icon: "😑" },
     { id: "nope", name: "Nope", icon: "❌" },
-    { id: "yeet", name: "Yeet", icon: "🚀" },
+    { id:"lingango", name: "Lingango", icon: "🗣️" },
+    { id: "cailloux", name: "Cailloux", icon: "🪨" },
+    { id: "fave", name: "Favéé", icon: "🎤" },
+    { id: "pipe", name: "Pipe", icon: "🔩" },
+    { id: "tuile", name: "Une Tuile", icon: "🧱" },
   ];
   
   const soundEnabled = settings?.sound.enabled || false;
@@ -97,7 +101,7 @@ export default function SoundEffects() {
               <span className="text-xl mb-1">{sound.icon}</span>
               <span className="text-xs">{sound.name}</span>
               {selectedSound === sound.id && (
-                <span className="absolute top-0 right-0">
+                <span className="absolute top-0 right-0 p-1">
                   <Gamepad className="h-3 w-3 text-primary" />
                 </span>
               )}

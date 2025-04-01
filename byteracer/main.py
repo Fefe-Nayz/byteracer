@@ -7,6 +7,7 @@ import os
 import subprocess
 import threading
 import psutil
+import sys
 from pathlib import Path
 import logging
 
@@ -20,6 +21,8 @@ from modules.sensor_manager import SensorManager, EmergencyState
 from modules.camera_manager import CameraManager, CameraState
 from modules.config_manager import ConfigManager
 from modules.log_manager import LogManager
+from modules.gpt_manager import GPTManager
+from modules.network_manager import NetworkManager
 
 # Define project directory
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
@@ -41,10 +44,13 @@ class ByteRacer:
         self.sound_manager = SoundManager()
         self.sensor_manager = SensorManager(self.px, self.handle_emergency)
         self.camera_manager = CameraManager(vflip=False, hflip=False, local=False, web=True)
+        self.network_manager = NetworkManager()
+        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager)
         
         # WebSocket state
         self.websocket = None
         self.client_connected = False
+        self.client_ever_connected = False
         self.last_activity_time = time.time()
         self.speaking_ip = False
         self.ip_speaking_task = None
@@ -81,6 +87,9 @@ class ByteRacer:
         url = f"ws://{SERVER_HOST}/ws"
         logging.info(f"Connecting to WebSocket server at {url}")
         self.websocket_task = asyncio.create_task(self.connect_to_websocket(url))
+        
+        # Update client connection status
+        self.sensor_manager.update_client_status(self.client_connected, self.client_ever_connected)
         
         # Return so other code can run
         return
@@ -227,11 +236,17 @@ class ByteRacer:
                         except websockets.exceptions.ConnectionClosed:
                             logging.warning("WebSocket connection closed")
                             self.client_connected = False
+                            
+                            # Update sensor manager about client disconnect
+                            self.sensor_manager.update_client_status(False, self.client_ever_connected)
                             break
             except Exception as e:
                 logging.error(f"WebSocket connection error: {e}")
                 self.websocket = None
                 self.client_connected = False
+                
+                # Update sensor manager about client disconnect
+                self.sensor_manager.update_client_status(False, self.client_ever_connected)
                 
                 # Announce reconnection attempts via TTS
                 await self.tts_manager.say("Connection to control server lost. Attempting to reconnect.", priority=1)
@@ -262,8 +277,12 @@ class ByteRacer:
                 if data["data"].get("type") == "controller":
                     logging.info(f"Received client register message from controller, client ID: {data['data'].get('id', 'unknown')}")
                     self.client_connected = True
+                    self.client_ever_connected = True
                     self.sensor_manager.register_client_connection()
                     self.last_activity_time = time.time()
+                    
+                    # Update sensor manager about client connection
+                    self.sensor_manager.update_client_status(True, True)
                     
                     # Now that a controller is connected, clear IP announcements
                     self.tts_manager.clear_queue(min_priority=1)
@@ -288,6 +307,8 @@ class ByteRacer:
                 if not self.client_connected:
                     logging.info("Received gamepad input from client, marking as connected")
                     self.client_connected = True
+                    self.client_ever_connected = True
+                    self.sensor_manager.update_client_status(True, True)
             
             elif data["name"] == "robot_command":
                 # Handle robot commands
@@ -339,7 +360,21 @@ class ByteRacer:
                         "success": success,
                         "message": f"Sound {'played' if success else 'not found'}: {sound_name}"
                     })
-                
+            
+            elif data["name"] == "gpt_command":
+                # Handle GPT command
+                if "prompt" in data["data"]:
+                    prompt = data["data"]["prompt"]
+                    use_camera = data["data"].get("useCamera", False)
+                    logging.info(f"Received GPT command: {prompt}, useCamera: {use_camera}")
+                    
+                    success = await self.gpt_manager.process_gpt_command(prompt, use_camera)
+                    
+                    await self.send_command_response({  
+                        "success": success,
+                        "message": "GPT command processed successfully"
+                    })
+                 
             else:
                 logging.info(f"Received message of type: {data['name']}")
             
@@ -376,19 +411,7 @@ class ByteRacer:
         # Pass inputs through sensor manager to handle safety overrides
         speed_value, turn_value, emergency = self.sensor_manager.update_motion(speed_value, turn_value)
 
-        if emergency:
-            return
-        
-        # Set motor speeds with safety constraints applied
-        max_speed = self.config_manager.get("drive.max_speed")
-        max_turn = self.config_manager.get("drive.max_turn_angle")
-        
-        # Apply motor commands
-        self.px.set_motor_speed(1, speed_value * max_speed)  # normal motor
-        self.px.set_motor_speed(2, speed_value * -max_speed)  # reversed motor
-        self.px.set_dir_servo_angle(turn_value * max_turn)
-        
-        # Set camera angles
+        # Set camera angles - always allow camera control even during emergencies
         self.px.set_cam_pan_angle(camera_pan_value * 90)
         
         # Handle camera tilt with different ranges for up/down
@@ -396,23 +419,34 @@ class ByteRacer:
             self.px.set_cam_tilt_angle(camera_tilt_value * 65)
         else:
             self.px.set_cam_tilt_angle(camera_tilt_value * 35)
+        
+        # Set motor speeds with safety constraints applied
+        max_speed = self.config_manager.get("drive.max_speed")
+        max_turn = self.config_manager.get("drive.max_turn_angle")
+        
+        # Apply motor commands - emergency overrides already applied to speed_value and turn_value
+        self.px.set_motor_speed(1, speed_value * max_speed)  # normal motor
+        self.px.set_motor_speed(2, speed_value * -max_speed)  # reversed motor
+        self.px.set_dir_servo_angle(turn_value * max_turn)
     
     async def handle_emergency(self, emergency):
         """Handle emergency situations"""
-        # Play alert sound
+        logging.warning(f"Emergency callback triggered: {emergency.name}")
+        
+        # Play alert sound immediately
         self.sound_manager.play_alert("emergency")
         
-        # Provide feedback via TTS
+        # Provide feedback via TTS immediately
         if emergency == EmergencyState.COLLISION_FRONT:
-            await self.tts_manager.say("Emergency stop. Obstacle detected ahead. Backing up.", priority=2)
+            asyncio.create_task(self.tts_manager.say("Emergency. Obstacle detected ahead. Maintaining safe distance.", priority=2))
         elif emergency == EmergencyState.EDGE_DETECTED:
-            await self.tts_manager.say("Emergency stop. Edge detected. Backing up.", priority=2)
+            asyncio.create_task(self.tts_manager.say("Emergency. Edge detected. Backing up.", priority=2))
         elif emergency == EmergencyState.CLIENT_DISCONNECTED:
-            await self.tts_manager.say("Emergency stop. Client disconnected.", priority=2)
+            asyncio.create_task(self.tts_manager.say("Emergency stop. Client disconnected.", priority=2))
         elif emergency == EmergencyState.LOW_BATTERY:
-            await self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2)
+            asyncio.create_task(self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2))
         elif emergency == EmergencyState.MANUAL_STOP:
-            await self.tts_manager.say("Emergency stop activated.", priority=2)
+            asyncio.create_task(self.tts_manager.say("Emergency stop activated.", priority=2))
         
         # Send emergency status to client if connected
         await self.send_sensor_data_to_client()
@@ -567,7 +601,6 @@ class ByteRacer:
                 
             elif command == "restart_all_services":
                 # Restart all three services
-                await self.tts_manager.say("Restarting all services. Please wait.", priority=2, blocking=True)
                 success = subprocess.run(
                     f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/restart_services.sh",
                     shell=True,
@@ -579,7 +612,6 @@ class ByteRacer:
                 
             elif command == "restart_websocket":
                 # Restart just the WebSocket service
-                await self.tts_manager.say("Restarting WebSocket service.", priority=1, blocking=True)
                 success = subprocess.run(
                     f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/restart_websocket.sh",
                     shell=True,
@@ -591,7 +623,6 @@ class ByteRacer:
                 
             elif command == "restart_web_server":
                 # Restart just the web server
-                await self.tts_manager.say("Restarting web server.", priority=1, blocking=True)
                 success = subprocess.run(
                     f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/restart_web_server.sh",
                     shell=True,
@@ -608,7 +639,9 @@ class ByteRacer:
                 result["message"] = "Python service will restart"
                 
                 # Exit Python script - systemd or screen will restart it
-                threading.Timer(1.0, lambda: os._exit(0)).start()
+                # threading.Timer(1.0, lambda: os._exit(0)).start()
+                python = sys.executable
+                os.execv(python, [python] + sys.argv)
                 
             elif command == "restart_camera_feed":
                 # Restart camera feed
@@ -620,7 +653,6 @@ class ByteRacer:
                 
             elif command == "check_for_updates":
                 # Check for updates
-                await self.tts_manager.say("Checking for updates. Please wait.", priority=1, blocking=True)
                 success = subprocess.run(
                     f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/update.sh",
                     shell=True,
@@ -771,6 +803,9 @@ class ByteRacer:
         logging.info("Starting periodic tasks loop")
         while True:
             try:
+                # Always update sensor manager with current client status
+                self.sensor_manager.update_client_status(self.client_connected, self.client_ever_connected)
+                
                 # Send sensor data every second if client is connected
                 if self.client_connected:
                     try:

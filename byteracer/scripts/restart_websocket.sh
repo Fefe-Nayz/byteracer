@@ -15,7 +15,7 @@ speak() {
 }
 
 echo "Restarting WebSocket server (eaglecontrol)..."
-speak "Restarting WebSocket server."
+speak "Restarting WebSocket service. Please wait."
 
 # Stop the service
 screen -S eaglecontrol -X quit || true

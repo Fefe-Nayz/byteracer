@@ -15,6 +15,7 @@ speak() {
 }
 
 echo "Updating ByteRacer components..."
+speak "Checking for updates. Please wait."
 speak "Starting update process for ByteRacer."
 
 cd "${BYTERACER_PATH}"

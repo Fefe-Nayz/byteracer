@@ -15,7 +15,7 @@ speak() {
 }
 
 echo "Restarting all ByteRacer services..."
-speak "Restarting all ByteRacer services."
+speak "Restarting all services. Please wait."
 
 # Stop all services
 speak "Stopping WebSocket server."
