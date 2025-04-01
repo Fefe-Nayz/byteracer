@@ -471,8 +471,6 @@ class ByteRacer:
         self.sound_manager.play_alert("emergency")
 
         await asyncio.sleep(2.1)
-        
-        self.tts_manager.clear_queue()
 
         # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
