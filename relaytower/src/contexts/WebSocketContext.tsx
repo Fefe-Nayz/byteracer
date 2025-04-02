@@ -175,7 +175,7 @@ interface WebSocketContextValue {
   playSound: (sound: string) => void;
   restartCameraFeed: () => void;
   scanNetworks: () => void;
-  updateNetwork: (action: string, data: NetworkUpdateData) => void;
+  updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
   sendGptCommand: (prompt: string, useCamera: boolean) => void;
 }
 
@@ -610,13 +610,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   // Function to update network settings
-  const updateNetwork = useCallback((action: string, data: NetworkUpdateData) => {
+  const updateNetwork = useCallback((action: NetworkAction, data: NetworkUpdateData) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const networkData = {
         name: "network_update",
         data: {
           action,
-          ...data,
+          data,
           timestamp: Date.now(),
         },
         createdAt: Date.now(),

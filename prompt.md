@@ -119,6 +119,7 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 - Change volume for different types
 - overlay full screen
 - Ajouter un mode nuit pour l'interface utilisateur
+- Arrêter un son ou le TTS en cours
 
 Gerardo :
 - Implémenter le mode démo (envoi de commandes préenregistrées au robot pour le faire avancer, tourner, reculer, freiner, etc.)

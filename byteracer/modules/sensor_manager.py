@@ -16,6 +16,17 @@ class EmergencyState(Enum):
     LOW_BATTERY = auto()
     MANUAL_STOP = auto()
 
+class RobotState(Enum):
+    """Enum representing different robot states"""
+    WAITING_FOR_CLIENT = auto() # The robot just started and is waiting for a client to connect to the website. The ony thing it can do is tell it's IP address.
+    WAITING_FOR_INPUT = auto() # The client has reached the website, it can control some aspects of the robot (like settings, sounds, tts and gpt etc.) but it has not still connected a controller to the client device or it is still not used so it is sending no input data.
+    CONTROLLED_BY_CLIENT = auto() # The client has connected a controller to the client device and is sending input data to the robot at 20hz. The robot is controlled by the client. If the input stream stops or if the client disconnects either it's controller or completely closes the website and if the robot was moving then we should trigger the emergency stop to prevent the robot from crashing into something. In this state the client can control all aspects of the robot (like settings, sounds, tts and gpt etc.) and it is controlling the robot.
+    EMERGENCY_CONTROL = auto() # The robot is in an emergency state. The robot is taking over some part of the control over the client to avoid crash but depending on the emergency the client can still control some movements of the robot and it can still control all the other aspects that are not related to the robot movement. 
+    GPT_CONTROLLED = auto() # This state is used when the client is triggering a chatGPT prompt. During the ai awnser and execution of the AI response nothing can alter it (excpet a force stop of the sequence by the client). When the robot is controlled by AI, no emergency can be triggered, the client controls inputs are ignored but the client can still control all other aspects of the robot (like settings, sounds, tts and gpt etc.).
+    CIRCUIT_MODE = auto() # The robot is in circuit mode. The robot is controlled by the client but only specific emergency situations can be triggered. The robot will use it's sensor of line following not to detect cliffs but the edges of the road and preventing the user to go outside the sircuit, the proximity sensor and stop emergency are still here and we are adding computer vision, if the robot detects signs or traffic lights the robot will make sure to enforce the rules of the road on the client. If for example the client tries to cross a no way street or a red light the robot will stop and only allow inputs from the client that are going to respect the road rules. If the robot detects a sign or traffic light it's camera will lock on it to be sure not to loose track of it, the client won't be able to move the head.
+    DEMO_MODE = auto() # The robot is doing pre-registered actions and tts to demo it capabilities. The user inputs are not taken into account. The emergency of collision and cliff are active
+    TRACKING_MODE = auto() # The robot is going arround (by itself) until he detects a person. When it detects a person the head will lock on it and the robot will follow the person. The robot will use it's camera to detect the person and the line following sensors to avoid cliffs. The robot will not be able to move if it detects a cliff or an obstacle in front of it. The user inputs are not taken into account. The emergency of collision and cliff are active
+
 class SensorManager:
     """
     Manages all sensors and detects emergency situations.

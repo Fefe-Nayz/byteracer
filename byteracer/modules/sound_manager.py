@@ -53,9 +53,6 @@ class SoundManager:
         self.is_braking = False
         self.is_drifting = False
         
-        # Cooldown timers for non-looping sounds that shouldn't repeat too quickly
-        self.acceleration_cooldown = 0
-        
         logger.info(f"Sound Manager initialized with {sum(len(s) for s in self.sounds.values())} sounds")
     
     def _load_sounds(self, category):
@@ -171,12 +168,14 @@ class SoundManager:
         abs_speed = abs(speed)
         abs_turn = abs(turn_value)
         
-        # Acceleration sound - plays once when acceleration happens, with cooldown
-        current_time = time.time()
-        if speed > 0.1 and acceleration > 0.05 and current_time > self.acceleration_cooldown:
-            logger.info(f"Playing acceleration sound, speed={abs_speed:.2f}, acceleration={acceleration:.2f}")
-            self.play_sound("acceleration")  # Play without looping
-            self.acceleration_cooldown = current_time + 2.0  # Prevent replaying for 2 seconds
+        # Acceleration sound
+        if abs_speed > 0.1 and acceleration > 0.05:
+            if not self.is_accelerating:
+                self.play_sound("acceleration", loop=True)
+                self.is_accelerating = True
+        elif self.is_accelerating:
+            self.stop_sound("acceleration")
+            self.is_accelerating = False
         
         # Braking sound
         if abs_speed > 0.1 and acceleration < -0.05:

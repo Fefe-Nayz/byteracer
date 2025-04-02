@@ -74,6 +74,9 @@ class ByteRacer:
         await self.camera_manager.start(self.handle_camera_status)
         await self.log_manager.start()
         
+        # Initialize network manager
+        self.network_manager = NetworkManager()
+        
         # Load settings from config
         await self.apply_config_settings()
         
@@ -375,6 +378,27 @@ class ByteRacer:
                         "message": "GPT command processed successfully"
                     })
                  
+            elif data["name"] == "network_scan":
+                # Handle network scan request
+                logging.info("Received network scan request")
+                networks = await self.network_manager.scan_wifi_networks()
+                await self.send_network_list(networks)
+            
+            elif data["name"] == "network_update":
+                # Handle network update request
+                if "action" in data["data"] and "data" in data["data"]:
+                    action = data["data"]["action"]
+                    network_data = data["data"]["data"]
+                    logging.info(f"Received network update request: {action}")
+                    
+                    result = await self.execute_network_action(action, network_data)
+                    await self.send_command_response(result)
+                    
+                    # After network update, send updated network list
+                    if result["success"]:
+                        networks = await self.network_manager.scan_wifi_networks()
+                        await self.send_network_list(networks)
+                    
             else:
                 logging.info(f"Received message of type: {data['name']}")
             
@@ -382,6 +406,132 @@ class ByteRacer:
             logging.warning(f"Received non-JSON message: {message}")
         except Exception as e:
             logging.error(f"Error processing message: {e}")
+    
+    async def execute_network_action(self, action, data):
+        """Execute network-related actions"""
+        result = {"success": False, "message": "Unknown network action"}
+        
+        try:
+            if action == "connect_wifi":
+                if "ssid" in data and "password" in data:
+                    result = await self.network_manager.connect_to_wifi(
+                        data["ssid"], data["password"]
+                    )
+                    
+                    # If successful, update the TTS
+                    if result["success"]:
+                        await self.tts_manager.say(f"Connected to WiFi network {data['ssid']}", priority=1)
+                else:
+                    result = {"success": False, "message": "Missing SSID or password"}
+            
+            elif action == "add_network":
+                if "ssid" in data and "password" in data:
+                    result = await self.network_manager.add_or_update_wifi(
+                        data["ssid"], data["password"]
+                    )
+                    
+                    if result["success"]:
+                        await self.tts_manager.say(f"Saved WiFi network {data['ssid']}", priority=1)
+                else:
+                    result = {"success": False, "message": "Missing SSID or password"}
+            
+            elif action == "remove_network":
+                if "ssid" in data:
+                    result = await self.network_manager.remove_wifi_network(data["ssid"])
+                    
+                    if result["success"]:
+                        await self.tts_manager.say(f"Removed WiFi network {data['ssid']}", priority=1)
+                else:
+                    result = {"success": False, "message": "Missing SSID"}
+            
+            elif action == "update_ap_settings":
+                ssid = data.get("ap_name")
+                password = data.get("ap_password")
+                
+                if ssid or password:
+                    result = await self.network_manager.update_ap_settings(ssid, password)
+                    
+                    if result["success"]:
+                        await self.tts_manager.say("Access point settings updated", priority=1)
+                else:
+                    result = {"success": False, "message": "No settings provided"}
+            
+            elif action == "create_ap":
+                # Switch to AP mode
+                success = await self.network_manager.switch_wifi_mode("ap")
+                
+                if success:
+                    result = {
+                        "success": True,
+                        "message": "Switched to Access Point mode"
+                    }
+                    await self.tts_manager.say("Switched to Access Point mode", priority=1)
+                else:
+                    result = {
+                        "success": False,
+                        "message": "Failed to switch to Access Point mode"
+                    }
+            
+            elif action == "connect_wifi_mode":
+                # Switch to WiFi client mode
+                success = await self.network_manager.switch_wifi_mode("wifi")
+                
+                if success:
+                    result = {
+                        "success": True,
+                        "message": "Switched to WiFi client mode"
+                    }
+                    await self.tts_manager.say("Switched to WiFi client mode", priority=1)
+                else:
+                    result = {
+                        "success": False,
+                        "message": "Failed to switch to WiFi client mode"
+                    }
+            
+            else:
+                result = {
+                    "success": False,
+                    "message": f"Unknown network action: {action}"
+                }
+                
+        except Exception as e:
+            logging.error(f"Error executing network action {action}: {e}")
+            result = {
+                "success": False,
+                "message": f"Error: {str(e)}"
+            }
+            
+        return result
+    
+    async def send_network_list(self, networks):
+        """Send list of available WiFi networks to client"""
+        if self.websocket and self.client_connected:
+            try:
+                # Get saved networks for comparison
+                saved_networks = await self.network_manager.get_saved_wifi_networks()
+                saved_ssids = [net["ssid"] for net in saved_networks]
+                
+                # Get connection status
+                connection_status = await self.network_manager.get_connection_status()
+                
+                # Prepare network data
+                network_data = {
+                    "networks": networks,
+                    "saved_networks": saved_networks,
+                    "status": {
+                        "ap_mode_active": connection_status["ap_mode_active"],
+                        "current_ip": connection_status["ip_addresses"].get(self.network_manager.wifi_interface, "Unknown")
+                    }
+                }
+                
+                await self.websocket.send(json.dumps({
+                    "name": "network_list",
+                    "data": network_data,
+                    "createdAt": int(time.time() * 1000)
+                }))
+                logging.debug(f"Sent network list with {len(networks)} networks")
+            except Exception as e:
+                logging.error(f"Error sending network list: {e}")
     
     async def handle_gamepad_input(self, data):
         """Handle gamepad input data"""
