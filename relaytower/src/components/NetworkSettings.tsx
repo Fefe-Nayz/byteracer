@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useWebSocket, RobotSettings } from "@/contexts/WebSocketContext";
+import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
@@ -24,9 +24,14 @@ interface NetworkStatus {
   internet_connected: boolean;
 }
 
+interface SavedNetwork {
+  ssid: string;
+  id: string;
+}
+
 export default function NetworkSettings() {
   const { toast } = useToast();
-  const { status, settings, updateSettings, scanNetworks, updateNetwork, requestSettings } = useWebSocket();
+  const { status, settings, scanNetworks, updateNetwork, requestSettings } = useWebSocket();
   
   // Local state for form values
   const [mode, setMode] = useState<NetworkMode>("wifi");
@@ -80,7 +85,7 @@ export default function NetworkSettings() {
         // Update saved networks
         if (Array.isArray(event.detail.saved_networks)) {
           // Convert saved network format to our local format
-          const savedNetworks = event.detail.saved_networks.map((network: any) => ({
+          const savedNetworks = event.detail.saved_networks.map((network: SavedNetwork) => ({
             ssid: network.ssid,
             password: "********" // Password is not provided from server for security
           }));
