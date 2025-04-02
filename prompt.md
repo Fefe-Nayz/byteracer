@@ -107,19 +107,19 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 ---
 
 # TODO:
-- Implémenter les paramètres réseaux
+- Refactor de l'implémentation des Etats du robot
+- Implémenter l'intégration avec chatGPT
 - Revérifier le code de redémarrage de la caméra et le code de redémarrage du python (voir si il y a pas de problème de redémarrage du python) et tester les autres
+- Implémenter les drive settings (max speed, acceleration, turn speed, etc.)
+- Change volume for different types
+- Arrêter un son ou le TTS en cours
+- Changer de branche bouton
 - Le status de la caméra doit être visible sur le client
 - Meilleur suivi de l'état de mise à jour sur le client
-- Implémenter l'intégration avec chatGPT
 - Implémenter un affichage de la vitesse qui dépends de l'integration de l'accélération grâce à l'accéléromètre (si il existe)
-- Implémenter les drive settings (max speed, acceleration, turn speed, etc.)
-- Changer de branche bouton
 - Reset mappings/settings
-- Change volume for different types
 - overlay full screen
 - Ajouter un mode nuit pour l'interface utilisateur
-- Arrêter un son ou le TTS en cours
 
 Gerardo :
 - Implémenter le mode démo (envoi de commandes préenregistrées au robot pour le faire avancer, tourner, reculer, freiner, etc.)
