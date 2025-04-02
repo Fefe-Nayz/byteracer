@@ -47,7 +47,8 @@ export type NetworkAction =
   | "create_ap"
   | "add_network" 
   | "remove_network"
-  | "update_ap_settings";
+  | "update_ap_settings"
+  | "connect_wifi_mode"
 
 // Define network update data interface
 export interface NetworkUpdateData {

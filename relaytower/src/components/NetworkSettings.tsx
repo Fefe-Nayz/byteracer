@@ -4,14 +4,27 @@ import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { Wifi, Globe, Loader2, PlusCircle, Trash2 } from "lucide-react";
+import { Wifi, Globe, Loader2, PlusCircle, Trash2, WifiOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "./ui/badge";
 
 type NetworkMode = "wifi" | "ap";
 type WifiNetwork = { ssid: string; password: string };
 
-export default function NetworkSettings() {
+// Define interface for network status
+interface NetworkStatus {
+  ap_mode_active: boolean;
+  current_ip: string;
+  current_connection?: {
+    ssid: string;
+    name: string;
+    ip?: string;
+  };
+  ap_ssid?: string;
+  internet_connected: boolean;
+}
 
+export default function NetworkSettings() {
   const { toast } = useToast();
   const { status, settings, updateSettings, scanNetworks, updateNetwork, requestSettings } = useWebSocket();
   
@@ -24,6 +37,11 @@ export default function NetworkSettings() {
   const [newPassword, setNewPassword] = useState("");
   const [availableNetworks, setAvailableNetworks] = useState<string[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>({
+    ap_mode_active: false,
+    current_ip: "",
+    internet_connected: false
+  });
   
   // Update local state when we get settings from server
   useEffect(() => {
@@ -39,21 +57,48 @@ export default function NetworkSettings() {
   useEffect(() => {
     if (status === "connected") {
       requestSettings();
+      scanNetworks(); // Also request network scan on initial load
     }
-  }, [status, requestSettings]);
+  }, [status, requestSettings, scanNetworks]);
   
   // Listen for network scan results
   useEffect(() => {
     const handleNetworkList = (event: CustomEvent) => {
-      if (event.detail && Array.isArray(event.detail.networks)) {
-        setAvailableNetworks(event.detail.networks);
-        setIsScanning(false);
+      if (event.detail) {
+        // Update available networks
+        if (Array.isArray(event.detail.networks)) {
+          setAvailableNetworks(event.detail.networks);
+          setIsScanning(false);
+          
+          toast({
+            title: "Network scan complete",
+            description: `Found ${event.detail.networks.length} networks`,
+            duration: 3000,
+          });
+        }
         
-        toast({
-          title: "Network scan complete",
-          description: `Found ${event.detail.networks.length} networks`,
-          duration: 3000,
-        });
+        // Update saved networks
+        if (Array.isArray(event.detail.saved_networks)) {
+          // Convert saved network format to our local format
+          const savedNetworks = event.detail.saved_networks.map((network: any) => ({
+            ssid: network.ssid,
+            password: "********" // Password is not provided from server for security
+          }));
+          
+          setKnownNetworks(savedNetworks);
+        }
+        
+        // Update network status
+        if (event.detail.status) {
+          setNetworkStatus(event.detail.status);
+          
+          // Update mode based on active mode from status
+          if (event.detail.status.ap_mode_active) {
+            setMode("ap");
+          } else {
+            setMode("wifi");
+          }
+        }
       }
     };
     
@@ -70,7 +115,7 @@ export default function NetworkSettings() {
         handleNetworkList as EventListener
       );
     };
-  }, [toast, setIsScanning, setAvailableNetworks]);
+  }, [toast, setIsScanning, setAvailableNetworks, setKnownNetworks, setNetworkStatus, setMode]);
   
   // Start network scan
   const handleScanNetworks = () => {
@@ -101,13 +146,8 @@ export default function NetworkSettings() {
       return;
     }
     
-    // Add to local state
-    const newNetwork = { ssid: newSsid, password: newPassword };
-    const updatedNetworks = [...knownNetworks, newNetwork];
-    setKnownNetworks(updatedNetworks);
-    
     // Send update to robot
-    updateNetwork("add_network", newNetwork);
+    updateNetwork("add_network", { ssid: newSsid, password: newPassword });
     
     // Reset form
     setNewSsid("");
@@ -122,10 +162,6 @@ export default function NetworkSettings() {
   
   // Remove WiFi network
   const handleRemoveNetwork = (ssid: string) => {
-    // Update local state
-    const updatedNetworks = knownNetworks.filter(n => n.ssid !== ssid);
-    setKnownNetworks(updatedNetworks);
-    
     // Send update to robot
     updateNetwork("remove_network", { ssid });
     
@@ -147,18 +183,11 @@ export default function NetworkSettings() {
       return;
     }
     
-    // Create a partial settings object for update
-    const networkSettings: Partial<RobotSettings> = {
-      network: {
-        mode: "ap",
-        ap_name: apName,
-        ap_password: apPassword,
-        known_networks: knownNetworks
-      }
-    };
-    
-    // Update settings
-    updateSettings(networkSettings);
+    // Update AP settings
+    updateNetwork("update_ap_settings", { 
+      ap_name: apName, 
+      ap_password: apPassword 
+    });
     
     toast({
       title: "AP settings saved",
@@ -169,23 +198,43 @@ export default function NetworkSettings() {
   
   // Change network mode
   const handleModeChange = (newMode: NetworkMode) => {
-    // Create a partial settings object for update
-    const networkSettings: Partial<RobotSettings> = {
-      network: {
-        mode: newMode,
-        ap_name: apName,
-        ap_password: apPassword,
-        known_networks: knownNetworks
-      }
-    };
+    if (newMode === mode) return; // No change
     
-    // Update settings and local state
     setMode(newMode);
-    updateSettings(networkSettings);
+    
+    // Execute the actual mode switch
+    if (newMode === "ap") {
+      updateNetwork("create_ap", {});
+    } else {
+      updateNetwork("connect_wifi_mode", {});
+    }
     
     toast({
-      title: "Network mode changed",
-      description: `Switched to ${newMode === "wifi" ? "WiFi" : "Access Point"} mode`,
+      title: "Network mode changing",
+      description: `Switching to ${newMode === "wifi" ? "WiFi" : "Access Point"} mode...`,
+      duration: 3000,
+    });
+  };
+  
+  // Connect to a WiFi network
+  const handleConnectToWifi = () => {
+    if (!newSsid.trim() || !newPassword.trim()) {
+      toast({
+        title: "Error",
+        description: "SSID and password are required to connect",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    updateNetwork("connect_wifi", { 
+      ssid: newSsid, 
+      password: newPassword 
+    });
+    
+    toast({
+      title: "Connecting to WiFi",
+      description: `Connecting to ${newSsid}...`,
       duration: 3000,
     });
   };
@@ -196,13 +245,13 @@ export default function NetworkSettings() {
   };
   
   // If not connected, show placeholder
-  if (status !== "connected" || !settings) {
+  if (status !== "connected") {
     return (
       <Card className="p-4">
         <h3 className="font-bold mb-3">Network Settings</h3>
         <div className="text-sm text-gray-500 italic">
-          {status === "connected" 
-            ? "Loading settings..." 
+          {status === "connecting" 
+            ? "Connecting to robot..." 
             : "Connect to robot to view network settings"}
         </div>
       </Card>
@@ -211,9 +260,52 @@ export default function NetworkSettings() {
   
   return (
     <Card className="p-4">
-      <div className="flex items-center space-x-2 mb-4">
-        <Globe className="h-5 w-5" />
-        <h3 className="font-bold">Network Settings</h3>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-2">
+          <Globe className="h-5 w-5" />
+          <h3 className="font-bold">Network Settings</h3>
+        </div>
+        
+        {/* Connection Status */}
+        <div className="flex items-center space-x-2">
+          {networkStatus.internet_connected ? (
+            <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200">
+              <Wifi className="h-3 w-3 mr-1" />
+              Internet Connected
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="bg-yellow-50 text-yellow-600 border-yellow-200">
+              <WifiOff className="h-3 w-3 mr-1" />
+              No Internet
+            </Badge>
+          )}
+          
+          {networkStatus.current_ip && (
+            <Badge variant="outline" className="text-xs">
+              IP: {networkStatus.current_ip}
+            </Badge>
+          )}
+        </div>
+      </div>
+      
+      {/* Current Connection Info */}
+      <div className="mb-4 p-2 border rounded-md bg-muted/30">
+        <div className="text-sm font-medium mb-1">Current Connection:</div>
+        {networkStatus.ap_mode_active ? (
+          <div className="flex items-center space-x-2">
+            <Globe className="h-4 w-4 text-primary" />
+            <span>Access Point Mode: {networkStatus.ap_ssid || apName || "ByteRacer_AP"}</span>
+          </div>
+        ) : networkStatus.current_connection ? (
+          <div className="flex items-center space-x-2">
+            <Wifi className="h-4 w-4 text-primary" />
+            <span>Connected to: {networkStatus.current_connection.ssid}</span>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-500 italic">
+            Not connected to any network
+          </div>
+        )}
       </div>
       
       <div className="mb-4">
@@ -272,7 +364,7 @@ export default function NetworkSettings() {
             </div>
             
             <div>
-              <h4 className="text-sm font-medium mb-2">Add New Network</h4>
+              <h4 className="text-sm font-medium mb-2">Connect to WiFi</h4>
               <div className="space-y-2">
                 <Input
                   value={newSsid}
@@ -285,14 +377,25 @@ export default function NetworkSettings() {
                   onChange={(e) => setNewPassword(e.target.value)}
                   placeholder="WiFi Password"
                 />
-                <Button
-                  onClick={handleAddNetwork}
-                  disabled={!newSsid.trim() || !newPassword.trim()}
-                  className="w-full"
-                >
-                  <PlusCircle className="h-4 w-4 mr-2" />
-                  Add Network
-                </Button>
+                <div className="flex space-x-2">
+                  <Button
+                    onClick={handleConnectToWifi}
+                    disabled={!newSsid.trim() || !newPassword.trim()}
+                    className="flex-1"
+                    variant="secondary"
+                  >
+                    <Wifi className="h-4 w-4 mr-2" />
+                    Connect
+                  </Button>
+                  <Button
+                    onClick={handleAddNetwork}
+                    disabled={!newSsid.trim() || !newPassword.trim()}
+                    className="flex-1"
+                  >
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Save Network
+                  </Button>
+                </div>
               </div>
             </div>
             
@@ -322,28 +425,38 @@ export default function NetworkSettings() {
                   </div>
                 ) : availableNetworks.length > 0 ? (
                   <div className="space-y-1">
-                    {availableNetworks.map((ssid) => (
-                      <div
-                        key={ssid}
-                        className="flex justify-between items-center p-2 hover:bg-muted/50 rounded cursor-pointer"
-                        onClick={() => handleUseNetwork(ssid)}
-                      >
-                        <div className="flex items-center space-x-2">
-                          <Wifi className="h-4 w-4" />
-                          <span className="text-sm">{ssid}</span>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleUseNetwork(ssid);
-                          }}
+                    {availableNetworks.map((ssid) => {
+                      // Check if this network is saved
+                      const isSaved = knownNetworks.some(n => n.ssid === ssid);
+                      const isConnected = networkStatus.current_connection?.ssid === ssid;
+                      
+                      return (
+                        <div
+                          key={ssid}
+                          className={`flex justify-between items-center p-2 hover:bg-muted/50 rounded cursor-pointer ${
+                            isConnected ? "bg-green-50" : ""
+                          }`}
+                          onClick={() => handleUseNetwork(ssid)}
                         >
-                          Use
-                        </Button>
-                      </div>
-                    ))}
+                          <div className="flex items-center space-x-2">
+                            <Wifi className={`h-4 w-4 ${isConnected ? "text-green-500" : ""}`} />
+                            <span className="text-sm">{ssid}</span>
+                            {isSaved && <Badge variant="outline" className="text-xs">Saved</Badge>}
+                            {isConnected && <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200 text-xs">Connected</Badge>}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleUseNetwork(ssid);
+                            }}
+                          >
+                            Use
+                          </Button>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <div className="p-4 text-center text-sm text-gray-500">

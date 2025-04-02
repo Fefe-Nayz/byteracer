@@ -187,7 +187,7 @@ class NetworkManager:
         try:
             # List all saved connections along with their SSIDs
             returncode, stdout, stderr = self._run_command(
-                ["nmcli", "-t", "-f", "NAME,SSID", "connection", "show"]
+                ["nmcli", "-t", "-f", "NAME,UUID", "connection", "show"]
             )
             
             if returncode != 0:
@@ -198,11 +198,23 @@ class NetworkManager:
             
             # Look for an existing connection with this SSID
             conn_name = None
-            for line in stdout.splitlines():
-                parts = line.split(":")
-                if len(parts) >= 2 and parts[1] == ssid:
+            
+            # Get details for each connection to find matching SSID
+            connections = stdout.splitlines()
+            for connection in connections:
+                parts = connection.split(":")
+                if len(parts) >= 1:
                     conn_name = parts[0]
-                    break
+                    # Check if this connection's SSID matches what we're looking for
+                    details_rc, details_out, _ = self._run_command(
+                        ["nmcli", "-t", "connection", "show", conn_name]
+                    )
+                    if details_rc == 0:
+                        for line in details_out.splitlines():
+                            if "802-11-wireless.ssid:" in line and ssid in line:
+                                # Found a matching connection
+                                conn_name = parts[0]
+                                break
             
             if conn_name:
                 # Update the password for the existing connection
@@ -263,9 +275,9 @@ class NetworkManager:
             Dictionary with operation status information
         """
         try:
-            # List all saved connections with SSIDs
+            # List all saved connections
             returncode, stdout, stderr = self._run_command(
-                ["nmcli", "-t", "-f", "NAME,SSID", "connection", "show"]
+                ["nmcli", "-t", "-f", "NAME", "connection", "show"]
             )
             
             if returncode != 0:
@@ -274,12 +286,23 @@ class NetworkManager:
                     "message": f"Failed to list connections: {stderr}"
                 }
             
-            # Find connection name for the SSID
+            # Find connection name that matches the SSID
             conn_name = None
-            for line in stdout.splitlines():
-                parts = line.split(":")
-                if len(parts) >= 2 and parts[1] == ssid:
-                    conn_name = parts[0]
+            connections = stdout.splitlines()
+            
+            for connection in connections:
+                # Check each connection's SSID
+                details_rc, details_out, _ = self._run_command(
+                    ["nmcli", "-t", "connection", "show", connection]
+                )
+                if details_rc == 0:
+                    for line in details_out.splitlines():
+                        if "802-11-wireless.ssid:" in line and ssid in line:
+                            # Found matching connection
+                            conn_name = connection
+                            break
+                
+                if conn_name:
                     break
             
             if not conn_name:
@@ -465,39 +488,54 @@ class NetworkManager:
         
         Returns:
             List of dictionaries containing network information:
-            [{"ssid": "network1", "id": "0"}, ...]
+            [{"ssid": "network1", "id": "conn_name"}, ...]
         """
         networks = []
         
-        # Use nmcli to list networks
-        returncode, stdout, stderr = self._run_command(
-            ["nmcli", "-t", "-f", "NAME,TYPE,SSID", "connection", "show"]
-        )
-        
-        if returncode != 0:
-            self.logger.error(f"Failed to get saved networks: {stderr}")
-            return networks
-        
-        # Parse the output - looking only for wifi connections
-        for line in stdout.splitlines():
-            parts = line.split(":")
-            if len(parts) >= 3 and parts[1] == "wifi" or parts[1] == "802-11-wireless":
-                # Skip AP profiles, only include client connections
-                # Get connection details to check if it's an AP
-                conn_check, conn_out, _ = self._run_command(
-                    ["nmcli", "-t", "connection", "show", parts[0], "| grep wireless.mode"]
-                )
-                
-                # Skip if it's an AP
-                if conn_check == 0 and "ap" in conn_out.lower():
-                    continue
+        try:
+            # Use nmcli to list all connections
+            returncode, stdout, stderr = self._run_command(
+                ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"]
+            )
+            
+            if returncode != 0:
+                self.logger.error(f"Failed to get saved networks: {stderr}")
+                return networks
+            
+            # Parse the output to find wifi connections
+            for line in stdout.splitlines():
+                parts = line.split(":")
+                if len(parts) >= 2 and parts[1] in ["wifi", "802-11-wireless"]:
+                    conn_name = parts[0]
                     
-                networks.append({
-                    "id": parts[0],
-                    "ssid": parts[2],
-                })
-        
-        return networks
+                    # Get connection details to find SSID and verify it's not an AP
+                    details_rc, details_out, _ = self._run_command(
+                        ["nmcli", "-t", "connection", "show", conn_name]
+                    )
+                    
+                    if details_rc == 0:
+                        ssid = None
+                        is_ap = False
+                        
+                        for detail in details_out.splitlines():
+                            if "802-11-wireless.ssid:" in detail:
+                                ssid = detail.split("802-11-wireless.ssid:")[1].strip()
+                            elif "802-11-wireless.mode:" in detail and "ap" in detail.lower():
+                                is_ap = True
+                                break
+                        
+                        # Add to list if it's a client connection (not AP) and has SSID
+                        if ssid and not is_ap:
+                            networks.append({
+                                "id": conn_name,
+                                "ssid": ssid
+                            })
+            
+            return networks
+            
+        except Exception as e:
+            self.logger.error(f"Error getting saved networks: {e}")
+            return networks
 
     def get_ip_address(self, interface: str = None) -> Dict[str, str]:
         """
@@ -548,6 +586,56 @@ class NetworkManager:
         
         return result
 
+    def get_current_connection(self) -> Dict[str, Any]:
+        """
+        Get details about the currently active WiFi connection.
+        
+        Returns:
+            Dictionary with connection details or empty if not connected
+        """
+        try:
+            # Get active connections
+            returncode, stdout, stderr = self._run_command(
+                ["nmcli", "-t", "-f", "NAME,DEVICE,TYPE", "connection", "show", "--active"]
+            )
+            
+            if returncode != 0:
+                return {}
+            
+            # Find active WiFi connection
+            wifi_conn = None
+            for line in stdout.splitlines():
+                parts = line.split(":")
+                if len(parts) >= 3 and parts[2] in ["wifi", "802-11-wireless"] and parts[1] == self.wifi_interface:
+                    wifi_conn = parts[0]
+                    break
+            
+            if not wifi_conn:
+                return {}
+            
+            # Get details of the connection
+            details_rc, details_out, _ = self._run_command(
+                ["nmcli", "-t", "connection", "show", wifi_conn]
+            )
+            
+            if details_rc != 0:
+                return {}
+            
+            result = {"name": wifi_conn}
+            
+            # Parse details to get SSID, signal strength, etc.
+            for line in details_out.splitlines():
+                if "802-11-wireless.ssid:" in line:
+                    result["ssid"] = line.split("802-11-wireless.ssid:")[1].strip()
+                elif "IP4.ADDRESS" in line:
+                    result["ip"] = line.split("IP4.ADDRESS[1]:")[1].strip()
+                
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error getting current connection: {e}")
+            return {}
+
     def is_connected_to_internet(self) -> bool:
         """
         Check if device is connected to the internet.
@@ -569,52 +657,49 @@ class NetworkManager:
         Returns:
             Dictionary with status information
         """
+        # Check AP mode first
+        self._check_ap_mode()
+        
+        # Get basic connectivity information
         status = {
             "internet_connected": self.is_connected_to_internet(),
             "ap_mode_active": self._ap_mode_active,
             "ip_addresses": self.get_ip_address(),
-            "saved_networks": await self.get_saved_wifi_networks()
         }
         
         # Get current connection details
-        returncode, stdout, stderr = self._run_command(
-            ["nmcli", "-t", "-f", "NAME,DEVICE,TYPE,ACTIVE", "connection", "show"]
-        )
+        current_conn = self.get_current_connection()
+        if current_conn:
+            status["current_connection"] = current_conn
         
-        if returncode == 0:
-            active_connections = []
-            for line in stdout.splitlines():
-                parts = line.split(":")
-                if len(parts) >= 4 and parts[3] == "yes":
-                    active_connections.append({
-                        "name": parts[0],
-                        "device": parts[1],
-                        "type": parts[2]
-                    })
-            
-            status["active_connections"] = active_connections
-            
-            # Find active WiFi connection
-            wifi_conn = next((conn for conn in active_connections 
-                             if conn["type"] == "wifi" or conn["type"] == "802-11-wireless"), None)
-            
-            if wifi_conn:
-                # Get signal strength
-                returncode, stdout, stderr = self._run_command(
-                    ["nmcli", "-f", "SIGNAL", "device", "wifi", "list", "ifname", wifi_conn["device"]]
-                )
-                
-                if returncode == 0:
-                    # Extract signal strength from the output
-                    lines = stdout.strip().split('\n')
-                    if len(lines) > 1:  # Skip the header
-                        for line in lines[1:]:
-                            if "*" in line:  # Connected network has asterisk
-                                parts = line.split()
-                                for part in parts:
-                                    if part.isdigit():
-                                        status["wifi_signal"] = int(part)
-                                        break
+        # Get saved networks list
+        try:
+            saved_networks = await self.get_saved_wifi_networks()
+            status["saved_networks"] = saved_networks
+        except Exception as e:
+            self.logger.error(f"Error getting saved networks: {e}")
+            status["saved_networks"] = []
+        
+        # Get AP information if in AP mode
+        if self._ap_mode_active:
+            # Try to get AP details from the script
+            try:
+                script_path = "/usr/bin/accesspopup"
+                if os.path.isfile(script_path):
+                    with open(script_path, "r") as f:
+                        content = f.read()
+                        
+                        # Extract AP SSID
+                        ssid_match = re.search(r"ap_ssid='([^']*)'", content)
+                        if ssid_match:
+                            status["ap_ssid"] = ssid_match.group(1)
+                        
+                        # Extract AP IP
+                        ip_match = re.search(r"ap_ip='([^']*)'", content)
+                        if ip_match:
+                            status["ap_ip"] = ip_match.group(1)
+            except Exception as e:
+                self.logger.error(f"Error getting AP details: {e}")
         
         return status
 
@@ -628,23 +713,47 @@ class NetworkManager:
 
     def _check_ap_mode(self) -> None:
         """Check if AP mode is currently active."""
-        returncode, stdout, stderr = self._run_command(["nmcli", "-t", "connection", "show", "--active"])
-        
-        if returncode == 0:
-            # Look for active AP mode connections
+        try:
+            returncode, stdout, stderr = self._run_command(
+                ["nmcli", "-t", "connection", "show", "--active"]
+            )
+            
+            if returncode != 0:
+                self._ap_mode_active = False
+                return
+            
+            # Look for active connections
             for line in stdout.splitlines():
                 parts = line.split(":")
                 if len(parts) >= 2:
                     conn_name = parts[0]
+                    
                     # Check if this connection is in AP mode
-                    mode_check, mode_out, _ = self._run_command(
-                        ["nmcli", "-t", "connection", "show", conn_name, "| grep wireless.mode"]
+                    details_rc, details_out, _ = self._run_command(
+                        ["nmcli", "-t", "connection", "show", conn_name]
                     )
-                    if mode_check == 0 and "ap" in mode_out.lower():
+                    
+                    if details_rc == 0 and "802-11-wireless.mode:ap" in details_out:
                         self._ap_mode_active = True
                         return
-        
-        self._ap_mode_active = False
+            
+            # If we didn't find any AP connection, check via different method
+            script_path = "/usr/bin/accesspopup"
+            if os.path.isfile(script_path):
+                # Run accesspopup with no arguments to see current state
+                status_rc, status_out, _ = self._run_command(
+                    ["sudo", script_path]
+                )
+                
+                if status_rc == 0 and "Access Point " in status_out and "active" in status_out:
+                    self._ap_mode_active = True
+                    return
+            
+            self._ap_mode_active = False
+            
+        except Exception as e:
+            self.logger.error(f"Error checking AP mode: {e}")
+            self._ap_mode_active = False
 
     async def restart_networking(self) -> bool:
         """

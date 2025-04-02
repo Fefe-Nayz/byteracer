@@ -507,20 +507,27 @@ class ByteRacer:
         """Send list of available WiFi networks to client"""
         if self.websocket and self.client_connected:
             try:
-                # Get saved networks for comparison
-                saved_networks = await self.network_manager.get_saved_wifi_networks()
-                saved_ssids = [net["ssid"] for net in saved_networks]
-                
-                # Get connection status
+                # Get current connection status first for more complete information
                 connection_status = await self.network_manager.get_connection_status()
                 
-                # Prepare network data
+                # Get current connection if available
+                current_connection = None
+                if "current_connection" in connection_status and "ssid" in connection_status["current_connection"]:
+                    current_connection = connection_status["current_connection"]
+                
+                # Get saved networks
+                saved_networks = connection_status.get("saved_networks", [])
+                
+                # Create extended network data by marking networks that are saved
                 network_data = {
                     "networks": networks,
                     "saved_networks": saved_networks,
                     "status": {
                         "ap_mode_active": connection_status["ap_mode_active"],
-                        "current_ip": connection_status["ip_addresses"].get(self.network_manager.wifi_interface, "Unknown")
+                        "current_ip": connection_status["ip_addresses"].get(self.network_manager.wifi_interface, "Unknown"),
+                        "current_connection": current_connection,
+                        "ap_ssid": connection_status.get("ap_ssid", "ByteRacer_AP"),
+                        "internet_connected": connection_status.get("internet_connected", False)
                     }
                 }
                 
