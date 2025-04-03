@@ -103,35 +103,55 @@ class TTSManager:
         """Stop the currently playing speech and clear the queue"""
         logger.info("Stopping current speech and clearing queue")
         
+        # Kill any running speech process
         with self._lock:
-            # Kill any running speech process
-            if self._current_process and self._current_process.poll() is None:
-                try:
-                    # Try to terminate the process
-                    self._current_process.terminate()
-                    # Wait a short time for it to terminate gracefully
-                    for _ in range(10):  # Wait up to 0.5 seconds
-                        if self._current_process.poll() is not None:
-                            break
-                        await asyncio.sleep(0.05)
-                    
-                    # If it's still running, force kill it
-                    if self._current_process.poll() is None:
-                        self._current_process.kill()
-                        
-                    logger.debug("Stopped current speech process")
-                except Exception as e:
-                    logger.error(f"Error stopping speech process: {e}")
-            
-            # Clear the queue
+            current_process = self._current_process
+            # Clear the queue while we have the lock
             self.clear_queue()
-            
             # Reset speaking state
             self._speaking = False
             self._current_priority = 0
             self._current_process = None
         
+        # Now handle the process termination outside the lock since it involves awaits
+        if current_process and current_process.poll() is None:
+            try:
+                # Try to terminate the process
+                current_process.terminate()
+                
+                # Wait a short time for it to terminate gracefully - outside the lock
+                for _ in range(10):  # Wait up to 0.5 seconds
+                    if current_process.poll() is not None:
+                        break
+                    await asyncio.sleep(0.05)
+                
+                # If it's still running, force kill it
+                if current_process.poll() is None:
+                    current_process.kill()
+                    
+                logger.debug("Stopped current speech process")
+            except Exception as e:
+                logger.error(f"Error stopping speech process: {e}")
+        
+        # Find and clean up any temporary TTS files that might be in use
+        await asyncio.to_thread(self._cleanup_temp_files)
+        
         return True
+        
+    def _cleanup_temp_files(self):
+        """Clean up temporary TTS files that might still be in use"""
+        try:
+            for filename in os.listdir("/tmp"):
+                if (filename.startswith("tts_") and filename.endswith(".wav")) or \
+                   (filename.startswith("tts_vol_") and filename.endswith(".wav")):
+                    try:
+                        file_path = os.path.join("/tmp", filename)
+                        os.remove(file_path)
+                        logger.debug(f"Cleaned up TTS temp file: {filename}")
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temp file {filename}: {e}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up temporary TTS files: {e}")
     
     def _speak(self, text):
         """Execute the actual TTS operation"""

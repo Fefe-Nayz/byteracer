@@ -206,8 +206,12 @@ class SoundManager:
             if channel_id:
                 channel_id.play(sound)
                 
-                # Track the channel
-                self.current_sounds["alerts"].append(channel_id.get_id())
+                # Track the channel - fixed to store the numerical ID instead of calling get_id()
+                # Store the channel number instead of trying to get an ID
+                for i in range(pygame.mixer.get_num_channels()):
+                    if pygame.mixer.Channel(i) == channel_id:
+                        self.current_sounds["alerts"].append(i)
+                        break
                 
                 logger.debug(f"Playing alert sound: {alert_name}")
                 return True
