@@ -18,7 +18,10 @@ class TTSManager:
     def __init__(self, sound_manager=None, lang="en-US", enabled=True, volume=80):
         self.lang = lang
         self.enabled = enabled
-        self.volume = volume
+        self.volume = volume  # Master TTS volume
+        self.user_tts_volume = 80  # Volume for user-triggered TTS
+        self.system_tts_volume = 90  # Volume for system/emergency TTS
+        self.emergency_tts_volume = 95  # Volume for emergency TTS
         self.sound_manager = sound_manager
         self._queue = asyncio.Queue()
         self._speaking = False
@@ -197,11 +200,24 @@ class TTSManager:
                 return False
             
             # Apply volume adjustment if needed
-            if self.volume != 100:
+            # Determine effective volume based on priority
+            # Priority 0: user-triggered TTS (lower priority)
+            # Priority 1: system TTS (medium priority)
+            # Priority 2+: emergency TTS (highest priority)
+            if self._current_priority >= 2:
+                priority_volume = self.emergency_tts_volume
+            elif self._current_priority == 1:
+                priority_volume = self.system_tts_volume
+            else:
+                priority_volume = self.user_tts_volume
+                
+            effective_volume = (self.volume / 100.0) * (priority_volume / 100.0)
+            
+            if effective_volume != 1.0:
                 volume_file = f"/tmp/tts_vol_{uuid.uuid4().hex}.wav"
                 
                 # Use sox to adjust volume
-                vol_multiplier = max(0.0, min(1.0, self.volume / 100.0))
+                vol_multiplier = max(0.0, min(1.0, effective_volume))
                 vol_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier}'
                 
                 self._current_process = subprocess.Popen(vol_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -224,8 +240,8 @@ class TTSManager:
                 # Load the sound
                 sound = pygame.mixer.Sound(final_file)
                 
-                # Set initial volume
-                sound.set_volume(self.volume / 100.0)
+                # Set initial volume based on master * category volume
+                sound.set_volume(effective_volume)
                 
                 # Stop any current TTS first - critical to avoid blocking
                 if self._tts_channel_id is not None:
@@ -238,7 +254,7 @@ class TTSManager:
                         channel_id = i
                         break
                 
-                if channel_id is None:
+                if (channel_id is None):
                     # If no channel is available, use the reserved TTS channel anyway
                     channel_id = self.tts_channel_max
                     pygame.mixer.Channel(channel_id).stop()  # Force stop anything on this channel
@@ -388,21 +404,95 @@ class TTSManager:
         
     def set_volume(self, volume):
         """
-        Set the TTS volume level
+        Set the master TTS volume level
         
         Args:
             volume (int): Volume level from 0 (mute) to 100 (max)
         """
         # Ensure volume is between 0 and 100
         self.volume = max(0, min(100, volume))
-        logger.info(f"TTS volume set to {self.volume}%")
+        logger.info(f"TTS master volume set to {self.volume}%")
         
         # Update volume of currently playing TTS if any
-        if self._tts_sound:
-            self._tts_sound.set_volume(self.volume / 100.0)
+        self._update_current_tts_volume()
             
         return self.volume
+    
+    def set_user_tts_volume(self, volume):
+        """
+        Set the volume level for user-triggered TTS (priority 0)
         
+        Args:
+            volume (int): Volume level from 0 (mute) to 100 (max)
+        """
+        # Ensure volume is between 0 and 100
+        self.user_tts_volume = max(0, min(100, volume))
+        logger.info(f"User TTS volume set to {self.user_tts_volume}%")
+        
+        # Update volume if currently playing and is user TTS
+        self._update_current_tts_volume()
+        
+        return self.user_tts_volume
+    
+    def set_system_tts_volume(self, volume):
+        """
+        Set the volume level for system/emergency TTS (priority 1+)
+        
+        Args:
+            volume (int): Volume level from 0 (mute) to 100 (max)
+        """
+        # Ensure volume is between 0 and 100
+        self.system_tts_volume = max(0, min(100, volume))
+        logger.info(f"System TTS volume set to {self.system_tts_volume}%")
+        
+        # Update volume if currently playing and is system TTS
+        self._update_current_tts_volume()
+        
+        return self.system_tts_volume
+    
+    def set_emergency_tts_volume(self, volume):
+        """
+        Set the volume level for emergency TTS (priority 2+)
+        
+        Args:
+            volume (int): Volume level from 0 (mute) to 100 (max)
+        """
+        # Ensure volume is between 0 and 100
+        self.emergency_tts_volume = max(0, min(100, volume))
+        logger.info(f"Emergency TTS volume set to {self.emergency_tts_volume}%")
+        
+        # Update volume if currently playing and is emergency TTS
+        self._update_current_tts_volume()
+        
+        return self.emergency_tts_volume
+    
+    def get_emergency_tts_volume(self):
+        """Get the current emergency TTS volume level"""
+        return self.emergency_tts_volume
+    
+    def _update_current_tts_volume(self):
+        """Update the volume of currently playing TTS based on its priority"""
+        with self._lock:
+            if self._tts_sound and self._current_priority is not None:
+                # Determine which volume to use based on priority
+                if self._current_priority >= 2:
+                    priority_volume = self.emergency_tts_volume
+                elif self._current_priority == 1:
+                    priority_volume = self.system_tts_volume
+                else:
+                    priority_volume = self.user_tts_volume
+                effective_volume = (self.volume / 100.0) * (priority_volume / 100.0)
+                self._tts_sound.set_volume(effective_volume)
+                logger.debug(f"Updated TTS volume to {effective_volume*100:.1f}%")
+    
     def get_volume(self):
-        """Get the current TTS volume level"""
+        """Get the current TTS master volume level"""
         return self.volume
+    
+    def get_user_tts_volume(self):
+        """Get the current user TTS volume level"""
+        return self.user_tts_volume
+    
+    def get_system_tts_volume(self):
+        """Get the current system TTS volume level"""
+        return self.system_tts_volume

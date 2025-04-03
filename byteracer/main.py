@@ -132,13 +132,41 @@ class ByteRacer:
         """Apply settings from config manager to all components"""
         settings = self.config_manager.get()
         
-        # Apply sound settings
+        # Apply sound settings - updating with detailed volume controls
         self.sound_manager.set_enabled(settings["sound"]["enabled"])
+        
+        # Apply master volume
         self.sound_manager.set_volume(settings["sound"]["volume"])
+        
+        # Apply sound effects master volume
+        if "sound_volume" in settings["sound"]:
+            self.sound_manager.set_sound_volume(settings["sound"]["sound_volume"])
+        
+        # Apply category-specific volumes
+        if "driving_volume" in settings["sound"]:
+            self.sound_manager.set_category_volume("driving", settings["sound"]["driving_volume"])
+        
+        if "alert_volume" in settings["sound"]:
+            self.sound_manager.set_category_volume("alert", settings["sound"]["alert_volume"])
+        
+        if "custom_volume" in settings["sound"]:
+            self.sound_manager.set_category_volume("custom", settings["sound"]["custom_volume"])
         
         # Apply TTS settings
         self.tts_manager.set_enabled(settings["sound"]["tts_enabled"])
         self.tts_manager.set_language(settings["sound"]["tts_language"])
+        
+        # Apply TTS volume settings
+        self.tts_manager.set_volume(settings["sound"]["tts_volume"])
+        
+        if "user_tts_volume" in settings["sound"]:
+            self.tts_manager.set_user_tts_volume(settings["sound"]["user_tts_volume"])
+        
+        if "system_tts_volume" in settings["sound"]:
+            self.tts_manager.set_system_tts_volume(settings["sound"]["system_tts_volume"])
+        
+        if "emergency_tts_volume" in settings["sound"]:
+            self.tts_manager.set_emergency_tts_volume(settings["sound"]["emergency_tts_volume"])
         
         # Apply camera settings
         restart_camera = self.camera_manager.update_settings(
@@ -347,7 +375,7 @@ class ByteRacer:
                 if "text" in data["data"]:
                     text = data["data"]["text"]
                     logging.info(f"Received TTS request: {text}")
-                    await self.tts_manager.say(text, priority=1)
+                    await self.tts_manager.say(text, priority=0)
                     await self.send_command_response({
                         "success": True,
                         "message": "Text spoken successfully"
@@ -742,7 +770,7 @@ class ByteRacer:
 
             if "edge_threshold" in safety:
                 self.config_manager.set("safety.edge_threshold", safety["edge_threshold"])
-                self.sensor_manager.edge_detection_threshold = safety["edge_threshold"]
+                self.sensor_manager.set_edge_detection_threshold(safety["edge_threshold"])
             
             if "auto_stop" in safety:
                 self.config_manager.set("safety.auto_stop", safety["auto_stop"])

@@ -96,12 +96,12 @@ export default function RobotSettings() {
         <h3 className="font-bold mb-4">Sound Settings</h3>
         
         <div className="space-y-6">
-          {/* Main sound settings */}
+          {/* Master volume */}
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Volume2 className="h-4 w-4" />
-                <span className="text-sm">Sound Effects</span>
+                <span className="text-sm font-medium">Master Volume</span>
               </div>
               <Switch 
                 checked={localSettings.sound.enabled}
@@ -113,7 +113,7 @@ export default function RobotSettings() {
             
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
-                <span>Volume</span>
+                <span>Master Volume</span>
                 <span>{localSettings.sound.volume}%</span>
               </div>
               <Slider 
@@ -129,12 +129,87 @@ export default function RobotSettings() {
             </div>
           </div>
           
+          {/* Sound effects section */}
+          <div className="pt-4 border-t space-y-4">
+            <div className="text-sm font-medium mb-2">Sound Effects</div>
+            
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs">
+                <span>Effects Master Volume</span>
+                <span>{localSettings.sound.sound_volume}%</span>
+              </div>
+              <Slider 
+                value={[localSettings.sound.sound_volume || 80]}
+                min={0}
+                max={100}
+                step={1}
+                disabled={!localSettings.sound.enabled}
+                onValueChange={(value) => 
+                  updateSetting("sound", "sound_volume", value[0])
+                }
+              />
+            </div>
+            
+            <div className="pl-4 pt-2 space-y-3">
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Driving Sounds</span>
+                  <span>{localSettings.sound.driving_volume || 80}%</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.driving_volume || 80]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!localSettings.sound.enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "driving_volume", value[0])
+                  }
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Alert Sounds</span>
+                  <span>{localSettings.sound.alert_volume || 90}%</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.alert_volume || 90]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!localSettings.sound.enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "alert_volume", value[0])
+                  }
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Custom Sounds</span>
+                  <span>{localSettings.sound.custom_volume || 80}%</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.custom_volume || 80]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!localSettings.sound.enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "custom_volume", value[0])
+                  }
+                />
+              </div>
+            </div>
+          </div>
+          
           {/* TTS settings */}
           <div className="pt-4 border-t space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Megaphone className="h-4 w-4" />
-                <span className="text-sm">Text-to-Speech</span>
+                <span className="text-sm font-medium">Text-to-Speech</span>
               </div>
               <Switch 
                 checked={localSettings.sound.tts_enabled}
@@ -146,7 +221,7 @@ export default function RobotSettings() {
             
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
-                <span>TTS Volume</span>
+                <span>TTS Master Volume</span>
                 <span>{localSettings.sound.tts_volume}%</span>
               </div>
               <Slider 
@@ -159,6 +234,59 @@ export default function RobotSettings() {
                   updateSetting("sound", "tts_volume", value[0])
                 }
               />
+            </div>
+            
+            <div className="pl-4 pt-2 space-y-3">
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>User TTS</span>
+                  <span>{localSettings.sound.user_tts_volume || 80}%</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.user_tts_volume || 80]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!localSettings.sound.tts_enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "user_tts_volume", value[0])
+                  }
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>System TTS</span>
+                  <span>{localSettings.sound.system_tts_volume || 90}%</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.system_tts_volume || 90]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!localSettings.sound.tts_enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "system_tts_volume", value[0])
+                  }
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Emergency TTS</span>
+                  <span>{localSettings.sound.emergency_tts_volume || 95}%</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.emergency_tts_volume || 95]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!localSettings.sound.tts_enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "emergency_tts_volume", value[0])
+                  }
+                />
+              </div>
             </div>
             
             <div>

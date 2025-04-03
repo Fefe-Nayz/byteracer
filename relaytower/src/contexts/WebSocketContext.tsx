@@ -99,10 +99,17 @@ export interface CameraStatus {
 export interface RobotSettings {
   sound: {
     enabled: boolean;
-    volume: number;
     tts_enabled: boolean;
-    tts_volume: number;
     tts_language: string;
+    volume: number;
+    sound_volume: number;
+    driving_volume: number;
+    alert_volume: number;
+    custom_volume: number;
+    tts_volume: number;
+    user_tts_volume: number;
+    system_tts_volume: number;
+    emergency_tts_volume: number;
   };
   camera: {
     vflip: boolean;

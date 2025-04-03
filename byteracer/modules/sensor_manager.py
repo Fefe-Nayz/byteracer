@@ -513,6 +513,12 @@ class SensorManager:
         """Enable or disable edge detection"""
         self.edge_detection_enabled = enabled
         logger.info(f"Edge detection {'enabled' if enabled else 'disabled'}")
+
+    def set_edge_detection_threshold(self, threshold):
+        """Set the edge detection threshold"""
+        self.edge_detection_threshold = threshold
+        self.px.set_cliff_reference([threshold] * 1000)
+        logger.info(f"Edge detection threshold set to {threshold}")
     
     def set_auto_stop(self, enabled):
         """Enable or disable auto-stop on client disconnection"""

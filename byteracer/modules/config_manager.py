@@ -32,10 +32,18 @@ class ConfigManager:
             # Sound settings
             "sound": {
                 "enabled": True,
-                "volume": 80,
+                "volume": 80,  # Master volume for all audio
+                "sound_volume": 80,  # Master volume for sound effects
+                "tts_volume": 80,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_volume": 80,
                 "tts_language": "en-US",
+                # Individual category volumes
+                "driving_volume": 80,  # For acceleration, braking, drift sounds
+                "alert_volume": 90,    # For emergency/alert sounds
+                "custom_volume": 80,   # For user-triggered sound effects
+                "user_tts_volume": 80, # For user-triggered TTS
+                "system_tts_volume": 90, # For system/emergency TTS
+                "emergency_tts_volume": 95, # For emergency TTS
             },
             
             # Camera settings
@@ -322,10 +330,18 @@ class ConfigManager:
             # Sound settings
             "sound": {
                 "enabled": True,
-                "volume": 80,
+                "volume": 80,  # Master volume for all audio
+                "sound_volume": 80,  # Master volume for sound effects
+                "tts_volume": 80,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_volume": 80,
                 "tts_language": "en-US",
+                # Individual category volumes
+                "driving_volume": 80,  # For acceleration, braking, drift sounds
+                "alert_volume": 90,    # For emergency/alert sounds
+                "custom_volume": 80,   # For user-triggered sound effects
+                "user_tts_volume": 80, # For user-triggered TTS
+                "system_tts_volume": 90, # For system TTS
+                "emergency_tts_volume": 95, # For emergency TTS
             },
             
             # Camera settings

@@ -19,7 +19,13 @@ class SoundManager:
     def __init__(self, assets_dir=None, enabled=True, volume=100):
         self.music_player = Music()
         self.enabled = enabled
-        self.volume = max(0, min(100, volume))
+        self.volume = max(0, min(100, volume))  # Master volume
+        
+        # Category-specific volumes (will be updated from config later)
+        self.sound_volume = 80  # Sound effects master volume
+        self.driving_volume = 80  # Volume for driving sounds
+        self.alert_volume = 90  # Volume for alert/emergency sounds
+        self.custom_volume = 80  # Volume for user-triggered sounds
         
         # Set assets directory
         if assets_dir is None:
@@ -105,7 +111,13 @@ class SoundManager:
                 if not pygame.mixer.Channel(channel_id).get_busy():
                     # Load and play the sound
                     sound = pygame.mixer.Sound(str(sound_file))
-                    sound.set_volume(self.volume / 100.0)
+                    
+                    # Apply the appropriate volume based on sound type
+                    # First apply category volume, then apply sound master volume, then apply overall master volume
+                    category_volume = self._get_category_volume(sound_type)
+                    effective_volume = (self.volume / 100.0) * (self.sound_volume / 100.0) * (category_volume / 100.0)
+                    sound.set_volume(effective_volume)
+                    
                     pygame.mixer.Channel(channel_id).play(sound, loops=-1 if loop else 0)
                     
                     # Add to the list of current sounds for this type
@@ -118,6 +130,17 @@ class SoundManager:
         
         logger.warning("No available sound channels")
         return None
+    
+    def _get_category_volume(self, sound_type):
+        """Get the appropriate volume for a sound category"""
+        if sound_type in ["acceleration", "braking", "drift"]:
+            return self.driving_volume
+        elif sound_type == "alerts":
+            return self.alert_volume
+        elif sound_type == "custom":
+            return self.custom_volume
+        else:
+            return 100  # Default to full volume for unknown categories
     
     def stop_sound(self, sound_type=None, channel_id=None):
         """
@@ -199,35 +222,15 @@ class SoundManager:
         """Play a specific alert sound"""
         alert_files = [f for f in self.sounds["alerts"] if f.stem == alert_name]
         if alert_files:
-            # Load and play the alert sound
-            sound = pygame.mixer.Sound(str(alert_files[0]))
-            sound.set_volume(self.volume / 100.0)
-            channel_id = pygame.mixer.find_channel()
-            if channel_id:
-                channel_id.play(sound)
-                
-                # Track the channel - fixed to store the numerical ID instead of calling get_id()
-                # Store the channel number instead of trying to get an ID
-                for i in range(pygame.mixer.get_num_channels()):
-                    if pygame.mixer.Channel(i) == channel_id:
-                        self.current_sounds["alerts"].append(i)
-                        break
-                
-                logger.debug(f"Playing alert sound: {alert_name}")
-                return True
+            # Use the play_sound method to benefit from proper volume handling
+            return self.play_sound("alerts", loop=False, name=alert_name) is not None
         
         logger.warning(f"Alert sound not found: {alert_name}")
         return False
     
     def play_custom_sound(self, sound_name):
         """Play a custom sound by name"""
-        custom_files = [f for f in self.sounds["custom"] if f.stem == sound_name]
-        if custom_files:
-            self.play_sound("custom", loop=False, name=sound_name)
-            return True
-        
-        logger.warning(f"Custom sound not found: {sound_name}")
-        return False
+        return self.play_sound("custom", loop=False, name=sound_name) is not None
     
     def music_play(self, file_name):
         """Play music using the Music class from robot_hat"""
@@ -266,15 +269,53 @@ class SoundManager:
             self.music_stop()
     
     def set_volume(self, volume):
-        """Set volume for all sounds (0-100)"""
+        """Set master volume for all sounds (0-100)"""
         self.volume = max(0, min(100, volume))
-        logger.info(f"Sound volume set to {self.volume}")
-        # Update volume of currently playing sounds
+        logger.info(f"Sound master volume set to {self.volume}")
+        self._update_playing_sounds_volume()
+    
+    def set_sound_volume(self, volume):
+        """Set volume for all sound effects (0-100)"""
+        self.sound_volume = max(0, min(100, volume))
+        logger.info(f"Sound effects volume set to {self.sound_volume}")
+        self._update_playing_sounds_volume()
+    
+    def set_category_volume(self, category, volume):
+        """
+        Set volume for a specific sound category
+        
+        Args:
+            category (str): Category of sound ('driving', 'alert', 'custom')
+            volume (int): Volume level from 0 (mute) to 100 (max)
+        """
+        volume = max(0, min(100, volume))
+        
+        if category == "driving":
+            self.driving_volume = volume
+            logger.info(f"Driving sounds volume set to {volume}")
+        elif category == "alert":
+            self.alert_volume = volume
+            logger.info(f"Alert sounds volume set to {volume}")
+        elif category == "custom":
+            self.custom_volume = volume
+            logger.info(f"Custom sounds volume set to {volume}")
+        else:
+            logger.warning(f"Unknown sound category: {category}")
+            return
+        
+        self._update_playing_sounds_volume()
+    
+    def _update_playing_sounds_volume(self):
+        """Update volume of all currently playing sounds"""
         with self._lock:
-            for channel_id in range(pygame.mixer.get_num_channels()):
-                if pygame.mixer.Channel(channel_id).get_busy():
-                    sound = pygame.mixer.Channel(channel_id).get_sound()
-                    sound.set_volume(self.volume / 100.0)
+            for sound_type, channels in self.current_sounds.items():
+                category_volume = self._get_category_volume(sound_type)
+                effective_volume = (self.volume / 100.0) * (self.sound_volume / 100.0) * (category_volume / 100.0)
+                
+                for channel_id in channels:
+                    if 0 <= channel_id < pygame.mixer.get_num_channels() and pygame.mixer.Channel(channel_id).get_busy():
+                        sound = pygame.mixer.Channel(channel_id).get_sound()
+                        sound.set_volume(effective_volume)
     
     def shutdown(self):
         """Clean shutdown of sound manager"""

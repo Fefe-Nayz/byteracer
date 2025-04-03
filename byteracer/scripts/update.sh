@@ -20,6 +20,10 @@ speak "Starting update process for ByteRacer."
 
 cd "${BYTERACER_PATH}"
 
+# Configure Git to handle directory ownership issues
+echo "Configuring Git safe directory..."
+git config --global --add safe.directory "${BYTERACER_PATH}"
+
 # Check for git updates
 echo "Checking for updates from GitHub..."
 speak "Checking for updates from GitHub."
