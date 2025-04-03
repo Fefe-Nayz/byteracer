@@ -41,6 +41,7 @@ type WebSocketEventName =
   | "battery_info"        // For receiving battery information
   | "settings"            // For receiving settings from the robot
   | "settings_update"     // For sending settings changes to the robot
+  | "reset_settings"      // For resetting settings to defaults
   | "sensor_data"         // For receiving sensor data
   | "camera_status"       // For receiving camera status
   | "speak_text"          // For sending text to be spoken
@@ -247,6 +248,13 @@ const wsHandlers = {
         case "settings_update":
           console.log("Settings update request received");
           // Forward settings update to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Reset settings
+        case "reset_settings":
+          console.log(`Settings reset request received for section: ${event.data.section || "all"}`);
+          // Forward to all cars
           broadcastToType(message, "car", ws);
           break;
 

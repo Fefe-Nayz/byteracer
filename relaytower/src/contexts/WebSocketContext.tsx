@@ -179,6 +179,7 @@ interface WebSocketContextValue {
   requestBatteryLevel: () => void;
   requestSettings: () => void;
   updateSettings: (settings: Partial<RobotSettings>) => void;
+  resetSettings: (section?: string) => void;
   speakText: (text: string) => void;
   playSound: (sound: string) => void;
   stopSound: () => void;
@@ -546,6 +547,29 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  // Function to reset settings
+  const resetSettings = useCallback((section?: string) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const resetData = {
+        name: "reset_settings",
+        data: {
+          section,
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(resetData));
+      trackWsMessage("sent", resetData);
+      console.log(`Settings reset sent for section: ${section}`);
+    } else {
+      logError("Cannot send settings reset", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
   // Function to send text to speak
   const speakText = useCallback((text: string) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -736,6 +760,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     requestBatteryLevel,
     requestSettings,
     updateSettings,
+    resetSettings,
     speakText,
     playSound,
     stopSound,

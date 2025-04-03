@@ -444,7 +444,28 @@ class ByteRacer:
                     if result["success"]:
                         networks = await self.network_manager.scan_wifi_networks()
                         await self.send_network_list(networks)
-                    
+            
+            elif data["name"] == "reset_settings":
+                # Handle reset settings request
+                logging.info("Received reset settings request")
+                section = data["data"].get("section")
+                success = self.config_manager.reset_to_defaults(section)
+                
+                # Apply the reset settings
+                await self.apply_config_settings()
+                
+                # Send response
+                await self.send_command_response({
+                    "success": success,
+                    "message": f"Settings reset to defaults{' for section: ' + section if section else ''}"
+                })
+                
+                # Send updated settings to client
+                await self.send_settings_to_client()
+                
+                # Announce via TTS
+                await self.tts_manager.say(f"Settings reset to defaults{' for ' + section if section else ''}", priority=1)
+                
             else:
                 logging.info(f"Received message of type: {data['name']}")
             
@@ -916,8 +937,7 @@ class ByteRacer:
                 # Exit Python script - systemd or screen will restart it
                 # threading.Timer(1.0, lambda: os._exit(0)).start()
                 python = sys.executable
-                # Schedule graceful shutdown and exit for restart
-                threading.Timer(5.0, lambda: sys.exit(0)).start()
+                os.execv(python, [python] + sys.argv)
                 
             elif command == "restart_camera_feed":
                 # Restart camera feed

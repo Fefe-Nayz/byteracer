@@ -97,7 +97,7 @@ if [ "$UPDATED" = true ]; then
         bun install
         echo "[relaytower] Building web server..."
         speak "Building web server."
-        bun run build
+        sudo bun run build
     fi
 
     # --- Eaglecontrol (WebSocket server) ---

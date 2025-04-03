@@ -12,7 +12,13 @@ import {
 } from "lucide-react";
 
 export default function RobotSettings() {
-  const { status, settings, updateSettings, requestSettings } = useWebSocket();
+  const { 
+    status, 
+    settings, 
+    updateSettings, 
+    requestSettings,
+    resetSettings 
+  } = useWebSocket();
   
   // Local state for settings (to avoid constant updates)
   const [localSettings, setLocalSettings] = useState<RobotSettingsType | null>(null);
@@ -607,6 +613,16 @@ export default function RobotSettings() {
           onClick={discardChanges}
         >
           Discard Changes
+        </Button>
+        
+        <Button 
+          variant="destructive"
+          onClick={() => {
+              resetSettings();
+              setSaveStatus("idle");
+          }}
+        >
+          Reset to Defaults
         </Button>
         
         <Button 
