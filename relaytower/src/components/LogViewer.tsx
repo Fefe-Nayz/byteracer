@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { useWebSocket, LogMessage } from "@/contexts/WebSocketContext";
+import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select, SelectTrigger,SelectValue, SelectContent, SelectItem
