@@ -718,6 +718,10 @@ class ByteRacer:
             if "volume" in sound:
                 self.config_manager.set("sound.volume", sound["volume"])
                 self.sound_manager.set_volume(sound["volume"])
+
+            if "sound_volume" in sound:
+                self.config_manager.set("sound.sound_volume", sound["sound_volume"])
+                self.sound_manager.set_sound_volume(sound["sound_volume"])
             
             if "tts_enabled" in sound:
                 self.config_manager.set("sound.tts_enabled", sound["tts_enabled"])
@@ -730,6 +734,30 @@ class ByteRacer:
             if "tts_language" in sound:
                 self.config_manager.set("sound.tts_language", sound["tts_language"])
                 self.tts_manager.set_language(sound["tts_language"])
+
+            if "driving_volume" in sound:
+                self.config_manager.set("sound.driving_volume", sound["driving_volume"])
+                self.sound_manager.set_category_volume("driving", sound["driving_volume"])
+
+            if "alert_volume" in sound:
+                self.config_manager.set("sound.alert_volume", sound["alert_volume"])
+                self.sound_manager.set_category_volume("alert", sound["alert_volume"])
+            
+            if "custom_volume" in sound:
+                self.config_manager.set("sound.custom_volume", sound["custom_volume"])
+                self.sound_manager.set_category_volume("custom", sound["custom_volume"])
+
+            if "user_tts_volume" in sound:
+                self.config_manager.set("sound.user_tts_volume", sound["user_tts_volume"])
+                self.tts_manager.set_user_tts_volume(sound["user_tts_volume"])
+            
+            if "system_tts_volume" in sound:
+                self.config_manager.set("sound.system_tts_volume", sound["system_tts_volume"])
+                self.tts_manager.set_system_tts_volume(sound["system_tts_volume"])
+
+            if "emergency_tts_volume" in sound:
+                self.config_manager.set("sound.emergency_tts_volume", sound["emergency_tts_volume"])
+                self.tts_manager.set_emergency_tts_volume(sound["emergency_tts_volume"])
         
         if "camera" in settings:
             camera = settings["camera"]
@@ -888,7 +916,8 @@ class ByteRacer:
                 # Exit Python script - systemd or screen will restart it
                 # threading.Timer(1.0, lambda: os._exit(0)).start()
                 python = sys.executable
-                os.execv(python, [python] + sys.argv)
+                # Schedule graceful shutdown and exit for restart
+                threading.Timer(5.0, lambda: sys.exit(0)).start()
                 
             elif command == "restart_camera_feed":
                 # Restart camera feed
