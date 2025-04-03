@@ -7,6 +7,7 @@ import os
 import uuid
 import subprocess
 import signal
+import pygame  # Add pygame import for audio playback
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,16 @@ class TTSManager:
         self._running = True
         self._task = None
         self._current_process = None
+        self._tts_channel = None
+        self._tts_sound = None
+        
+        # Ensure pygame mixer is initialized (will use the initialization from sound_manager if already done)
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()
+            
+        # Reserve a specific channel for TTS playback
+        self._tts_channel = pygame.mixer.Channel(pygame.mixer.get_num_channels() - 1)  # Use the last available channel
+        
         self._clear_temp_files()
         logger.info(f"TTS Manager initialized (lang={lang}, volume={volume})")
     
@@ -103,37 +114,27 @@ class TTSManager:
         """Stop the currently playing speech and clear the queue"""
         logger.info("Stopping current speech and clearing queue")
         
-        # Kill any running speech process
         with self._lock:
-            current_process = self._current_process
             # Clear the queue while we have the lock
             self.clear_queue()
             # Reset speaking state
             self._speaking = False
             self._current_priority = 0
-            self._current_process = None
-        
-        # Now handle the process termination outside the lock since it involves awaits
-        if current_process and current_process.poll() is None:
-            try:
-                # Try to terminate the process
-                current_process.terminate()
-                
-                # Wait a short time for it to terminate gracefully - outside the lock
-                for _ in range(10):  # Wait up to 0.5 seconds
-                    if current_process.poll() is not None:
-                        break
-                    await asyncio.sleep(0.05)
-                
-                # If it's still running, force kill it
-                if current_process.poll() is None:
-                    current_process.kill()
-                    
-                logger.debug("Stopped current speech process")
-            except Exception as e:
-                logger.error(f"Error stopping speech process: {e}")
-        
-        # Find and clean up any temporary TTS files that might be in use
+            
+            # Kill any running pico2wave or sox processes
+            if self._current_process and self._current_process.poll() is None:
+                try:
+                    self._current_process.terminate()
+                    # No need to wait since we're stopping the process 
+                    self._current_process = None
+                except Exception as e:
+                    logger.error(f"Error stopping TTS generation process: {e}")
+            
+            # Stop pygame playback immediately
+            if self._tts_channel:
+                self._tts_channel.stop()
+            
+        # Clean up temporary files in a separate thread
         await asyncio.to_thread(self._cleanup_temp_files)
         
         return True
@@ -172,12 +173,19 @@ class TTSManager:
             pico_cmd = f'pico2wave -l {self.lang} -w {temp_file} "{text}"'
             
             # Execute command and wait for it to complete
-            pico_process = subprocess.run(pico_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if pico_process.returncode != 0:
-                logger.error(f"TTS pico2wave error: {pico_process.stderr.decode()}")
+            self._current_process = subprocess.Popen(pico_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = self._current_process.wait()
+            
+            if result != 0:
+                stderr = self._current_process.stderr.read().decode() if self._current_process.stderr else "Unknown error"
+                logger.error(f"TTS pico2wave error: {stderr}")
                 return False
             
-            # Apply volume adjustment if needed
+            # Clear the process reference once generation is complete
+            self._current_process = None
+            
+            # Use a volume-adjusted file if needed
+            final_file = temp_file
             if self.volume != 100:
                 # Calculate volume multiplier (0-1 range for sox)
                 vol_multiplier = max(0.0, min(1.0, self.volume / 100.0))
@@ -189,38 +197,43 @@ class TTSManager:
                 vol_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier}'
                 logger.debug(f"Adjusting volume with sox: multiplier {vol_multiplier}")
                 
-                vol_process = subprocess.run(vol_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                if vol_process.returncode != 0:
-                    logger.error(f"Volume adjustment error: {vol_process.stderr.decode()}")
-                    # If volume adjustment fails, fall back to the original file
-                    play_cmd = f'aplay {temp_file}'
+                self._current_process = subprocess.Popen(vol_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                result = self._current_process.wait()
+                self._current_process = None
+                
+                if result != 0:
+                    logger.error(f"Volume adjustment error, using original file")
                 else:
-                    # Play the volume-adjusted file and then clean it up
-                    play_cmd = f'aplay {volume_file}'
-                    
-                    # We'll clean up the original temp file now, volume file later
+                    # Use the volume-adjusted file and clean up the original
                     try:
                         os.remove(temp_file)
-                        temp_file = volume_file  # For cleanup in finally block
+                        final_file = volume_file
                     except Exception as e:
                         logger.warning(f"Failed to remove original TTS file: {e}")
-            else:
-                # Just play the original file at full volume
-                play_cmd = f'aplay {temp_file}'
-                logger.debug("Playing with standard aplay (full volume)")
             
-            # Play the audio file - store the process so we can terminate it if needed
-            self._current_process = subprocess.Popen(play_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            
-            # Wait for the process to complete
-            return_code = self._current_process.wait()
-            if return_code != 0:
-                stderr = self._current_process.stderr.read().decode() if self._current_process.stderr else "Unknown error"
-                logger.error(f"Audio playback error: {stderr}")
-            
-            # Clear the current process reference
-            self._current_process = None
-            
+            # Play the file using pygame instead of aplay
+            try:
+                # Load the sound file
+                sound = pygame.mixer.Sound(final_file)
+                
+                # Set the volume (pygame uses 0.0 to 1.0)
+                sound.set_volume(self.volume / 100.0)
+                
+                # Play on the dedicated TTS channel
+                self._tts_sound = sound  # Keep a reference to prevent garbage collection
+                self._tts_channel.play(sound)
+                
+                # Wait for playback to complete or be stopped
+                while self._tts_channel.get_busy():
+                    time.sleep(0.05)
+                
+                logger.debug("TTS playback completed")
+                self._tts_sound = None  # Clear the reference
+                
+            except Exception as e:
+                logger.error(f"Error during pygame TTS playback: {e}")
+                return False
+                
             return True
         except Exception as e:
             logger.error(f"TTS error while speaking '{text}': {e}")
