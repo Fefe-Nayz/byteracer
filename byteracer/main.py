@@ -38,10 +38,10 @@ class ByteRacer:
         # Then initialize hardware
         self.px = Picarx()
         
-        # Initialize managers
+        # Initialize managers - order matters for dependencies
         self.config_manager = ConfigManager()
-        self.tts_manager = TTSManager()
-        self.sound_manager = SoundManager()
+        self.sound_manager = SoundManager()  # Initialize sound manager first
+        self.tts_manager = TTSManager(sound_manager=self.sound_manager)  # Pass sound manager to TTS manager
         self.sensor_manager = SensorManager(self.px, self.handle_emergency)
         self.camera_manager = CameraManager(vflip=False, hflip=False, local=False, web=True)
         self.network_manager = NetworkManager()

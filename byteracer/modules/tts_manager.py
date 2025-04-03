@@ -1,13 +1,11 @@
 import asyncio
 import threading
-from robot_hat import TTS
 import time
 import logging
 import os
 import uuid
 import subprocess
-import signal
-import pygame  # Add pygame import for audio playback
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +13,13 @@ class TTSManager:
     """
     Manages Text-to-Speech functionality with asynchronous operation.
     Prevents TTS operations from blocking the main program flow.
+    Uses SoundManager for audio playback to ensure consistent behavior.
     """
-    def __init__(self, lang="en-US", enabled=True, volume=80):
+    def __init__(self, sound_manager=None, lang="en-US", enabled=True, volume=80):
         self.lang = lang
         self.enabled = enabled
         self.volume = volume
+        self.sound_manager = sound_manager  # Store reference to sound manager
         self._queue = asyncio.Queue()
         self._speaking = False
         self._current_priority = 0
@@ -27,18 +27,30 @@ class TTSManager:
         self._running = True
         self._task = None
         self._current_process = None
-        self._tts_channel = None
-        self._tts_sound = None
+        self._current_channel = None
         
-        # Ensure pygame mixer is initialized (will use the initialization from sound_manager if already done)
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
-            
-        # Reserve a specific channel for TTS playback
-        self._tts_channel = pygame.mixer.Channel(pygame.mixer.get_num_channels() - 1)  # Use the last available channel
+        # Create a dedicated TTS category for the sound manager if it doesn't exist
+        if sound_manager:
+            self._create_tts_sound_category()
         
         self._clear_temp_files()
         logger.info(f"TTS Manager initialized (lang={lang}, volume={volume})")
+    
+    def _create_tts_sound_category(self):
+        """Create a TTS category for the sound manager"""
+        # Check if the sound manager already has a TTS category
+        if "tts" not in self.sound_manager.sounds:
+            # Add a new category for TTS
+            tts_dir = self.sound_manager.assets_dir / "tts"
+            if not tts_dir.exists():
+                tts_dir.mkdir(exist_ok=True)
+                logger.info("Created TTS sound category directory")
+            
+            # Add the category to sound manager's sounds
+            self.sound_manager.sounds["tts"] = []
+            # Add empty list for tracking currently playing TTS sounds
+            self.sound_manager.current_sounds["tts"] = []
+            logger.info("Added TTS category to sound manager")
     
     async def start(self):
         """Start the TTS processing loop"""
@@ -65,8 +77,8 @@ class TTSManager:
             priority (int): Priority level (higher means more important)
             blocking (bool): If True, wait until speech is completed
         """
-        if not self.enabled:
-            logger.debug(f"TTS disabled, skipping: '{text}'")
+        if not self.enabled or not self.sound_manager:
+            logger.debug(f"TTS disabled or sound manager not available, skipping: '{text}'")
             return
 
         # Put in queue with priority
@@ -93,7 +105,7 @@ class TTSManager:
                     self._speaking = True
                     self._current_priority = priority
                 
-                # Speak the text in a separate thread to avoid blocking
+                # Generate and speak the text in a separate thread to avoid blocking
                 speaking_task = asyncio.to_thread(self._speak, text)
                 await speaking_task
                 
@@ -115,8 +127,9 @@ class TTSManager:
         logger.info("Stopping current speech and clearing queue")
         
         with self._lock:
-            # Clear the queue while we have the lock
+            # Clear the queue
             self.clear_queue()
+            
             # Reset speaking state
             self._speaking = False
             self._current_priority = 0
@@ -125,54 +138,88 @@ class TTSManager:
             if self._current_process and self._current_process.poll() is None:
                 try:
                     self._current_process.terminate()
-                    # No need to wait since we're stopping the process 
                     self._current_process = None
                 except Exception as e:
                     logger.error(f"Error stopping TTS generation process: {e}")
             
-            # Stop pygame playback immediately
-            if self._tts_channel:
-                self._tts_channel.stop()
-            
+            # Store channel ID to stop
+            channel_to_stop = self._current_channel
+            self._current_channel = None
+        
+        # Stop playback via sound manager if there's a current channel
+        if channel_to_stop is not None and self.sound_manager:
+            self.sound_manager.stop_sound(channel_id=channel_to_stop)
+        
         # Clean up temporary files in a separate thread
         await asyncio.to_thread(self._cleanup_temp_files)
         
         return True
         
     def _cleanup_temp_files(self):
-        """Clean up temporary TTS files that might still be in use"""
+        """Clean up temporary TTS files"""
         try:
             for filename in os.listdir("/tmp"):
                 if (filename.startswith("tts_") and filename.endswith(".wav")) or \
                    (filename.startswith("tts_vol_") and filename.endswith(".wav")):
                     try:
                         file_path = os.path.join("/tmp", filename)
-                        # Check if file exists before trying to remove it
                         if os.path.exists(file_path):
                             try:
                                 os.remove(file_path)
                                 logger.debug(f"Cleaned up TTS temp file: {filename}")
                             except PermissionError:
-                                # File might be in use, try to close any handles to it
                                 logger.warning(f"Permission error removing temp file {filename}, may still be in use")
-                                # On Linux we can continue without stopping the process
                     except Exception as e:
                         logger.warning(f"Failed to remove temp file {filename}: {e}")
         except Exception as e:
             logger.warning(f"Error cleaning up temporary TTS files: {e}")
     
+    def _wait_for_playback_completion(self, channel_id):
+        """Wait for playback to complete on the specified channel"""
+        if channel_id is None or not self.sound_manager:
+            return
+            
+        # Get a reference to pygame mixer channels from the sound manager
+        try:
+            import pygame
+            
+            # Wait while the channel is busy, but also check if we should stop
+            start_time = time.time()
+            while pygame.mixer.Channel(channel_id).get_busy():
+                time.sleep(0.05)
+                
+                # Check if we're still supposed to be speaking (in case stop_speech was called)
+                with self._lock:
+                    if not self._speaking or self._current_channel != channel_id:
+                        break
+                        
+                # Failsafe - don't wait forever (5 minutes max)
+                if time.time() - start_time > 300:
+                    logger.warning("TTS playback timeout reached, stopping wait")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"Error waiting for TTS playback completion: {e}")
+    
     def _speak(self, text):
         """Execute the actual TTS operation"""
+        if not self.sound_manager:
+            logger.error("Sound manager not available for TTS playback")
+            return False
+            
+        temp_file = None
+        final_file = None
+            
         try:
             logger.debug(f"Speaking: '{text}' (volume: {self.volume})")
             
             # Generate a unique temp file name for this specific TTS operation
             temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
+            final_file = temp_file
             
-            # Generate the TTS wave file - without background execution
+            # Generate the TTS wave file
             pico_cmd = f'pico2wave -l {self.lang} -w {temp_file} "{text}"'
             
-            # Execute command and wait for it to complete
             self._current_process = subprocess.Popen(pico_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             result = self._current_process.wait()
             
@@ -181,60 +228,94 @@ class TTSManager:
                 logger.error(f"TTS pico2wave error: {stderr}")
                 return False
             
-            # Clear the process reference once generation is complete
+            # Reset the process reference
             self._current_process = None
             
-            # Use a volume-adjusted file if needed
-            final_file = temp_file
+            # Apply volume adjustment if needed
             if self.volume != 100:
-                # Calculate volume multiplier (0-1 range for sox)
-                vol_multiplier = max(0.0, min(1.0, self.volume / 100.0))
-                
-                # Create a new temporary file with adjusted volume
                 volume_file = f"/tmp/tts_vol_{uuid.uuid4().hex}.wav"
                 
-                # Use sox to adjust volume (create a new file instead of playing directly)
+                # Use sox to adjust volume
+                vol_multiplier = max(0.0, min(1.0, self.volume / 100.0))
                 vol_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier}'
-                logger.debug(f"Adjusting volume with sox: multiplier {vol_multiplier}")
                 
                 self._current_process = subprocess.Popen(vol_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 result = self._current_process.wait()
                 self._current_process = None
                 
-                if result != 0:
-                    logger.error(f"Volume adjustment error, using original file")
-                else:
+                if result == 0:
                     # Use the volume-adjusted file and clean up the original
                     try:
                         os.remove(temp_file)
                         final_file = volume_file
+                        temp_file = None  # Prevent double cleanup
                     except Exception as e:
                         logger.warning(f"Failed to remove original TTS file: {e}")
+                else:
+                    logger.error(f"Volume adjustment error, using original file")
             
-            # Play the file using pygame instead of aplay
+            # Check if we're still supposed to be speaking
+            with self._lock:
+                if not self._speaking:
+                    logger.debug("Speech was canceled while generating audio")
+                    return False
+            
+            # Play the generated WAV file directly using pygame
             try:
-                # Load the sound file
-                sound = pygame.mixer.Sound(final_file)
+                import pygame
                 
-                # Set the volume (pygame uses 0.0 to 1.0)
-                sound.set_volume(self.volume / 100.0)
-                
-                # Play on the dedicated TTS channel
-                self._tts_sound = sound  # Keep a reference to prevent garbage collection
-                self._tts_channel.play(sound)
+                with self._lock:
+                    # Load the sound
+                    sound = pygame.mixer.Sound(final_file)
+                    
+                    # Set the volume (adjusting for sound manager's volume as well)
+                    effective_volume = (self.volume / 100.0) * (self.sound_manager.volume / 100.0)
+                    sound.set_volume(effective_volume)
+                    
+                    # Find an available channel
+                    channel_id = None
+                    for i in range(pygame.mixer.get_num_channels()):
+                        if not pygame.mixer.Channel(i).get_busy():
+                            channel_id = i
+                            break
+                    
+                    if channel_id is None:
+                        logger.warning("No available channel for TTS playback")
+                        return False
+                    
+                    # Play on the found channel
+                    pygame.mixer.Channel(channel_id).play(sound)
+                    
+                    # Store the channel ID for later stopping
+                    self._current_channel = channel_id
+                    
+                    # Add to sound manager's tracking
+                    if "tts" not in self.sound_manager.current_sounds:
+                        self.sound_manager.current_sounds["tts"] = []
+                    self.sound_manager.current_sounds["tts"].append(channel_id)
+                    
+                    logger.debug(f"Playing TTS on channel {channel_id}")
                 
                 # Wait for playback to complete or be stopped
-                while self._tts_channel.get_busy():
-                    time.sleep(0.05)
+                self._wait_for_playback_completion(channel_id)
+                
+                # Reset current channel if we're still the current speaker
+                with self._lock:
+                    if self._current_channel == channel_id:
+                        self._current_channel = None
+                
+                # Remove from tracking in sound manager
+                with self.sound_manager._lock:
+                    if "tts" in self.sound_manager.current_sounds and channel_id in self.sound_manager.current_sounds["tts"]:
+                        self.sound_manager.current_sounds["tts"].remove(channel_id)
                 
                 logger.debug("TTS playback completed")
-                self._tts_sound = None  # Clear the reference
+                return True
                 
             except Exception as e:
                 logger.error(f"Error during pygame TTS playback: {e}")
                 return False
                 
-            return True
         except Exception as e:
             logger.error(f"TTS error while speaking '{text}': {e}")
             self._current_process = None
@@ -242,8 +323,10 @@ class TTSManager:
         finally:
             # Clean up temp files
             try:
-                if os.path.exists(temp_file):
+                if temp_file and os.path.exists(temp_file):
                     os.remove(temp_file)
+                if final_file and final_file != temp_file and os.path.exists(final_file):
+                    os.remove(final_file)
             except Exception as e:
                 logger.warning(f"Failed to remove temporary TTS file: {e}")
     
