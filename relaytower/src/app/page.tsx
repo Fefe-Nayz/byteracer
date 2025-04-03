@@ -15,6 +15,7 @@ import SoundEffects from "@/components/SoundEffects";
 import GptIntegration from "@/components/GptIntegration";
 import NetworkSettings from "@/components/NetworkSettings";
 import GamepadInputHandler from "@/components/GamepadInputHandler";
+import LogViewer from "@/components/LogViewer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 function GamepadPage() {
@@ -34,6 +35,7 @@ function GamepadPage() {
           <TabsTrigger value="system">System</TabsTrigger>
           <TabsTrigger value="features">Features</TabsTrigger>
           <TabsTrigger value="debug">Debug</TabsTrigger>
+          <TabsTrigger value="logs">Logs</TabsTrigger>
         </TabsList>
 
         <TabsContent value="control">
@@ -94,6 +96,10 @@ function GamepadPage() {
 
         <TabsContent value="debug">
           <DebugState />
+        </TabsContent>
+
+        <TabsContent value="logs">
+          <LogViewer maxHeight="600px" />
         </TabsContent>
       </Tabs>
     </div>

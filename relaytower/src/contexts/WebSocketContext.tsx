@@ -60,6 +60,12 @@ export interface NetworkUpdateData {
   [key: string]: string | undefined;
 }
 
+// Define log message interface
+export interface LogMessage {
+  level: string;
+  message: string;
+  timestamp: number;
+}
 
 // Define sensor data interface
 export interface SensorData {
@@ -172,6 +178,8 @@ interface WebSocketContextValue {
   cameraStatus: CameraStatus | null;
   settings: RobotSettings | null;
   commandResponse: CommandResponse | null;
+  logs: LogMessage[]; // Add logs array to store log messages
+  clearLogs: () => void; // Function to clear log messages
   
   // Commands
   sendGamepadState: (gamepadState: Record<string, boolean | string | number>) => void;
@@ -209,6 +217,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
   const [settings, setSettings] = useState<RobotSettings | null>(null);
   const [commandResponse, setCommandResponse] = useState<CommandResponse | null>(null);
+  const [logs, setLogs] = useState<LogMessage[]>([]);
+  
+  // Function to clear logs
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+  }, []);
   
   // Refs
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -395,6 +409,14 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
                 detail: event.data,
               })
             );
+            break;
+          case "log_message":
+            // Add log message to the logs array (limit to most recent 500 logs)
+            setLogs(prevLogs => {
+              const newLogs = [...prevLogs, event.data];
+              // Keep only the most recent 500 logs to avoid memory issues
+              return newLogs.slice(-500);
+            });
             break;
         }
       } catch (e) {
@@ -753,6 +775,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     cameraStatus,
     settings,
     commandResponse,
+    logs,
+    clearLogs,
     
     // Commands
     sendGamepadState,

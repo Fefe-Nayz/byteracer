@@ -5,6 +5,97 @@ from datetime import datetime
 from pathlib import Path
 import asyncio
 import threading
+import json
+import websockets
+from logging.handlers import QueueHandler, QueueListener
+import queue
+
+class WebSocketLogHandler(logging.Handler):
+    """
+    A logging handler that sends logs to a WebSocket connection.
+    """
+    def __init__(self, websocket=None):
+        super().__init__()
+        self.websocket = websocket
+        self.queue = asyncio.Queue()
+        self.task = None
+        self.running = True
+        
+    def set_websocket(self, websocket):
+        """Update the WebSocket connection"""
+        self.websocket = websocket
+        
+    def emit(self, record):
+        """Put log record in the queue for sending"""
+        if not self.running:
+            return
+            
+        try:
+            log_entry = self.format(record)
+            
+            # Create a new asyncio task if one is not already running
+            if self.task is None or self.task.done():
+                loop = asyncio.get_event_loop()
+                self.task = asyncio.run_coroutine_threadsafe(
+                    self._send_logs_worker(), loop
+                )
+                
+            # Add to queue
+            asyncio.run_coroutine_threadsafe(
+                self.queue.put({
+                    "level": record.levelname,
+                    "message": log_entry,
+                    "timestamp": int(time.time() * 1000)
+                }), 
+                asyncio.get_event_loop()
+            )
+            
+        except Exception as e:
+            self.handleError(record)
+            
+    async def _send_logs_worker(self):
+        """Worker coroutine that sends logs from the queue to the WebSocket"""
+        while self.running:
+            try:
+                # Get next log with a timeout
+                try:
+                    log_data = await asyncio.wait_for(self.queue.get(), timeout=0.5)
+                except asyncio.TimeoutError:
+                    continue
+                    
+                # Check if we have a valid WebSocket
+                if self.websocket and self.websocket.open:
+                    try:
+                        # Create message
+                        message = json.dumps({
+                            "name": "log_message",
+                            "data": log_data,
+                            "createdAt": int(time.time() * 1000)
+                        })
+                        
+                        # Send it
+                        await self.websocket.send(message)
+                    except websockets.exceptions.ConnectionClosed:
+                        # Connection closed, but don't mark task as complete
+                        pass
+                    except Exception as e:
+                        print(f"Error sending log via WebSocket: {e}")
+                
+                # Mark task as complete in the queue
+                self.queue.task_done()
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in WebSocket log worker: {e}")
+                await asyncio.sleep(1)  # Prevent tight loop on error
+                
+    def close(self):
+        """Close the handler"""
+        self.running = False
+        if self.task:
+            self.task.cancel()
+        super().close()
 
 class LogManager:
     """
@@ -25,6 +116,9 @@ class LogManager:
         self.max_log_files = max_log_files
         self.max_log_size_mb = max_log_size_mb
         self.log_file_path = self.log_dir / f"byteracer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        
+        # WebSocket handler
+        self.websocket_handler = None
         
         # Configure root logger
         self._setup_logging()
@@ -60,6 +154,11 @@ class LogManager:
             datefmt='%Y-%m-%d %H:%M:%S'
         )
         
+        # Create WebSocket handler
+        self.websocket_handler = WebSocketLogHandler()
+        self.websocket_handler.setLevel(logging.INFO)
+        self.websocket_handler.setFormatter(formatter)
+        
         # Set formatters
         file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
@@ -67,6 +166,7 @@ class LogManager:
         # Add handlers to root logger
         root_logger.addHandler(file_handler)
         root_logger.addHandler(console_handler)
+        root_logger.addHandler(self.websocket_handler)
         
         # Reduce verbosity of specific third-party libraries
         logging.getLogger('picamera2').setLevel(logging.INFO)
@@ -75,6 +175,12 @@ class LogManager:
         
         # Initial log message
         logging.info(f"Logging to {self.log_file_path}")
+    
+    def set_websocket(self, websocket):
+        """Set the WebSocket connection for log streaming"""
+        if self.websocket_handler:
+            self.websocket_handler.set_websocket(websocket)
+            logging.info("WebSocket log streaming enabled")
     
     async def start(self):
         """Start the log maintenance task"""
@@ -91,6 +197,10 @@ class LogManager:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
+        
+        # Close WebSocket handler
+        if self.websocket_handler:
+            self.websocket_handler.close()
         
         logging.info("Log Manager stopped")
     

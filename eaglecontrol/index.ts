@@ -52,7 +52,8 @@ type WebSocketEventName =
   | "gpt_response"        // For receiving GPT responses
   | "network_scan"        // For requesting network scan
   | "network_list"        // For receiving network list
-  | "network_update";     // For updating network settings
+  | "network_update"      // For updating network settings
+  | "log_message";        // For receiving real-time log messages
 
 type WebSocketEvent = {
   name: WebSocketEventName;
@@ -321,6 +322,12 @@ const wsHandlers = {
           console.log(`Network update request: ${event.data.action}`);
           // Forward to all cars
           broadcastToType(message, "car", ws);
+          break;
+
+        case "log_message":
+          // Forward log messages to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
           break;
 
         default:

@@ -245,6 +245,9 @@ class ByteRacer:
                     self.websocket = websocket
                     logging.info(f"Connected to WebSocket server at {url}")
                     
+                    # Set the websocket in the log manager for real-time log streaming
+                    self.log_manager.set_websocket(websocket)
+                    
                     # Register as a car
                     register_message = json.dumps({
                         "name": "client_register",
