@@ -146,8 +146,15 @@ class TTSManager:
                    (filename.startswith("tts_vol_") and filename.endswith(".wav")):
                     try:
                         file_path = os.path.join("/tmp", filename)
-                        os.remove(file_path)
-                        logger.debug(f"Cleaned up TTS temp file: {filename}")
+                        # Check if file exists before trying to remove it
+                        if os.path.exists(file_path):
+                            try:
+                                os.remove(file_path)
+                                logger.debug(f"Cleaned up TTS temp file: {filename}")
+                            except PermissionError:
+                                # File might be in use, try to close any handles to it
+                                logger.warning(f"Permission error removing temp file {filename}, may still be in use")
+                                # On Linux we can continue without stopping the process
                     except Exception as e:
                         logger.warning(f"Failed to remove temp file {filename}: {e}")
         except Exception as e:

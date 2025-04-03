@@ -644,7 +644,7 @@ class ByteRacer:
 
         # Clear TTS queue and stop any ongoing speech
         self.tts_manager.clear_queue()
-        self.tts_manager.stop_speech()
+        await self.tts_manager.stop_speech()  # Fixed: properly await the async call
 
         # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
@@ -658,7 +658,7 @@ class ByteRacer:
         elif emergency == EmergencyState.MANUAL_STOP:
             await self.tts_manager.say("Emergency stop activated.", priority=2)
 
-                # Play alert sound immediately
+        # Play alert sound immediately
         self.sound_manager.play_alert("emergency")
         
         # Send emergency status to client if connected
