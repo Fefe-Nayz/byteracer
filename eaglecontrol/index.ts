@@ -45,6 +45,8 @@ type WebSocketEventName =
   | "camera_status"       // For receiving camera status
   | "speak_text"          // For sending text to be spoken
   | "play_sound"          // For sending a sound to be played
+  | "stop_sound"          // For stopping all currently playing sounds
+  | "stop_tts"            // For stopping currently playing speech
   | "gpt_command"         // For sending GPT commands
   | "gpt_response"        // For receiving GPT responses
   | "network_scan"        // For requesting network scan
@@ -258,6 +260,20 @@ const wsHandlers = {
         // Sound to play
         case "play_sound":
           console.log(`Sound to play: ${event.data.sound}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Stop sound
+        case "stop_sound":
+          console.log("Stop sound request received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Stop TTS
+        case "stop_tts":
+          console.log("Stop TTS request received");
           // Forward to all cars
           broadcastToType(message, "car", ws);
           break;

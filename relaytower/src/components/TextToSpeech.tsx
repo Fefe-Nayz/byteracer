@@ -3,13 +3,13 @@ import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { Megaphone, Play } from "lucide-react";
+import { Megaphone, Play, Square } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 export default function TextToSpeech() {
   const [text, setText] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const { status, speakText, settings } = useWebSocket();
+  const { status, speakText, stopTts, settings } = useWebSocket();
   const { toast } = useToast();
   
   const handleSubmit = (e: React.FormEvent) => {
@@ -36,13 +36,35 @@ export default function TextToSpeech() {
     }, 1000);
   };
   
+  const handleStopTts = () => {
+    stopTts();
+    
+    // Show toast notification
+    toast({
+      title: "Speech stopped",
+      description: "TTS speech has been stopped",
+      duration: 2000,
+    });
+  };
+  
   const ttsEnabled = settings?.sound.tts_enabled || false;
   
   return (
     <Card className="p-4">
-      <div className="flex items-center space-x-2 mb-3">
-        <Megaphone className="h-5 w-5" />
-        <h3 className="font-bold">Text-to-Speech</h3>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-2">
+          <Megaphone className="h-5 w-5" />
+          <h3 className="font-bold">Text-to-Speech</h3>
+        </div>
+        <Button 
+          variant="destructive" 
+          size="sm"
+          onClick={handleStopTts}
+          disabled={status !== "connected" || !ttsEnabled}
+        >
+          <Square className="h-4 w-4 mr-1" />
+          Stop
+        </Button>
       </div>
       
       <form onSubmit={handleSubmit} className="flex space-x-2">

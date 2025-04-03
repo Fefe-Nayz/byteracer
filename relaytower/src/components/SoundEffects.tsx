@@ -2,16 +2,14 @@ import { useState, useEffect } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
-import { Music } from "lucide-react";
+import { Music, VolumeX, Gamepad, Square } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { VolumeX } from "lucide-react";
-import { Gamepad } from "lucide-react";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 
 export default function SoundEffects() {
   const [isPlaying, setIsPlaying] = useState<string | null>(null);
   const [selectedSound, setSelectedSound] = useLocalStorage<string>("gamepad-selected-sound", "fart");
-  const { status, playSound, settings } = useWebSocket();
+  const { status, playSound, stopSound, settings } = useWebSocket();
   const { toast } = useToast();
   
   const handlePlaySound = (sound: string) => {
@@ -28,7 +26,21 @@ export default function SoundEffects() {
     });
     
     // Reset after delay (assuming most sounds are short)
+    setTimeout(() => {
+      setIsPlaying(null);
+    }, 2000);
+  };
+  
+  const handleStopSound = () => {
+    stopSound();
     setIsPlaying(null);
+    
+    // Show toast notification
+    toast({
+      title: "Sounds stopped",
+      description: "All sounds have been stopped",
+      duration: 2000,
+    });
   };
   
   const handleSelectSound = (sound: string) => {
@@ -77,9 +89,21 @@ export default function SoundEffects() {
           <Music className="h-5 w-5" />
           <h3 className="font-bold">Sound Effects</h3>
         </div>
-        <div className="text-xs flex items-center">
-          <Gamepad className="h-4 w-4 mr-1" />
-          <span>Quick Control: {selectedSound}</span>
+        <div className="flex items-center space-x-2">
+          <div className="text-xs flex items-center">
+            <Gamepad className="h-4 w-4 mr-1" />
+            <span>Quick: {selectedSound}</span>
+          </div>
+          <Button 
+            variant="destructive" 
+            size="sm"
+            onClick={handleStopSound}
+            disabled={status !== "connected" || !soundEnabled}
+            className="ml-2"
+          >
+            <Square className="h-4 w-4 mr-1" />
+            Stop
+          </Button>
         </div>
       </div>
       

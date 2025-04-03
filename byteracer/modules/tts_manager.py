@@ -6,6 +6,7 @@ import logging
 import os
 import uuid
 import subprocess
+import signal
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ class TTSManager:
         self._lock = threading.Lock()
         self._running = True
         self._task = None
+        self._current_process = None
         self._clear_temp_files()
         logger.info(f"TTS Manager initialized (lang={lang}, volume={volume})")
     
@@ -97,6 +99,40 @@ class TTSManager:
                 logger.error(f"Error in TTS queue processor: {e}")
                 await asyncio.sleep(1)  # Avoid tight loop on error
     
+    async def stop_speech(self):
+        """Stop the currently playing speech and clear the queue"""
+        logger.info("Stopping current speech and clearing queue")
+        
+        with self._lock:
+            # Kill any running speech process
+            if self._current_process and self._current_process.poll() is None:
+                try:
+                    # Try to terminate the process
+                    self._current_process.terminate()
+                    # Wait a short time for it to terminate gracefully
+                    for _ in range(10):  # Wait up to 0.5 seconds
+                        if self._current_process.poll() is not None:
+                            break
+                        await asyncio.sleep(0.05)
+                    
+                    # If it's still running, force kill it
+                    if self._current_process.poll() is None:
+                        self._current_process.kill()
+                        
+                    logger.debug("Stopped current speech process")
+                except Exception as e:
+                    logger.error(f"Error stopping speech process: {e}")
+            
+            # Clear the queue
+            self.clear_queue()
+            
+            # Reset speaking state
+            self._speaking = False
+            self._current_priority = 0
+            self._current_process = None
+        
+        return True
+    
     def _speak(self, text):
         """Execute the actual TTS operation"""
         try:
@@ -146,14 +182,22 @@ class TTSManager:
                 play_cmd = f'aplay {temp_file}'
                 logger.debug("Playing with standard aplay (full volume)")
             
-            # Play the audio file
-            play_process = subprocess.run(play_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if play_process.returncode != 0:
-                logger.error(f"Audio playback error: {play_process.stderr.decode()}")
+            # Play the audio file - store the process so we can terminate it if needed
+            self._current_process = subprocess.Popen(play_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Wait for the process to complete
+            return_code = self._current_process.wait()
+            if return_code != 0:
+                stderr = self._current_process.stderr.read().decode() if self._current_process.stderr else "Unknown error"
+                logger.error(f"Audio playback error: {stderr}")
+            
+            # Clear the current process reference
+            self._current_process = None
             
             return True
         except Exception as e:
             logger.error(f"TTS error while speaking '{text}': {e}")
+            self._current_process = None
             return False
         finally:
             # Clean up temp files

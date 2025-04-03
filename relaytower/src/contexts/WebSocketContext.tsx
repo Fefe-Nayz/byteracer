@@ -174,6 +174,8 @@ interface WebSocketContextValue {
   updateSettings: (settings: Partial<RobotSettings>) => void;
   speakText: (text: string) => void;
   playSound: (sound: string) => void;
+  stopSound: () => void;
+  stopTts: () => void;
   restartCameraFeed: () => void;
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
@@ -583,6 +585,50 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  // Function to stop current sound playback
+  const stopSound = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const stopSoundData = {
+        name: "stop_sound",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(stopSoundData));
+      trackWsMessage("sent", stopSoundData);
+      console.log("Stop sound request sent");
+    } else {
+      logError("Cannot send stop sound request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  // Function to stop current TTS playback
+  const stopTts = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const stopTtsData = {
+        name: "stop_tts",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(stopTtsData));
+      trackWsMessage("sent", stopTtsData);
+      console.log("Stop TTS request sent");
+    } else {
+      logError("Cannot send stop TTS request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
   // Function to restart camera feed
   const restartCameraFeed = useCallback(() => {
     sendRobotCommand("restart_camera_feed");
@@ -685,6 +731,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     updateSettings,
     speakText,
     playSound,
+    stopSound,
+    stopTts,
     restartCameraFeed,
     scanNetworks,
     updateNetwork,

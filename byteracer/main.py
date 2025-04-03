@@ -364,6 +364,24 @@ class ByteRacer:
                         "message": f"Sound {'played' if success else 'not found'}: {sound_name}"
                     })
             
+            elif data["name"] == "stop_sound":
+                # Handle stop sound request
+                logging.info("Received stop sound request")
+                self.sound_manager.stop_sound()
+                await self.send_command_response({
+                    "success": True,
+                    "message": "All sounds stopped"
+                })
+                
+            elif data["name"] == "stop_tts":
+                # Handle stop TTS request
+                logging.info("Received stop TTS request")
+                success = await self.tts_manager.stop_speech()
+                await self.send_command_response({
+                    "success": success,
+                    "message": "TTS speech stopped"
+                })
+                
             elif data["name"] == "gpt_command":
                 # Handle GPT command
                 if "prompt" in data["data"]:
@@ -623,6 +641,10 @@ class ByteRacer:
     async def handle_emergency(self, emergency):
         """Handle emergency situations"""
         logging.warning(f"Emergency callback triggered: {emergency.name}")
+
+        # Clear TTS queue and stop any ongoing speech
+        self.tts_manager.clear_queue()
+        self.tts_manager.stop_speaking()
 
         # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
