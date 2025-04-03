@@ -644,7 +644,7 @@ class ByteRacer:
 
         # Clear TTS queue and stop any ongoing speech
         self.tts_manager.clear_queue()
-        self.tts_manager.stop_speaking()
+        self.tts_manager.stop_speech()
 
         # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
