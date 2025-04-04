@@ -117,7 +117,7 @@ export default function CameraFeed() {
 
   if (isFullscreen) {
     return (
-      <div ref={fullscreenContainerRef} className="fixed inset-0 z-50 bg-black">
+      <div ref={fullscreenContainerRef} className="fixed inset-0 z-50 bg-black m-0">
         {/* Blurred background */}
         <div className="absolute inset-0 overflow-hidden">
           <img
