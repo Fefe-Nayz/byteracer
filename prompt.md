@@ -109,6 +109,7 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 # TODO:
 - Refactor de l'implémentation des Etats du robot (avec différents modes et différents états pour mieux gérer la détection de connection)
 - Implémenter l'intégration avec chatGPT
+- Parler à travers le websocket (https://stackoverflow.com/questions/67118642/audiocontext-getusermedia-and-websockets-audio-streaming)
 
 - Refactoriser du module caméra pour mieux gérer les erreurs et les redémarrages (changement de wifi, affichage de l'etat sur le client)
 - Refactoriser les scripts bash pour les commandes systèmes pour ne pas qu'ils quittens les sessions screen mais juste stoppent les programmes à l'intérieur
