@@ -83,6 +83,9 @@ class TTSManager:
             blocking (bool): If True, wait until speech is completed (not recommended)
             lang (str): Language for the TTS (overrides instance language)
         """
+
+        logger.info(f"Request to say: '{text}' in lang '{lang}' with priority {priority}")
+
         if lang is None:
             lang = self.lang
         if not self.enabled:

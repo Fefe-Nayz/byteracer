@@ -211,7 +211,7 @@ class ByteRacer:
             while True:
                 try:
                     # Get current network status
-                    network_status = self.network_manager.get_connection_status()
+                    network_status = await self.network_manager.get_connection_status()
                     current_ips = network_status.get("ip_addresses", {})
                     current_mode = "ap" if network_status.get("ap_mode_active", False) else "wifi"
                     port = "3000"
@@ -668,15 +668,23 @@ class ByteRacer:
             # Calculate raw acceleration
             raw_acceleration = (speed_value - self.last_speed) / dt
             
-            # Apply acceleration limit based on acceleration_factor
-            max_acceleration = acceleration_factor * 2.0  # Scale factor for reasonable acceleration limits
-            if abs(raw_acceleration) > max_acceleration:
-                # Limit acceleration to the maximum allowed value
-                acceleration = max_acceleration if raw_acceleration > 0 else -max_acceleration
+            # Only apply acceleration limit if factor is less than 1.0
+            if acceleration_factor < 1.0:
+                # Scale max acceleration inversely - smaller factor = tighter limit
+                # When factor is 1.0, there should be no limit (infinite acceleration allowed)
+                # When factor is close to 0, the limit should be very restrictive
+                max_acceleration = 2.0 / (1.1 - acceleration_factor)  # This creates a curve that approaches infinity as factor approaches 1.0
                 
-                # Adjust speed value to respect acceleration limit
-                speed_value = self.last_speed + (acceleration * dt)
+                if abs(raw_acceleration) > max_acceleration:
+                    # Limit acceleration to the maximum allowed value
+                    acceleration = max_acceleration if raw_acceleration > 0 else -max_acceleration
+                    
+                    # Adjust speed value to respect acceleration limit
+                    speed_value = self.last_speed + (acceleration * dt)
+                else:
+                    acceleration = raw_acceleration
             else:
+                # No acceleration limit when factor is at maximum
                 acceleration = raw_acceleration
         else:
             acceleration = 0
