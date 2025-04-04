@@ -17,84 +17,93 @@ class WebSocketLogHandler(logging.Handler):
     def __init__(self, websocket=None):
         super().__init__()
         self.websocket = websocket
-        self.queue = asyncio.Queue()
-        self.task = None
+        # Use a thread-safe queue instead of asyncio.Queue
+        self.queue = queue.Queue()
+        self.event_loop = None
+        self.worker_thread = None
         self.running = True
+        # Start the worker thread
+        self._start_worker()
+        
+    def _start_worker(self):
+        """Start the worker thread that processes logs"""
+        if not self.worker_thread or not self.worker_thread.is_alive():
+            self.worker_thread = threading.Thread(target=self._process_queue, daemon=True)
+            self.worker_thread.start()
         
     def set_websocket(self, websocket):
         """Update the WebSocket connection"""
         self.websocket = websocket
+        # Store a reference to the event loop when the WebSocket is set
+        self.event_loop = asyncio.get_running_loop()
         
     def emit(self, record):
-        """Put log record in the queue for sending"""
+        """Put log record in the queue for sending - safe to call from any thread"""
         if not self.running:
             return
             
         try:
             log_entry = self.format(record)
             
-            # Create a new asyncio task if one is not already running
-            if self.task is None or self.task.done():
-                loop = asyncio.get_event_loop()
-                self.task = asyncio.run_coroutine_threadsafe(
-                    self._send_logs_worker(), loop
-                )
-                
-            # Add to queue
-            asyncio.run_coroutine_threadsafe(
-                self.queue.put({
-                    "level": record.levelname,
-                    "message": log_entry,
-                    "timestamp": int(time.time() * 1000)
-                }), 
-                asyncio.get_event_loop()
-            )
+            # Add to thread-safe queue - no asyncio needed here
+            self.queue.put({
+                "level": record.levelname,
+                "message": log_entry,
+                "timestamp": int(time.time() * 1000)
+            })
             
         except Exception as e:
             self.handleError(record)
-            
-    async def _send_logs_worker(self):
-        """Worker coroutine that sends logs from the queue to the WebSocket"""
+    
+    def _process_queue(self):
+        """Thread method that processes the queue and sends to the WebSocket via the event loop"""
         while self.running:
             try:
                 # Get next log with a timeout
                 try:
-                    log_data = await asyncio.wait_for(self.queue.get(), timeout=0.5)
-                except asyncio.TimeoutError:
+                    log_data = self.queue.get(timeout=0.5)
+                except queue.Empty:
                     continue
-                    
-                # Check if we have a valid WebSocket
-                if self.websocket and self.websocket.open:
-                    try:
-                        # Create message
-                        message = json.dumps({
-                            "name": "log_message",
-                            "data": log_data,
-                            "createdAt": int(time.time() * 1000)
-                        })
-                        
-                        # Send it
-                        await self.websocket.send(message)
-                    except websockets.exceptions.ConnectionClosed:
-                        # Connection closed, but don't mark task as complete
-                        pass
-                    except Exception as e:
-                        print(f"Error sending log via WebSocket: {e}")
+                
+                # Skip if we don't have an event loop or websocket yet
+                if not self.event_loop or not self.websocket:
+                    self.queue.task_done()
+                    time.sleep(0.1)
+                    continue
+                
+                # Create message
+                message = json.dumps({
+                    "name": "log_message",
+                    "data": log_data,
+                    "createdAt": int(time.time() * 1000)
+                })
+                
+                # Schedule sending on the event loop
+                if self.event_loop and self.websocket and not self.event_loop.is_closed():
+                    asyncio.run_coroutine_threadsafe(self._send_log(message), self.event_loop)
                 
                 # Mark task as complete in the queue
                 self.queue.task_done()
                 
-            except asyncio.CancelledError:
-                break
             except Exception as e:
                 print(f"Error in WebSocket log worker: {e}")
-                await asyncio.sleep(1)  # Prevent tight loop on error
+                time.sleep(1)  # Prevent tight loop on error
+            
+    async def _send_log(self, message):
+        """Coroutine to send a single log message via WebSocket"""
+        if self.websocket and hasattr(self.websocket, 'open') and self.websocket.open:
+            try:
+                await self.websocket.send(message)
+            except websockets.exceptions.ConnectionClosed:
+                pass  # Connection closed
+            except Exception as e:
+                print(f"Error sending log via WebSocket: {e}")
                 
     def close(self):
         """Close the handler"""
         self.running = False
-        if self.task:
-            self.task.cancel()
+        if self.worker_thread and self.worker_thread.is_alive():
+            self.worker_thread.join(timeout=1.0)  # Wait for worker thread to finish
         super().close()
 
 class LogManager:

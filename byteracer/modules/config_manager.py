@@ -78,6 +78,7 @@ class ConfigManager:
                 "tracking_enabled": False,
                 "circuit_mode_enabled": False,
                 "demo_mode_enabled": False,
+                "normal_mode_enabled": True,
             },
             
             # Network settings
@@ -376,6 +377,7 @@ class ConfigManager:
                 "tracking_enabled": False,
                 "circuit_mode_enabled": False,
                 "demo_mode_enabled": False,
+                "normal_mode_enabled": True,
             },
             
             # Network settings are not reset by default
