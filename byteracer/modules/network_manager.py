@@ -85,36 +85,31 @@ class NetworkManager:
         return await task
 
     async def _scan_wifi_networks_impl(self) -> List[str]:
-        """
-        Implementation of WiFi network scanning that can run in the background.
-        """
         try:
-            # First ensure WiFi is powered on
-            self._ensure_wifi_powered_sync()
+            # Ensure WiFi is powered on in a thread so it doesn't block
+            await asyncio.to_thread(self._ensure_wifi_powered_sync)
             
-            # Try using nmcli first (preferred method with NetworkManager)
-            returncode, stdout, stderr = self._run_command(
+            # Try using nmcli first
+            returncode, stdout, stderr = await asyncio.to_thread(
+                self._run_command,
                 ["nmcli", "-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes"]
             )
             
             if returncode == 0:
-                # Parse nmcli output for SSIDs
                 ssids = []
                 for line in stdout.splitlines():
                     ssid = line.strip()
                     if ssid and ssid not in ssids and not ssid.startswith('\x00'):
                         ssids.append(ssid)
-                
                 self.logger.info(f"Found {len(ssids)} WiFi networks using nmcli")
                 return ssids
             else:
-                # Fallback to iw scan if nmcli fails
                 self.logger.warning("nmcli scan failed, falling back to iw scan")
-                returncode, stdout, stderr = self._run_command(
+                returncode, stdout, stderr = await asyncio.to_thread(
+                    self._run_command,
                     ["iw", "dev", self.wifi_interface, "scan", "ap-force"],
-                    timeout=20  # iw scan can take longer
+                    20  # timeout
                 )
-                
                 if returncode == 0:
                     ssids = []
                     for line in stdout.splitlines():
@@ -122,7 +117,6 @@ class NetworkManager:
                             ssid = line.split("SSID:")[1].strip()
                             if ssid and ssid not in ssids and not ssid.startswith('\x00'):
                                 ssids.append(ssid)
-                    
                     self.logger.info(f"Found {len(ssids)} WiFi networks using iw")
                     return ssids
                 else:
@@ -131,6 +125,7 @@ class NetworkManager:
         except Exception as e:
             self.logger.error(f"Error scanning for WiFi networks: {str(e)}")
             return []
+
 
     def _ensure_wifi_powered_sync(self) -> None:
         """Ensure WiFi radio is powered on (synchronous version)."""
