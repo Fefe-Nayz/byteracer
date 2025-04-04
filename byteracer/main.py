@@ -190,6 +190,8 @@ class ByteRacer:
         # Apply special modes
         self.sensor_manager.set_tracking(settings["modes"]["tracking_enabled"])
         self.sensor_manager.set_circuit_mode(settings["modes"]["circuit_mode_enabled"])
+        self.sensor_manager.set_tracking(settings["modes"]["circuit_mode_enabled"])
+        self.sensor_manager.set_normal_mode(settings["modes"]["normal_mode_enabled"])
         
         logging.info("Applied settings from configuration")
     
@@ -201,41 +203,74 @@ class ByteRacer:
     async def announce_ip_periodically(self):
         """Periodically announce the IP address until a client connects"""
         try:
-            while not self.client_connected:
-                ip_address = self.get_ip()
-                port = "3000"
-                
-                # Speak the IP address
-                await self.tts_manager.say(f"My IP address is {ip_address}. Connect to {ip_address} port {port}", priority=0)
-                
-                # Check if we've been connected to while speaking
-                if self.client_connected:
-                    break
-                
-                # Wait before repeating
-                await asyncio.sleep(30)
-                
-                # Check again if connected before looping
-                if self.client_connected:
-                    break
-            
-            logging.info("IP announcement task stopped - client connected")
+            # Track previous network state
+            previous_ip = None
+            previous_mode = None
+            first_run = True
+
+            while True:
+                try:
+                    # Get current network status
+                    network_status = self.network_manager.get_connection_status()
+                    current_ips = network_status.get("ip_addresses", {})
+                    current_mode = "ap" if network_status.get("ap_mode_active", False) else "wifi"
+                    port = "3000"
+                    
+                    # Get the primary interface IP
+                    wifi_interface = self.network_manager.wifi_interface
+                    current_ip = current_ips.get(wifi_interface, "unknown")
+                    
+                    # Check if IP or mode has changed
+                    ip_changed = current_ip != previous_ip and previous_ip is not None
+                    mode_changed = current_mode != previous_mode and previous_mode is not None
+                    
+                    # Determine if we need to make an announcement
+                    should_announce = False
+                    
+                    # Always announce on first run or when not connected
+                    if first_run or not self.client_connected:
+                        should_announce = True
+                        first_run = False
+                    # Announce if network changed while connected
+                    elif ip_changed or mode_changed:
+                        logging.info(f"Network changed: IP: {current_ip} (was {previous_ip}), Mode: {current_mode} (was {previous_mode})")
+                        self.client_connected = False
+                        self.client_ever_connected = True  # Keep this flag true
+                        should_announce = True
+                        
+                        # Update client status in sensor manager
+                        self.sensor_manager.update_client_status(False, self.client_ever_connected)
+                    
+                    # Make announcement if needed
+                    if should_announce:
+                        # Update previous state
+                        previous_ip = current_ip
+                        previous_mode = current_mode
+                        
+                        # Prepare message based on mode
+                        if current_mode == "ap":
+                            ap_name = network_status.get("ap_ssid", "ByteRacer")
+                            message = f"Access point mode active. Connect to WiFi network {ap_name}, then visit {current_ip} port {port} in your browser."
+                        else:
+                            message = f"WiFi mode active. My IP address is {current_ip}. Connect to {current_ip} port {port} in your browser."
+                        
+                        # Speak the message
+                        await self.tts_manager.say(message, priority=1)
+                        logging.info(f"Announced IP: {current_ip}, Mode: {current_mode}")
+                    
+                    # Wait before checking again
+                    if self.client_connected:
+                        # Check less frequently when client is connected
+                        await asyncio.sleep(60)
+                    else:
+                        # Check more frequently when no client is connected
+                        await asyncio.sleep(30)
+                        
+                except Exception as e:
+                    logging.error(f"Error in IP announcement task: {e}")
+                    await asyncio.sleep(30)  # Wait before retrying on error
         except asyncio.CancelledError:
             logging.info("IP announcement task cancelled")
-    
-    def get_ip(self):
-        """Get the robot's IP address"""
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(0)
-        try:
-            # This address doesn't need to be reachable
-            s.connect(('10.255.255.255', 1))
-            ip = s.getsockname()[0]
-        except Exception:
-            ip = '127.0.0.1'
-        finally:
-            s.close()
-        return ip
     
     async def connect_to_websocket(self, url):
         """Connect to the WebSocket server and handle reconnection"""
@@ -377,8 +412,9 @@ class ByteRacer:
                 # Handle text to speak
                 if "text" in data["data"]:
                     text = data["data"]["text"]
-                    logging.info(f"Received TTS request: {text}")
-                    await self.tts_manager.say(text, priority=0)
+                    language = data["data"].get("language", "en")
+                    logging.info(f"Received TTS request: {text} in {language}")
+                    await self.tts_manager.say(text, language=language, priority=1)
                     await self.send_command_response({
                         "success": True,
                         "message": "Text spoken successfully"
@@ -619,11 +655,29 @@ class ByteRacer:
         camera_tilt_value = float(data.get("turnCameraY", 0))
         use_button = data.get("use", False)
         
+        # Get acceleration_factor from config (between 0.1 and 1.0)
+        acceleration_factor = self.config_manager.get("drive.acceleration_factor")
+        
+        # Ensure acceleration_factor is within valid range
+        acceleration_factor = max(0.1, min(1.0, acceleration_factor))
+        
         # Calculate acceleration for sound effects
         now = time.time()
         dt = now - self.last_motion_update
         if dt > 0:
-            acceleration = (speed_value - self.last_speed) / dt
+            # Calculate raw acceleration
+            raw_acceleration = (speed_value - self.last_speed) / dt
+            
+            # Apply acceleration limit based on acceleration_factor
+            max_acceleration = acceleration_factor * 2.0  # Scale factor for reasonable acceleration limits
+            if abs(raw_acceleration) > max_acceleration:
+                # Limit acceleration to the maximum allowed value
+                acceleration = max_acceleration if raw_acceleration > 0 else -max_acceleration
+                
+                # Adjust speed value to respect acceleration limit
+                speed_value = self.last_speed + (acceleration * dt)
+            else:
+                acceleration = raw_acceleration
         else:
             acceleration = 0
         
@@ -648,8 +702,18 @@ class ByteRacer:
             self.px.set_cam_tilt_angle(camera_tilt_value * 35)
         
         # Set motor speeds with safety constraints applied
-        max_speed = self.config_manager.get("drive.max_speed")
-        max_turn = self.config_manager.get("drive.max_turn_angle")
+        # Convert percentage values (0-100) to actual values
+        max_speed_pct = self.config_manager.get("drive.max_speed")
+        max_turn_pct = self.config_manager.get("drive.max_turn_angle")
+        
+        # Ensure values are within valid range (0-100%)
+        max_speed_pct = max(0, min(100, max_speed_pct))
+        max_turn_pct = max(0, min(100, max_turn_pct))
+        
+        # Convert percentages to actual values
+        max_speed = max_speed_pct / 100.0    # Convert to 0.0-1.0 range
+        max_turn = max_turn_pct / 100.0 * 30  # Convert to degrees (assuming 45° is max possible turn)
+        
         enhanced_turning = self.config_manager.get("drive.enhanced_turning")
         turn_in_place = self.config_manager.get("drive.turn_in_place")
         
@@ -845,6 +909,10 @@ class ByteRacer:
             if "demo_mode_enabled" in modes:
                 self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])
                 self.sensor_manager.set_demo_mode(modes["demo_mode_enabled"])
+
+            if "normal_mode_enabled" in modes:
+                self.config_manager.set("modes.normal_mode_enabled", modes["normal_mode_enabled"])
+                self.sensor_manager.set_normal_mode(modes["normal_mode_enabled"])
 
         if "drive" in settings:
             drive = settings["drive"]

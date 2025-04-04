@@ -7,15 +7,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 
 export default function SoundEffects() {
-  const [isPlaying, setIsPlaying] = useState<string | null>(null);
   const [selectedSound, setSelectedSound] = useLocalStorage<string>("gamepad-selected-sound", "fart");
   const { status, playSound, stopSound, settings } = useWebSocket();
   const { toast } = useToast();
   
   const handlePlaySound = (sound: string) => {
-    if (isPlaying) return;
-    
-    setIsPlaying(sound);
     playSound(sound);
     
     // Show toast notification
@@ -24,16 +20,10 @@ export default function SoundEffects() {
       description: `Playing ${sound} sound`,
       duration: 2000,
     });
-    
-    // Reset after delay (assuming most sounds are short)
-    setTimeout(() => {
-      setIsPlaying(null);
-    }, 2000);
   };
   
   const handleStopSound = () => {
     stopSound();
-    setIsPlaying(null);
     
     // Show toast notification
     toast({
@@ -119,7 +109,7 @@ export default function SoundEffects() {
               return false;
             }}
             disabled={status !== "connected" || !soundEnabled }
-            className={`h-auto py-3 relative ${isPlaying === sound.id ? 'bg-primary/20' : ''} ${selectedSound === sound.id ? 'border-2 border-primary' : ''}`}
+            className={`h-auto py-3 relative ${selectedSound === sound.id ? 'border-2 border-primary' : ''}`}
           >
             <div className="flex flex-col items-center">
               <span className="text-xl mb-1">{sound.icon}</span>

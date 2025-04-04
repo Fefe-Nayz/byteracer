@@ -73,7 +73,7 @@ class TTSManager:
         await self.stop_speech()
         logger.info("TTS processing loop stopped")
     
-    async def say(self, text, priority=0, blocking=False):
+    async def say(self, text, priority=0, blocking=False, lang=None):
         """
         Add a phrase to the TTS queue.
         
@@ -81,13 +81,16 @@ class TTSManager:
             text (str): Text to be spoken
             priority (int): Priority level (higher means more important)
             blocking (bool): If True, wait until speech is completed (not recommended)
+            lang (str): Language for the TTS (overrides instance language)
         """
+        if lang is None:
+            lang = self.lang
         if not self.enabled:
             logger.debug(f"TTS disabled, skipping: '{text}'")
             return
 
         # Put in queue with priority
-        await self._queue.put((priority, text))
+        await self._queue.put((priority, text, lang))
         logger.debug(f"Added to TTS queue: '{text}' (priority {priority})")
         
         if blocking:
@@ -104,7 +107,7 @@ class TTSManager:
                     await asyncio.sleep(0.1)
                     continue
                 
-                priority, text = await self._queue.get()
+                priority, text, lang = await self._queue.get()
                 
                 with self._lock:
                     self._speaking = True
@@ -112,7 +115,7 @@ class TTSManager:
                 
                 # Generate the speech in a separate thread to avoid blocking
                 # Important: We DON'T wait for the playback to finish in this thread
-                await asyncio.to_thread(self._generate_and_play_speech, text)
+                await asyncio.to_thread(self._generate_and_play_speech, text, lang)
                 
                 # Mark as done IMMEDIATELY - don't wait for audio to finish
                 self._queue.task_done()
@@ -170,10 +173,11 @@ class TTSManager:
         # Clean up temporary files
         await asyncio.to_thread(self._cleanup_temp_files)
         
-        return True
-    
-    def _generate_and_play_speech(self, text):
+    def _generate_and_play_speech(self, text, lang=None):
         """Generate speech file and start playback - but don't wait for it to finish"""
+        if lang is None:
+            lang = self.lang
+
         if not self.enabled:
             return False
         
@@ -181,12 +185,10 @@ class TTSManager:
         final_file = None
         
         try:
-            # Generate a unique temp file name
+            # Generate the TTS wave file
             temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
             final_file = temp_file
-            
-            # Generate the TTS wave file
-            pico_cmd = f'pico2wave -l {self.lang} -w {temp_file} "{text}"'
+            pico_cmd = f'pico2wave -l {lang} -w {temp_file} "{text}"'
             logger.debug(f"Generating TTS for: '{text}'")
             
             # Generate the audio file

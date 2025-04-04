@@ -139,6 +139,7 @@ export interface RobotSettings {
     turn_in_place: boolean;
   };
   modes: {
+    normal_mode_enabled: boolean;
     tracking_enabled: boolean;
     circuit_mode_enabled: boolean;
     demo_mode_enabled: boolean;
@@ -188,7 +189,7 @@ interface WebSocketContextValue {
   requestSettings: () => void;
   updateSettings: (settings: Partial<RobotSettings>) => void;
   resetSettings: (section?: string) => void;
-  speakText: (text: string) => void;
+  speakText: (text: string, language: string) => void;
   playSound: (sound: string) => void;
   stopSound: () => void;
   stopTts: () => void;
@@ -593,12 +594,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   // Function to send text to speak
-  const speakText = useCallback((text: string) => {
+  const speakText = useCallback((text: string, language: string) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const ttsData = {
         name: "speak_text",
         data: {
           text,
+          language,
           timestamp: Date.now(),
         },
         createdAt: Date.now(),

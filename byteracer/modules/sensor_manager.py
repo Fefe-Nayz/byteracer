@@ -534,6 +534,10 @@ class SensorManager:
         """Enable or disable circuit mode"""
         self.circuit_mode_enabled = enabled
         logger.info(f"Circuit mode {'enabled' if enabled else 'disabled'}")
+
+    def set_normal_mode(self, enabled):
+        """Enable or disable normal mode"""
+        logger.info(f"Normal mode {'enabled' if enabled else 'disabled'}")
     
     def set_demo_mode(self, enabled):
         """Enable or disable demo mode"""

@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { 
   Volume2, Megaphone, Camera, AlertTriangle,
-  PersonStanding, TrafficCone, BarChart 
+  PersonStanding, TrafficCone, BarChart, Gamepad2
 } from "lucide-react";
 
 export default function RobotSettings() {
@@ -142,10 +142,10 @@ export default function RobotSettings() {
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span>Effects Master Volume</span>
-                <span>{localSettings.sound.sound_volume}%</span>
+                <span>{localSettings.sound.sound_volume !== undefined ? localSettings.sound.sound_volume : 80}%</span>
               </div>
               <Slider 
-                value={[localSettings.sound.sound_volume || 80]}
+                value={[localSettings.sound.sound_volume !== undefined ? localSettings.sound.sound_volume : 80]}
                 min={0}
                 max={100}
                 step={1}
@@ -160,10 +160,10 @@ export default function RobotSettings() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Driving Sounds</span>
-                  <span>{localSettings.sound.driving_volume || 80}%</span>
+                  <span>{localSettings.sound.driving_volume !== undefined ? localSettings.sound.driving_volume : 80}%</span>
                 </div>
                 <Slider 
-                  value={[localSettings.sound.driving_volume || 80]}
+                  value={[localSettings.sound.driving_volume !== undefined ? localSettings.sound.driving_volume : 80]}
                   min={0}
                   max={100}
                   step={1}
@@ -177,10 +177,10 @@ export default function RobotSettings() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Alert Sounds</span>
-                  <span>{localSettings.sound.alert_volume || 90}%</span>
+                  <span>{localSettings.sound.alert_volume !== undefined ? localSettings.sound.alert_volume : 90}%</span>
                 </div>
                 <Slider 
-                  value={[localSettings.sound.alert_volume || 90]}
+                  value={[localSettings.sound.alert_volume !== undefined ? localSettings.sound.alert_volume : 90]}
                   min={0}
                   max={100}
                   step={1}
@@ -194,10 +194,10 @@ export default function RobotSettings() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Custom Sounds</span>
-                  <span>{localSettings.sound.custom_volume || 80}%</span>
+                  <span>{localSettings.sound.custom_volume !== undefined ? localSettings.sound.custom_volume : 80}%</span>
                 </div>
                 <Slider 
-                  value={[localSettings.sound.custom_volume || 80]}
+                  value={[localSettings.sound.custom_volume !== undefined ? localSettings.sound.custom_volume : 80]}
                   min={0}
                   max={100}
                   step={1}
@@ -246,10 +246,10 @@ export default function RobotSettings() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>User TTS</span>
-                  <span>{localSettings.sound.user_tts_volume || 80}%</span>
+                  <span>{localSettings.sound.user_tts_volume !== undefined ? localSettings.sound.user_tts_volume : 80}%</span>
                 </div>
                 <Slider 
-                  value={[localSettings.sound.user_tts_volume || 80]}
+                  value={[localSettings.sound.user_tts_volume !== undefined ? localSettings.sound.user_tts_volume : 80]}
                   min={0}
                   max={100}
                   step={1}
@@ -263,10 +263,10 @@ export default function RobotSettings() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>System TTS</span>
-                  <span>{localSettings.sound.system_tts_volume || 90}%</span>
+                  <span>{localSettings.sound.system_tts_volume !== undefined ? localSettings.sound.system_tts_volume : 90}%</span>
                 </div>
                 <Slider 
-                  value={[localSettings.sound.system_tts_volume || 90]}
+                  value={[localSettings.sound.system_tts_volume !== undefined ? localSettings.sound.system_tts_volume : 90]}
                   min={0}
                   max={100}
                   step={1}
@@ -280,10 +280,10 @@ export default function RobotSettings() {
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Emergency TTS</span>
-                  <span>{localSettings.sound.emergency_tts_volume || 95}%</span>
+                  <span>{localSettings.sound.emergency_tts_volume !== undefined ? localSettings.sound.emergency_tts_volume : 95}%</span>
                 </div>
                 <Slider 
-                  value={[localSettings.sound.emergency_tts_volume || 95]}
+                  value={[localSettings.sound.emergency_tts_volume !== undefined ? localSettings.sound.emergency_tts_volume : 95]}
                   min={0}
                   max={100}
                   step={1}
@@ -564,43 +564,58 @@ export default function RobotSettings() {
           <h3 className="font-bold mb-4">Mode Settings</h3>
           
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <PersonStanding className="h-4 w-4" />
-                <span className="text-sm">Person Tracking</span>
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2 mb-2">
+                <span className="text-sm font-medium">Operation Mode</span>
+                <span className="text-xs text-gray-500">(select one)</span>
               </div>
-              <Switch 
-                checked={localSettings.modes.tracking_enabled}
-                onCheckedChange={(checked) => 
-                  updateSetting("modes", "tracking_enabled", checked)
-                }
-              />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <TrafficCone className="h-4 w-4" />
-                <span className="text-sm">Circuit Mode</span>
-              </div>
-              <Switch 
-                checked={localSettings.modes.circuit_mode_enabled}
-                onCheckedChange={(checked) => 
-                  updateSetting("modes", "circuit_mode_enabled", checked)
-                }
-              />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <BarChart className="h-4 w-4" />
-                <span className="text-sm">Demo Mode</span>
-              </div>
-              <Switch 
-                checked={localSettings.modes.demo_mode_enabled}
-                onCheckedChange={(checked) => 
-                  updateSetting("modes", "demo_mode_enabled", checked)
-                }
-              />
+              
+              <Select 
+                value={
+                  localSettings.modes.normal_mode_enabled ? "normal" :
+                  localSettings.modes.tracking_enabled ? "tracking" :
+                  localSettings.modes.circuit_mode_enabled ? "circuit" :
+                  localSettings.modes.demo_mode_enabled ? "demo" :
+                  "normal" // Default fallback
+                } 
+                onValueChange={(value) => {
+                  // Update all mode settings based on selection
+                  updateSetting("modes", "normal_mode_enabled", value === "normal");
+                  updateSetting("modes", "tracking_enabled", value === "tracking");
+                  updateSetting("modes", "circuit_mode_enabled", value === "circuit");
+                  updateSetting("modes", "demo_mode_enabled", value === "demo");
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select mode" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="normal">
+                    <div className="flex items-center space-x-2">
+                      <Gamepad2 className="h-4 w-4" />
+                      <span>Default Controller Mode</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="tracking">
+                    <div className="flex items-center space-x-2">
+                      <PersonStanding className="h-4 w-4" />
+                      <span>Person Tracking</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="circuit">
+                    <div className="flex items-center space-x-2">
+                      <TrafficCone className="h-4 w-4" />
+                      <span>Circuit Mode</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="demo">
+                    <div className="flex items-center space-x-2">
+                      <BarChart className="h-4 w-4" />
+                      <span>Demo Mode</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </div>

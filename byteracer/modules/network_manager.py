@@ -29,8 +29,8 @@ class NetworkManager:
         
         # Default AP settings
         self.ap_config = {
-            "ssid": "ByteRacer_AP",
-            "password": "byteracer1234",
+            "ssid": "ByteRacer",
+            "password": "ByteRacerForever",
             "ip": "192.168.50.5/24"
         }
         
@@ -665,6 +665,7 @@ class NetworkManager:
             "internet_connected": self.is_connected_to_internet(),
             "ap_mode_active": self._ap_mode_active,
             "ip_addresses": self.get_ip_address(),
+            "ap_ssid": self.ap_config["ssid"],
         }
         
         # Get current connection details
