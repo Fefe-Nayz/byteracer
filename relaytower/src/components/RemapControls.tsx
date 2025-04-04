@@ -2,7 +2,6 @@
 import { useGamepadContext } from "@/contexts/GamepadContext";
 import { Button } from "./ui/button";
 import { ACTIONS } from "@/hooks/useGamepad";
-import { useLocalStorage } from "@/hooks/useLocalStorage";
 
 export default function RemapControls() {
   const {

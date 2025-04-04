@@ -315,11 +315,10 @@ export function useGamepad() {
   useEffect(() => {
     if (!selectedGamepadId) return;
 
-    // Check if reset flag is present
-    const resetPerformed = storedMappings._resetFlag === true;
+
 
     // Only load from storage if we have a gamepad selected
-    if (selectedGamepadId && storedMappings[selectedGamepadId] && !resetPerformed) {
+    if (selectedGamepadId && storedMappings[selectedGamepadId]) {
       // Prevent saving during loading
       isLoadingFromStorage.current = true;
 
@@ -331,7 +330,7 @@ export function useGamepad() {
         isLoadingFromStorage.current = false;
       }, 0);
       // Fixed version with proper default mappings
-    } else if (selectedGamepadId && !resetPerformed) {
+    } else if (selectedGamepadId) {
       // Use default mappings from the ACTIONS array
       const defaultMappings = {} as Mapping;
 
@@ -362,16 +361,8 @@ export function useGamepad() {
       setMappings(defaultMappings);
     }
 
-    // If reset flag is present, clear it after handling
-    if (resetPerformed) {
-      setStoredMappings(prev => {
-        const { _resetFlag, ...rest } = prev;
-        return rest;
-      });
-    }
-
     // Only depends on selectedGamepadId and storedMappings
-  }, [selectedGamepadId, storedMappings, setStoredMappings]);
+  }, [selectedGamepadId, storedMappings]);
 
   // Save mappings when they change due to user actions
   useEffect(() => {
@@ -956,7 +947,7 @@ export function useGamepad() {
 
   // Set up event listeners and polling
   useEffect(() => {
-    function onConnect(e: GamepadEvent) {
+    function onConnect() {
       updateAvailableGamepads();
     }
 

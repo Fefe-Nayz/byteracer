@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
