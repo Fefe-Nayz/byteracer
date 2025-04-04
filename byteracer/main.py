@@ -414,7 +414,7 @@ class ByteRacer:
                     text = data["data"]["text"]
                     language = data["data"].get("language", "en")
                     logging.info(f"Received TTS request: {text} in {language}")
-                    await self.tts_manager.say(text, language=language, priority=1)
+                    await self.tts_manager.say(text, lang=language, priority=1)
                     await self.send_command_response({
                         "success": True,
                         "message": "Text spoken successfully"

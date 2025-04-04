@@ -517,7 +517,8 @@ class SensorManager:
     def set_edge_detection_threshold(self, threshold):
         """Set the edge detection threshold"""
         self.edge_detection_threshold = threshold
-        self.px.set_cliff_reference([threshold, threshold, threshold] * 1000)
+        threshold = threshold * 1000 
+        self.px.set_cliff_reference([threshold, threshold, threshold])
         logger.info(f"Edge detection threshold set to {threshold}")
     
     def set_auto_stop(self, enabled):
