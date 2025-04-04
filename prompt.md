@@ -107,19 +107,18 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 ---
 
 # TODO:
-- Refactor de l'implémentation des Etats du robot
-- Détection changement de réseau wifi/point d'accès et redémarrage de la caméra + notifier avec le TTS
+- Refactor de l'implémentation des Etats du robot (avec différents modes et différents états pour mieux gérer la détection de connection)
 - Implémenter l'intégration avec chatGPT
-- Revérifier le code de redémarrage de la caméra et le code de redémarrage du python (voir si il y a pas de problème de redémarrage du python) et tester les autres
-- Implémenter les drive settings (max speed, acceleration, turn speed, etc.)
-- Changer de branche bouton
-- Le status de la caméra doit être visible sur le client
-- Meilleur suivi de l'état de mise à jour sur le client
-- Implémenter un affichage de la vitesse qui4 dépends de l'integration de l'accélération grâce à l'accéléromètre (si il existe)
-- Reset mappings/settings
-- logs in client
-- overlay full screen
-- Ajouter un mode nuit pour l'interface utilisateur
+
+- Refactoriser du module caméra pour mieux gérer les erreurs et les redémarrages (changement de wifi, affichage de l'etat sur le client)
+- Refactoriser les scripts bash pour les commandes systèmes pour ne pas qu'ils quittens les sessions screen mais juste stoppent les programmes à l'intérieur
+
+- Ajouter un bouton pour changer de branche
+- Afficher les données des capteurs dans un overlay en plein écran
+- Ajouter un DarkMode pour l'interface utilisateur
+- Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
+- Lifting de l'interface utilisateur
+
 
 Gerardo :
 - Implémenter le mode démo (envoi de commandes préenregistrées au robot pour le faire avancer, tourner, reculer, freiner, etc.)

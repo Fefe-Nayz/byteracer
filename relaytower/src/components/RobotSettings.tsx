@@ -431,7 +431,7 @@ export default function RobotSettings() {
           
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
-              <span>Edge Detection Threshold</span>
+              <span>Edge Detection Threshold <span className="text-xs text-gray-500">(Lower is less sensitive)</span></span>
               <span>{localSettings.safety.edge_threshold}</span>
             </div>
             <Slider 

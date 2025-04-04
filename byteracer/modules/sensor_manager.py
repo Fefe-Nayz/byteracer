@@ -405,14 +405,14 @@ class SensorManager:
         if self.emergency_active:
             if self.current_emergency == EmergencyState.COLLISION_FRONT:
                 # For collision, only prevent forward motion
-                if speed >= -30:
-                    speed = -30
+                if speed >= -0.3:
+                    speed = -0.3
                 # Allow steering and backward motion
             
             elif self.current_emergency == EmergencyState.EDGE_DETECTED:
                 # For edge detection, completely control wheel speed for safety
                 # But allow steering to continue working
-                speed = -0.5  # Force backing up
+                speed = -1
             
             elif self.current_emergency in [EmergencyState.CLIENT_DISCONNECTED, EmergencyState.MANUAL_STOP]:
                 # Complete stop for these emergencies
