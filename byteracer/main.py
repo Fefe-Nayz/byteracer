@@ -734,8 +734,8 @@ class ByteRacer:
         if turn_in_place and abs_turn > 0.1 and abs_speed < 0.1:
             # Turn in place by driving wheels in opposite directions
             turning_power = turn_value * max_speed
-            self.px.set_motor_speed(1, turning_power)        # Left motor
-            self.px.set_motor_speed(2, turning_power)        # Right motor (same direction - reversed in hardware)
+            self.px.set_motor_speed(1, turning_power * 100)        # Left motor
+            self.px.set_motor_speed(2, turning_power * 100)        # Right motor (same direction - reversed in hardware)
             self.px.set_dir_servo_angle(0)                   # Center the steering
 
             logging.info(f"Turning in place with power: {turning_power}")
@@ -755,14 +755,14 @@ class ByteRacer:
                     right_speed = speed_value  # Outer wheel at full speed
                 
                 # Apply speeds to motors
-                self.px.set_motor_speed(1, left_speed * max_speed)    # Left motor
-                self.px.set_motor_speed(2, -right_speed * max_speed)  # Right motor (reversed in hardware)
+                self.px.set_motor_speed(1, left_speed * max_speed * 100)    # Left motor
+                self.px.set_motor_speed(2, -right_speed * max_speed * 100)  # Right motor (reversed in hardware)
                 logging.info(f"Differential steering with left speed: {left_speed}, right speed: {-right_speed}. They are modified by the turn factor and the final speed is: {left_speed * max_speed}")
                 self.px.set_dir_servo_angle(turn_value * max_turn)    # Still use steering for sharper turns
             else:
                 # Regular steering (no differential)
-                self.px.set_motor_speed(1, speed_value * max_speed)   # Left motor at full speed
-                self.px.set_motor_speed(2, speed_value * -max_speed)  # Right motor at full speed (reversed)
+                self.px.set_motor_speed(1, speed_value * max_speed * 100)   # Left motor at full speed
+                self.px.set_motor_speed(2, speed_value * -max_speed * 100)  # Right motor at full speed (reversed)
                 logging.info(f"Regular steering with left speed: {speed_value}, right speed: {-speed_value}. They are modified by the final speed which is: {speed_value * max_speed}")
                 self.px.set_dir_servo_angle(turn_value * max_turn)    # Use steering only
     
