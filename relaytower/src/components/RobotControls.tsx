@@ -21,8 +21,9 @@ interface RobotControlsProps {
 }
 
 export default function RobotControls({ showAllControls = false }: RobotControlsProps) {
-  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, sendGptCommand } = useWebSocket();
+  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, sendGptCommand, settings } = useWebSocket();
   const [textToSpeak, setTextToSpeak] = useState("");
+  const [language, setLanguage] = useState("");
   const [gptPrompt, setGptPrompt] = useState("");
   const [selectedSound, setSelectedSound] = useState("klaxon");
   const [actionStatus, setActionStatus] = useState<ActionStatusState>({
@@ -30,6 +31,23 @@ export default function RobotControls({ showAllControls = false }: RobotControls
     status: "idle"
   });
   const [useCameraForGpt, setUseCameraForGpt] = useState(true);
+  
+  // Languages available for TTS
+  const languages = [
+    { value: "en-US", label: "English (US)" },
+    { value: "en-GB", label: "English (UK)" },
+    { value: "fr-FR", label: "French" },
+    { value: "de-DE", label: "German" },
+    { value: "es-ES", label: "Spanish" },
+    { value: "it-IT", label: "Italian" },
+  ];
+  
+  // Set default language from settings when component loads or settings change
+  useEffect(() => {
+    if (settings?.sound.tts_language) {
+      setLanguage(settings.sound.tts_language);
+    }
+  }, [settings]);
   
   // Available sounds
   const availableSounds = [
@@ -89,7 +107,7 @@ export default function RobotControls({ showAllControls = false }: RobotControls
     e.preventDefault();
     if (!textToSpeak.trim() || status !== "connected") return;
     
-    speakText(textToSpeak);
+    speakText(textToSpeak, language);
     setTextToSpeak("");
   };
   
@@ -115,7 +133,7 @@ export default function RobotControls({ showAllControls = false }: RobotControls
         <h3 className="font-bold mb-3">Quick Controls</h3>
         
         {/* TTS input */}
-        <form onSubmit={handleTtsSubmit} className="mb-4">
+        <form onSubmit={handleTtsSubmit} className="mb-4 space-y-2">
           <div className="flex space-x-2">
             <Input
               placeholder="Text to speak..."
@@ -131,6 +149,23 @@ export default function RobotControls({ showAllControls = false }: RobotControls
               <Megaphone className="h-4 w-4" />
             </Button>
           </div>
+          <Select
+            value={language}
+            onValueChange={(value) => setLanguage(value)}
+            disabled={status !== "connected"}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select language" />
+            </SelectTrigger>
+            <SelectContent>
+              {languages.map((lang) => (
+                <SelectItem key={lang.value} value={lang.value}>
+                  {lang.label}
+                  {lang.value === settings?.sound.tts_language && " (Default)"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </form>
         
         {/* Sound player */}
@@ -312,7 +347,7 @@ export default function RobotControls({ showAllControls = false }: RobotControls
       {/* Text-to-Speech section */}
       <div className="border-t pt-4 pb-2">
         <h4 className="text-sm font-semibold mb-2">Text-to-Speech</h4>
-        <form onSubmit={handleTtsSubmit}>
+        <form onSubmit={handleTtsSubmit} className="space-y-2">
           <div className="flex space-x-2">
             <Input
               placeholder="Text to speak..."
@@ -328,6 +363,23 @@ export default function RobotControls({ showAllControls = false }: RobotControls
               <Megaphone className="h-4 w-4" />
             </Button>
           </div>
+          <Select
+            value={language}
+            onValueChange={(value) => setLanguage(value)}
+            disabled={status !== "connected"}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select language" />
+            </SelectTrigger>
+            <SelectContent>
+              {languages.map((lang) => (
+                <SelectItem key={lang.value} value={lang.value}>
+                  {lang.label}
+                  {lang.value === settings?.sound.tts_language && " (Default)"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </form>
       </div>
       
