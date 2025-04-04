@@ -10,8 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 export default function TextToSpeech() {
   const [text, setText] = useState("");
   const [language, setLanguage] = useState("");
-  const { status, speakText, stopTts, settings } = useWebSocket();
+  const { status, speakText, stopTts, settings, requestSettings } = useWebSocket();
   const { toast } = useToast();
+
+  // Request settings only once when component mounts
+  useEffect(() => {
+    requestSettings();
+  }, [requestSettings]);
 
   // Set default language from settings when component loads or settings change
   useEffect(() => {

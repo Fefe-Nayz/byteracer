@@ -21,7 +21,7 @@ interface RobotControlsProps {
 }
 
 export default function RobotControls({ showAllControls = false }: RobotControlsProps) {
-  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, sendGptCommand, settings } = useWebSocket();
+  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, sendGptCommand, settings, requestSettings } = useWebSocket();
   const [textToSpeak, setTextToSpeak] = useState("");
   const [language, setLanguage] = useState("");
   const [gptPrompt, setGptPrompt] = useState("");
@@ -31,6 +31,10 @@ export default function RobotControls({ showAllControls = false }: RobotControls
     status: "idle"
   });
   const [useCameraForGpt, setUseCameraForGpt] = useState(true);
+
+  useEffect(() => {
+    requestSettings();
+  }, [requestSettings]);
   
   // Languages available for TTS
   const languages = [
