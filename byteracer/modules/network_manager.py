@@ -42,44 +42,10 @@ class NetworkManager:
         
         # Check current network status
         self._check_ap_mode()
-
-    async def _run_command_async(self, command: List[str], timeout: int = 10) -> Tuple[int, str, str]:
-        """
-        Execute a shell command asynchronously and return the result.
-        
-        Args:
-            command: List containing the command and its arguments
-            timeout: Timeout in seconds
-            
-        Returns:
-            Tuple of (return_code, stdout, stderr)
-        """
-        try:
-            # Create process using asyncio subprocess
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                text=True  # Use text mode for output
-            )
-            
-            # Set up a timeout for the process
-            try:
-                stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
-                return process.returncode, stdout, stderr
-            except asyncio.TimeoutError:
-                # Kill the process if it times out
-                process.kill()
-                return -1, "", "Command timed out"
-                
-        except Exception as e:
-            self.logger.error(f"Error executing command: {e}")
-            return -1, "", str(e)
     
     def _run_command(self, command: List[str], timeout: int = 10) -> Tuple[int, str, str]:
         """
         Execute a shell command synchronously and return the result.
-        This is kept for backward compatibility and non-async contexts.
         
         Args:
             command: List containing the command and its arguments
@@ -112,12 +78,22 @@ class NetworkManager:
         Returns:
             List of unique SSID names
         """
+        # Start a background task to do the actual scanning
+        task = asyncio.create_task(self._scan_wifi_networks_impl())
+        
+        # Return the scan result - allowing other async tasks to run while this completes
+        return await task
+
+    async def _scan_wifi_networks_impl(self) -> List[str]:
+        """
+        Implementation of WiFi network scanning that can run in the background.
+        """
         try:
             # First ensure WiFi is powered on
-            await self._ensure_wifi_powered()
+            self._ensure_wifi_powered_sync()
             
             # Try using nmcli first (preferred method with NetworkManager)
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes"]
             )
             
@@ -134,7 +110,7 @@ class NetworkManager:
             else:
                 # Fallback to iw scan if nmcli fails
                 self.logger.warning("nmcli scan failed, falling back to iw scan")
-                returncode, stdout, stderr = await self._run_command_async(
+                returncode, stdout, stderr = self._run_command(
                     ["iw", "dev", self.wifi_interface, "scan", "ap-force"],
                     timeout=20  # iw scan can take longer
                 )
@@ -155,6 +131,14 @@ class NetworkManager:
         except Exception as e:
             self.logger.error(f"Error scanning for WiFi networks: {str(e)}")
             return []
+
+    def _ensure_wifi_powered_sync(self) -> None:
+        """Ensure WiFi radio is powered on (synchronous version)."""
+        self._run_command(["sudo", "rfkill", "unblock", "wifi"])
+        self._run_command(["nmcli", "radio", "wifi", "on"])
+        
+        # Also try using ip link to bring up the interface
+        self._run_command(["sudo", "ip", "link", "set", self.wifi_interface, "up"])
 
     async def connect_to_wifi(self, ssid: str, password: str) -> Dict[str, Any]:
         """
@@ -178,7 +162,7 @@ class NetworkManager:
                     }
             
             # Try to connect to the specified WiFi
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "device", "wifi", "connect", ssid, "password", password]
             )
             
@@ -220,7 +204,7 @@ class NetworkManager:
         """
         try:
             # List all saved connections along with their SSIDs
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "-t", "-f", "NAME,UUID", "connection", "show"]
             )
             
@@ -240,7 +224,7 @@ class NetworkManager:
                 if len(parts) >= 1:
                     conn_name = parts[0]
                     # Check if this connection's SSID matches what we're looking for
-                    details_rc, details_out, _ = await self._run_command_async(
+                    details_rc, details_out, _ = self._run_command(
                         ["nmcli", "-t", "connection", "show", conn_name]
                     )
                     if details_rc == 0:
@@ -252,7 +236,7 @@ class NetworkManager:
             
             if conn_name:
                 # Update the password for the existing connection
-                returncode, stdout, stderr = await self._run_command_async(
+                returncode, stdout, stderr = self._run_command(
                     ["nmcli", "connection", "modify", conn_name, "wifi-sec.psk", password]
                 )
                 
@@ -263,8 +247,8 @@ class NetworkManager:
                     }
                 
                 # Optionally, restart the connection to apply the new password
-                await self._run_command_async(["nmcli", "connection", "down", conn_name])
-                await self._run_command_async(["nmcli", "connection", "up", conn_name])
+                self._run_command(["nmcli", "connection", "down", conn_name])
+                self._run_command(["nmcli", "connection", "up", conn_name])
                 
                 self.logger.info(f"Updated password for connection '{conn_name}'")
                 return {
@@ -274,7 +258,7 @@ class NetworkManager:
                 }
             else:
                 # Create a new connection profile
-                returncode, stdout, stderr = await self._run_command_async(
+                returncode, stdout, stderr = self._run_command(
                     ["nmcli", "device", "wifi", "connect", ssid, "password", password]
                 )
                 
@@ -310,7 +294,7 @@ class NetworkManager:
         """
         try:
             # List all saved connections
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "-t", "-f", "NAME", "connection", "show"]
             )
             
@@ -326,7 +310,7 @@ class NetworkManager:
             
             for connection in connections:
                 # Check each connection's SSID
-                details_rc, details_out, _ = await self._run_command_async(
+                details_rc, details_out, _ = self._run_command(
                     ["nmcli", "-t", "connection", "show", connection]
                 )
                 if details_rc == 0:
@@ -346,7 +330,7 @@ class NetworkManager:
                 }
             
             # Remove the network
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "connection", "delete", conn_name]
             )
             
@@ -383,7 +367,7 @@ class NetworkManager:
         try:
             if mode.lower() == "ap" and not self._ap_mode_active:
                 # Switch to AP mode
-                returncode, stdout, stderr = await self._run_command_async(
+                returncode, stdout, stderr = self._run_command(
                     ["sudo", "accesspopup", "-a"]
                 )
                 
@@ -397,7 +381,7 @@ class NetworkManager:
                 
             elif mode.lower() == "wifi" and self._ap_mode_active:
                 # Switch to WiFi client mode
-                returncode, stdout, stderr = await self._run_command_async(
+                returncode, stdout, stderr = self._run_command(
                     ["sudo", "accesspopup"]
                 )
                 
@@ -469,7 +453,7 @@ class NetworkManager:
                 }
             
             # Move the temporary file to replace the original
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["sudo", "mv", temp_file, script_path]
             )
             
@@ -480,7 +464,7 @@ class NetworkManager:
                 }
             
             # Make sure the script is executable
-            await self._run_command_async(["sudo", "chmod", "+x", script_path])
+            self._run_command(["sudo", "chmod", "+x", script_path])
             
             # If currently in AP mode, restart to apply changes
             if self._ap_mode_active:
@@ -528,7 +512,7 @@ class NetworkManager:
         
         try:
             # Use nmcli to list all connections
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"]
             )
             
@@ -543,7 +527,7 @@ class NetworkManager:
                     conn_name = parts[0]
                     
                     # Get connection details to find SSID and verify it's not an AP
-                    details_rc, details_out, _ = await self._run_command_async(
+                    details_rc, details_out, _ = self._run_command(
                         ["nmcli", "-t", "connection", "show", conn_name]
                     )
                     
@@ -587,7 +571,7 @@ class NetworkManager:
             interfaces = [interface]
         else:
             # Get all network interfaces
-            returncode, stdout, stderr = await self._run_command_async(["ip", "link", "show"])
+            returncode, stdout, stderr = self._run_command(["ip", "link", "show"])
             interfaces = []
             
             if returncode == 0:
@@ -602,7 +586,7 @@ class NetworkManager:
         for iface in interfaces:
             try:
                 # Use 'ip addr show' to get the IP address
-                returncode, stdout, stderr = await self._run_command_async(["ip", "addr", "show", iface])
+                returncode, stdout, stderr = self._run_command(["ip", "addr", "show", iface])
                 
                 if returncode != 0:
                     result[iface] = "Not available"
@@ -629,7 +613,7 @@ class NetworkManager:
         """
         try:
             # Get active connections
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "-t", "-f", "NAME,DEVICE,TYPE", "connection", "show", "--active"]
             )
             
@@ -648,7 +632,7 @@ class NetworkManager:
                 return {}
             
             # Get details of the connection
-            details_rc, details_out, _ = await self._run_command_async(
+            details_rc, details_out, _ = self._run_command(
                 ["nmcli", "-t", "connection", "show", wifi_conn]
             )
             
@@ -741,11 +725,11 @@ class NetworkManager:
 
     async def _ensure_wifi_powered(self) -> None:
         """Ensure WiFi radio is powered on."""
-        await self._run_command_async(["sudo", "rfkill", "unblock", "wifi"])
-        await self._run_command_async(["nmcli", "radio", "wifi", "on"])
+        self._run_command(["sudo", "rfkill", "unblock", "wifi"])
+        self._run_command(["nmcli", "radio", "wifi", "on"])
         
         # Also try using ip link to bring up the interface
-        await self._run_command_async(["sudo", "ip", "link", "set", self.wifi_interface, "up"])
+        self._run_command(["sudo", "ip", "link", "set", self.wifi_interface, "up"])
 
     def _check_ap_mode(self) -> None:
         """
@@ -800,7 +784,7 @@ class NetworkManager:
         Asynchronous version for runtime use.
         """
         try:
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["nmcli", "-t", "connection", "show", "--active"]
             )
             
@@ -815,7 +799,7 @@ class NetworkManager:
                     conn_name = parts[0]
                     
                     # Check if this connection is in AP mode
-                    details_rc, details_out, _ = await self._run_command_async(
+                    details_rc, details_out, _ = self._run_command(
                         ["nmcli", "-t", "connection", "show", conn_name]
                     )
                     
@@ -827,7 +811,7 @@ class NetworkManager:
             script_path = "/usr/bin/accesspopup"
             if os.path.isfile(script_path):
                 # Run accesspopup with no arguments to see current state
-                status_rc, status_out, _ = await self._run_command_async(
+                status_rc, status_out, _ = self._run_command(
                     ["sudo", script_path]
                 )
                 
@@ -850,7 +834,7 @@ class NetworkManager:
         """
         try:
             # Restart NetworkManager service
-            returncode, stdout, stderr = await self._run_command_async(
+            returncode, stdout, stderr = self._run_command(
                 ["sudo", "systemctl", "restart", "NetworkManager"]
             )
             
