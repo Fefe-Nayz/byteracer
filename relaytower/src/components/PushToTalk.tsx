@@ -1,80 +1,117 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Mic2, Mic, Circle } from "lucide-react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 
-// Configuration for audio processing
-const BUFFER_SIZE = 4096;
-const SAMPLE_RATE = 44100;
-const TARGET_SAMPLE_RATE = 16000;
-
-// Extend Window interface to include webkitAudioContext
-declare global {
-  interface Window {
-    webkitAudioContext: typeof AudioContext;
-  }
-}
-
 export default function PushToTalk() {
   const [isTalking, setIsTalking] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const { status, sendAudioStream } = useWebSocket();
   
   // Audio context refs
   const audioContextRef = useRef<AudioContext | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const inputRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  // Initialize AudioWorklet when component mounts
+  useEffect(() => {
+    let mounted = true;
+    
+    const initAudioWorklet = async () => {
+      try {
+        // Create AudioContext
+        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        audioContextRef.current = ctx;
+        
+        // Load and register the audio processor
+        await ctx.audioWorklet.addModule('/audio-processor.js');
+        console.log('Audio worklet module loaded successfully');
+        
+        if (mounted) {
+          setIsReady(true);
+          setErrorMessage(null);
+        }
+      } catch (err) {
+        console.error('Failed to initialize audio worklet:', err);
+        if (mounted) {
+          setIsReady(false);
+          setErrorMessage('Failed to initialize audio processor. Please refresh the page.');
+        }
+      }
+    };
+    
+    initAudioWorklet();
+    
+    return () => {
+      mounted = false;
+      
+      // Clean up
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close();
+      }
+    };
+  }, []);
+
   const startTalk = async () => {
-    if (status !== "connected") {
-      console.error("WebSocket not connected");
+    if (!isReady || status !== "connected") {
+      console.error("Not ready or WebSocket not connected");
       return;
     }
 
     try {
-      setIsTalking(true);
-      console.log("Push to Talk activated");
-
-      // Initialize audio context with proper typing
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-      audioContextRef.current = new AudioContextClass({
-        latencyHint: 'interactive',
-      });
-
-      // Create processor
-      const processor = audioContextRef.current.createScriptProcessor(BUFFER_SIZE, 1, 1);
-      processorRef.current = processor;
-      processor.connect(audioContextRef.current.destination);
-
-      // Get microphone stream
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      streamRef.current = stream;
+      const ctx = audioContextRef.current;
+      if (!ctx) {
+        console.error("AudioContext not initialized");
+        return;
+      }
       
-      // Create audio source from stream
-      const input = audioContextRef.current.createMediaStreamSource(stream);
-      inputRef.current = input;
-      input.connect(processor);
-
-      // Process audio data
-      processor.onaudioprocess = (e) => {
-        if (status === "connected" && isTalking) {
-          const left = e.inputBuffer.getChannelData(0);
-          const downsampled = downsampleBuffer(left, SAMPLE_RATE, TARGET_SAMPLE_RATE);
-          
-          // Convert the audio data to Int16Array and then to an array of numbers for WebSocket transmission
-          const audioArray = Array.from(new Int16Array(downsampled));
-          
-          // Use the specialized function to send audio data
-          sendAudioStream(audioArray, TARGET_SAMPLE_RATE);
-        }
+      // Resume audio context (needed for some browsers)
+      if (ctx.state !== 'running') {
+        await ctx.resume();
+      }
+      
+      // Get microphone stream
+      console.log("Requesting microphone access...");
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: false 
+      });
+      streamRef.current = stream;
+      console.log("Microphone access granted");
+      
+      // Create source node
+      const source = ctx.createMediaStreamSource(stream);
+      sourceNodeRef.current = source;
+      
+      // Create AudioWorkletNode with the simple processor
+      const workletNode = new AudioWorkletNode(ctx, 'simple-audio-processor');
+      audioWorkletNodeRef.current = workletNode;
+      
+      // Connect nodes
+      source.connect(workletNode);
+      
+      // Listen for messages from the processor
+      workletNode.port.onmessage = (event) => {
+        const audioBuffer = event.data.buffer;
+        const sampleRate = event.data.sampleRate;
+        
+        // Convert to Int16Array for transmission
+        const audioArray = convertFloat32ToInt16(audioBuffer);
+        
+        console.log(`Sending ${audioArray.length} samples`);
+        
+        // Send the audio packet
+        sendAudioStream(audioArray, sampleRate);
       };
-
-      // Resume audio context
-      await audioContextRef.current.resume();
-
+      
+      setIsTalking(true);
+      console.log("Push to Talk activated - simple mode");
     } catch (error) {
       console.error("Error starting audio capture:", error);
+      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
       setIsTalking(false);
     }
   };
@@ -90,56 +127,28 @@ export default function PushToTalk() {
     }
 
     // Disconnect audio nodes
-    if (inputRef.current && processorRef.current) {
-      inputRef.current.disconnect(processorRef.current);
-      inputRef.current = null;
+    if (sourceNodeRef.current && audioWorkletNodeRef.current) {
+      sourceNodeRef.current.disconnect(audioWorkletNodeRef.current);
+      sourceNodeRef.current = null;
     }
 
-    if (processorRef.current && audioContextRef.current) {
-      processorRef.current.disconnect(audioContextRef.current.destination);
-      processorRef.current = null;
-    }
-
-    // Close audio context
-    if (audioContextRef.current) {
-      audioContextRef.current.close().then(() => {
-        audioContextRef.current = null;
-      });
+    if (audioWorkletNodeRef.current) {
+      audioWorkletNodeRef.current.disconnect();
+      audioWorkletNodeRef.current = null;
     }
   };
 
-  // Function to downsample audio buffer
-  const downsampleBuffer = (buffer: Float32Array, sampleRate: number, outSampleRate: number) => {
-    if (outSampleRate === sampleRate) {
-      return buffer.buffer;
+  // Helper function to convert Float32Array to Int16Array
+  const convertFloat32ToInt16 = (buffer: Float32Array): number[] => {
+    const output = new Int16Array(buffer.length);
+    
+    for (let i = 0; i < buffer.length; i++) {
+      // Simple linear conversion from float to int16
+      const s = Math.max(-1, Math.min(1, buffer[i]));
+      output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
     
-    if (outSampleRate > sampleRate) {
-      throw new Error('Downsampling rate should be smaller than original sample rate');
-    }
-    
-    const sampleRateRatio = sampleRate / outSampleRate;
-    const newLength = Math.round(buffer.length / sampleRateRatio);
-    const result = new Int16Array(newLength);
-    let offsetResult = 0;
-    let offsetBuffer = 0;
-    
-    while (offsetResult < result.length) {
-      const nextOffsetBuffer = Math.round((offsetResult + 1) * sampleRateRatio);
-      let accum = 0;
-      let count = 0;
-      
-      for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
-        accum += buffer[i];
-        count++;
-      }
-      
-      result[offsetResult] = Math.min(1, accum / count) * 0x7FFF;
-      offsetResult++;
-      offsetBuffer = nextOffsetBuffer;
-    }
-    
-    return result.buffer;
+    return Array.from(output);
   };
 
   return (
@@ -147,21 +156,32 @@ export default function PushToTalk() {
       <div className="flex flex-col justify-between gap-3">
         <div className="flex items-center space-x-2">
           <Mic2 className="h-5 w-5" />
-          <h3 className="font-bold">Push To Talk</h3>
+          <h3 className="font-bold">Push To Talk (Simple)</h3>
         </div>
 
-        <div className="flex justify-center items-center space-x-2 min-h-[200px]">
+        <div className="flex flex-col justify-center items-center space-y-2 min-h-[200px]">
+          {errorMessage && (
+            <p className="text-red-500 text-sm mb-2">{errorMessage}</p>
+          )}
+          
           {!isTalking ? (
             <Button 
-              disabled={status !== "connected"} 
+              disabled={!isReady || status !== "connected"} 
               onClick={startTalk}
             >
               <Mic className="h-4 w-4 mr-1" />
               Transmit
-            </Button>) : (<Button variant="destructive" onClick={stopTalk}>
+            </Button>
+          ) : (
+            <Button variant="destructive" onClick={stopTalk}>
               <Circle className="h-4 w-4 mr-1" />
               Mute
-            </Button>)}
+            </Button>
+          )}
+          
+          {!isReady && !errorMessage && (
+            <p className="text-sm text-gray-500 mt-2">Initializing audio system...</p>
+          )}
         </div>
       </div>
     </Card>

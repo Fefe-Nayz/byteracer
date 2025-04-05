@@ -104,8 +104,6 @@ export default function SensorData() {
   // Check if safety system is active
   const isSafetyActive = sensorData.isCollisionAvoidanceActive || sensorData.isEdgeDetectionActive;
 
-  console.log("Sensor Data:", sensorData); // Debugging log
-
   return (
     <Card className={`p-4 ${emergencyAlert ? 'bg-red-50 border-red-200' : 'border-gray-200 bg-white'}`}>
       <div className="flex items-center justify-between mb-3">

@@ -197,7 +197,6 @@ export default function GamepadInputHandler() {
       return;
     }
 
-    console.log("Setting up gamepad interval - will send data every 50ms");
     
     // Force an immediate send of gamepad state
     const sendGamepadUpdate = () => {
@@ -225,7 +224,6 @@ export default function GamepadInputHandler() {
     const interval = setInterval(sendGamepadUpdate, 50); // Send updates at 20 Hz
 
     return () => {
-      console.log("Cleaning up gamepad interval");
       clearInterval(interval);
     };
   }, [status, selectedGamepadId, computeGamepadState, sendGamepadState, isActionActive, lastUseState]);
