@@ -19,11 +19,14 @@ export type WebSocketMessageType =
   | "camera_status"
   | "speak_text"
   | "play_sound"
+  | "stop_sound"
+  | "stop_tts"
   | "gpt_command"
   | "gpt_response"
   | "network_scan"
   | "network_list"
-  | "network_update";
+  | "network_update"
+  | "audio_stream";
 
 // Define WebSocket connection status type
 export type WebSocketStatus = "connecting" | "connected" | "disconnected";
@@ -112,6 +115,7 @@ export interface RobotSettings {
     driving_volume: number;
     alert_volume: number;
     custom_volume: number;
+    voice_volume: number;
     tts_volume: number;
     user_tts_volume: number;
     system_tts_volume: number;
@@ -179,8 +183,8 @@ interface WebSocketContextValue {
   cameraStatus: CameraStatus | null;
   settings: RobotSettings | null;
   commandResponse: CommandResponse | null;
-  logs: LogMessage[]; // Add logs array to store log messages
-  clearLogs: () => void; // Function to clear log messages
+  logs: LogMessage[];
+  clearLogs: () => void;
   
   // Commands
   sendGamepadState: (gamepadState: Record<string, boolean | string | number>) => void;
@@ -197,6 +201,7 @@ interface WebSocketContextValue {
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
   sendGptCommand: (prompt: string, useCamera: boolean) => void;
+  sendAudioStream: (audio: number[] | Int16Array, sampleRate: number) => void;
 }
 
 // Create context with default values
@@ -759,6 +764,30 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  // Function to send audio stream data
+  const sendAudioStream = useCallback((audio: number[] | Int16Array, sampleRate: number) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const audioData = {
+        name: "audio_stream",
+        data: {
+          audio,
+          sampleRate,
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(audioData));
+      trackWsMessage("sent", audioData);
+      console.log("Audio stream data sent");
+    } else {
+      logError("Cannot send audio stream data", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
   // Combine all values and functions for the context
   const contextValue: WebSocketContextValue = {
     // Connection
@@ -795,6 +824,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     scanNetworks,
     updateNetwork,
     sendGptCommand,
+    sendAudioStream,
   };
 
   return (

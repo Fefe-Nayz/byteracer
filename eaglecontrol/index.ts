@@ -53,7 +53,8 @@ type WebSocketEventName =
   | "network_scan"        // For requesting network scan
   | "network_list"        // For receiving network list
   | "network_update"      // For updating network settings
-  | "log_message";        // For receiving real-time log messages
+  | "audio_stream"        // For streaming audio data to the robot
+  | "log_message";
 
 type WebSocketEvent = {
   name: WebSocketEventName;
@@ -321,6 +322,12 @@ const wsHandlers = {
         case "network_update":
           console.log(`Network update request: ${event.data.action}`);
           // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "audio_stream":
+          console.log("Audio stream received");
+          // Forward audio stream to all cars
           broadcastToType(message, "car", ws);
           break;
 

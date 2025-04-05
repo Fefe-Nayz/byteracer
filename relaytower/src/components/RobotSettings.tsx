@@ -207,6 +207,23 @@ export default function RobotSettings() {
                   }
                 />
               </div>
+              
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Push-to-Talk Voice</span>
+                  <span>{localSettings.sound.voice_volume !== undefined ? localSettings.sound.voice_volume : 95}%</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.voice_volume !== undefined ? localSettings.sound.voice_volume : 95]}
+                  min={0}
+                  max={100}
+                  step={1}
+                  disabled={!localSettings.sound.enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "voice_volume", value[0])
+                  }
+                />
+              </div>
             </div>
           </div>
           

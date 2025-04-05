@@ -152,6 +152,9 @@ class ByteRacer:
         if "custom_volume" in settings["sound"]:
             self.sound_manager.set_category_volume("custom", settings["sound"]["custom_volume"])
         
+        if "voice_volume" in settings["sound"]:
+            self.sound_manager.set_category_volume("voice", settings["sound"]["voice_volume"])
+        
         # Apply TTS settings
         self.tts_manager.set_enabled(settings["sound"]["tts_enabled"])
         self.tts_manager.set_language(settings["sound"]["tts_language"])
@@ -504,6 +507,11 @@ class ByteRacer:
                 
                 # Announce via TTS
                 await self.tts_manager.say(f"Settings reset to defaults{' for ' + section if section else ''}", priority=1)
+            
+            elif data["name"] == "audio_stream":
+                # Handle audio stream data
+                if "audio" in data["data"]:
+                    await self.handle_audio_stream(data["data"])
                 
             else:
                 logging.info(f"Received message of type: {data['name']}")
@@ -803,6 +811,56 @@ class ByteRacer:
         # Send status to client
         await self.send_camera_status_to_client()
     
+    async def handle_audio_stream(self, data):
+        """Handle incoming audio stream from push-to-talk feature"""
+        try:
+            if "audio" in data and "sampleRate" in data:
+                audio_data = data["audio"]
+                sample_rate = data["sampleRate"]
+                logging.info(f"Received audio stream data: {len(audio_data)} samples at {sample_rate}Hz")
+                
+                # Convert audio data to numpy array for processing
+                import numpy as np
+                audio_array = np.array(audio_data, dtype=np.int16)
+                
+                # Create a temporary WAV file
+                import wave
+                import tempfile
+                import os
+                
+                # Create a temporary file with .wav extension
+                temp_file = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+                temp_file.close()
+                
+                try:
+                    # Write audio data to WAV file
+                    with wave.open(temp_file.name, 'wb') as wav_file:
+                        wav_file.setnchannels(1)  # Mono
+                        wav_file.setsampwidth(2)  # 16-bit
+                        wav_file.setframerate(sample_rate)
+                        wav_file.writeframes(audio_array.tobytes())
+                    
+                    # Play the audio using the sound manager
+                    self.sound_manager.play_voice_stream(temp_file.name)
+                    
+                    logging.debug(f"Audio stream played successfully")
+                    
+                finally:
+                    # Clean up temporary file after a delay to ensure it's not deleted before playback starts
+                    async def delete_temp_file():
+                        await asyncio.sleep(5)  # Wait 5 seconds before deleting
+                        try:
+                            if os.path.exists(temp_file.name):
+                                os.unlink(temp_file.name)
+                        except Exception as e:
+                            logging.error(f"Error deleting temp file: {e}")
+                    
+                    # Schedule the deletion without waiting for it
+                    asyncio.create_task(delete_temp_file())
+                
+        except Exception as e:
+            logging.error(f"Error handling audio stream: {e}")
+    
     async def update_settings(self, settings):
         """Update settings based on client request"""
         if "sound" in settings:
@@ -842,6 +900,10 @@ class ByteRacer:
             if "custom_volume" in sound:
                 self.config_manager.set("sound.custom_volume", sound["custom_volume"])
                 self.sound_manager.set_category_volume("custom", sound["custom_volume"])
+                
+            if "voice_volume" in sound:
+                self.config_manager.set("sound.voice_volume", sound["voice_volume"])
+                self.sound_manager.set_category_volume("voice", sound["voice_volume"])
 
             if "user_tts_volume" in sound:
                 self.config_manager.set("sound.user_tts_volume", sound["user_tts_volume"])

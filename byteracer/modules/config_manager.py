@@ -41,6 +41,7 @@ class ConfigManager:
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
                 "alert_volume": 90,    # For emergency/alert sounds
                 "custom_volume": 80,   # For user-triggered sound effects
+                "voice_volume": 95,    # For push-to-talk voice streams
                 "user_tts_volume": 80, # For user-triggered TTS
                 "system_tts_volume": 90, # For system/emergency TTS
                 "emergency_tts_volume": 95, # For emergency TTS
@@ -340,6 +341,7 @@ class ConfigManager:
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
                 "alert_volume": 90,    # For emergency/alert sounds
                 "custom_volume": 80,   # For user-triggered sound effects
+                "voice_volume": 95,    # For push-to-talk voice streams
                 "user_tts_volume": 80, # For user-triggered TTS
                 "system_tts_volume": 90, # For system TTS
                 "emergency_tts_volume": 95, # For emergency TTS

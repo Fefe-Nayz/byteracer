@@ -26,6 +26,7 @@ class SoundManager:
         self.driving_volume = 80  # Volume for driving sounds
         self.alert_volume = 90  # Volume for alert/emergency sounds
         self.custom_volume = 80  # Volume for user-triggered sounds
+        self.voice_volume = 95  # Volume for push-to-talk voice streams
         
         # Set assets directory
         if assets_dir is None:
@@ -51,6 +52,7 @@ class SoundManager:
         
         # Keep track of currently playing sounds - modified to support multiple sounds per type
         self.current_sounds = {category: [] for category in self.sounds.keys()}
+        self.current_voice_channel = None  # Track the current voice stream channel
         self._running = True
         self._lock = threading.Lock()
         
@@ -139,6 +141,8 @@ class SoundManager:
             return self.alert_volume
         elif sound_type == "custom":
             return self.custom_volume
+        elif sound_type == "voice":
+            return self.voice_volume
         else:
             return 100  # Default to full volume for unknown categories
     
@@ -232,6 +236,51 @@ class SoundManager:
         """Play a custom sound by name"""
         return self.play_sound("custom", loop=False, name=sound_name) is not None
     
+    def play_voice_stream(self, file_path):
+        """
+        Play an audio stream received from push-to-talk feature.
+        
+        Args:
+            file_path (str): Path to the temporary WAV file containing the voice data
+        """
+        if not self.enabled:
+            return None
+        
+        # Stop any currently playing voice stream
+        if self.current_voice_channel is not None:
+            if pygame.mixer.Channel(self.current_voice_channel).get_busy():
+                pygame.mixer.Channel(self.current_voice_channel).stop()
+        
+        with self._lock:
+            # Find an available channel with higher priority for voice
+            for channel_id in range(pygame.mixer.get_num_channels()):
+                if not pygame.mixer.Channel(channel_id).get_busy():
+                    # Load and play the sound
+                    try:
+                        sound = pygame.mixer.Sound(file_path)
+                        
+                        # Apply volume based on voice stream priority
+                        effective_volume = (self.volume / 100.0) * (self.voice_volume / 100.0)
+                        sound.set_volume(effective_volume)
+                        
+                        pygame.mixer.Channel(channel_id).play(sound)
+                        self.current_voice_channel = channel_id
+                        
+                        logger.debug(f"Playing voice stream on channel {channel_id}")
+                        return channel_id
+                    except Exception as e:
+                        logger.error(f"Error playing voice stream: {e}")
+                        return None
+        
+        logger.warning("No available sound channels for voice stream")
+        return None
+    
+    def set_voice_volume(self, volume):
+        """Set volume for push-to-talk voice streams (0-100)"""
+        self.voice_volume = max(0, min(100, volume))
+        logger.info(f"Voice stream volume set to {self.voice_volume}")
+        self._update_playing_sounds_volume()
+    
     def music_play(self, file_name):
         """Play music using the Music class from robot_hat"""
         if not self.enabled:
@@ -299,6 +348,9 @@ class SoundManager:
         elif category == "custom":
             self.custom_volume = volume
             logger.info(f"Custom sounds volume set to {volume}")
+        elif category == "voice":
+            self.voice_volume = volume
+            logger.info(f"Voice stream volume set to {volume}")
         else:
             logger.warning(f"Unknown sound category: {category}")
             return

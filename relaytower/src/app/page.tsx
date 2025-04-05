@@ -17,6 +17,7 @@ import NetworkSettings from "@/components/NetworkSettings";
 import GamepadInputHandler from "@/components/GamepadInputHandler";
 import LogViewer from "@/components/LogViewer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import PushToTalk from "@/components/PushToTalk";
 
 function GamepadPage() {
   const { selectedGamepadId } = useGamepadContext();
@@ -54,6 +55,7 @@ function GamepadPage() {
               <WebSocketStatus />
               <RobotControls />
               <GptIntegration />
+              <PushToTalk />
             </div>
           </div>
 
