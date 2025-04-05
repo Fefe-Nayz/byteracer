@@ -11,144 +11,128 @@ export default function PushToTalk() {
   const { status, sendAudioStream } = useWebSocket();
   
   // Audio context refs
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const audioWorkletNodeRef = useRef<AudioWorkletNode | null>(null);
-  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const opusChunks = useRef<Blob[]>([]);
 
-  // Initialize AudioWorklet when component mounts
+  // Check if MediaRecorder is available and supports opus
   useEffect(() => {
-    let mounted = true;
-    
-    const initAudioWorklet = async () => {
-      try {
-        // Create AudioContext
-        const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        audioContextRef.current = ctx;
-        
-        // Load and register the audio processor
-        await ctx.audioWorklet.addModule('/audio-processor.js');
-        console.log('Audio worklet module loaded successfully');
-        
-        if (mounted) {
-          setIsReady(true);
-          setErrorMessage(null);
-        }
-      } catch (err) {
-        console.error('Failed to initialize audio worklet:', err);
-        if (mounted) {
-          setIsReady(false);
-          setErrorMessage('Failed to initialize audio processor. Please refresh the page.');
-        }
+    const checkMediaRecorderSupport = async () => {
+      if (!window.MediaRecorder) {
+        setErrorMessage("Votre navigateur ne supporte pas MediaRecorder");
+        return false;
       }
-    };
-    
-    initAudioWorklet();
-    
-    return () => {
-      mounted = false;
       
-      // Clean up
-      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-        audioContextRef.current.close();
+      try {
+        // Get a temporary stream to check codec support
+        const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Check if opus codec is supported
+        const mimeType = 'audio/webm;codecs=opus';
+        const isSupported = MediaRecorder.isTypeSupported(mimeType);
+        
+        // Stop all tracks
+        tempStream.getTracks().forEach(track => track.stop());
+        
+        if (!isSupported) {
+          setErrorMessage("Le codec Opus n'est pas supporté par votre navigateur");
+          return false;
+        }
+        
+        setIsReady(true);
+        return true;
+      } catch (err) {
+        console.error("Erreur lors de la vérification du support MediaRecorder:", err);
+        setErrorMessage("Erreur lors de l'initialisation de l'audio");
+        return false;
       }
     };
+    
+    checkMediaRecorderSupport();
   }, []);
 
   const startTalk = async () => {
     if (!isReady || status !== "connected") {
-      console.error("Not ready or WebSocket not connected");
+      console.error("Pas prêt ou WebSocket non connecté");
       return;
     }
 
     try {
-      const ctx = audioContextRef.current;
-      if (!ctx) {
-        console.error("AudioContext not initialized");
-        return;
-      }
-      
-      // Resume audio context (needed for some browsers)
-      if (ctx.state !== 'running') {
-        await ctx.resume();
-      }
-      
       // Get microphone stream
-      console.log("Requesting microphone access...");
+      console.log("Demande d'accès au microphone...");
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true, 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }, 
         video: false 
       });
       streamRef.current = stream;
-      console.log("Microphone access granted");
+      console.log("Accès au microphone accordé");
       
-      // Create source node
-      const source = ctx.createMediaStreamSource(stream);
-      sourceNodeRef.current = source;
+      // Clear previous chunks
+      opusChunks.current = [];
       
-      // Create AudioWorkletNode with the simple processor
-      const workletNode = new AudioWorkletNode(ctx, 'simple-audio-processor');
-      audioWorkletNodeRef.current = workletNode;
+      // Create MediaRecorder with opus codec
+      const mimeType = 'audio/webm;codecs=opus';
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: mimeType,
+        audioBitsPerSecond: 32000 // 32 kbps pour l'audio voix
+      });
+      mediaRecorderRef.current = mediaRecorder;
       
-      // Connect nodes
-      source.connect(workletNode);
-      
-      // Listen for messages from the processor
-      workletNode.port.onmessage = (event) => {
-        const audioBuffer = event.data.buffer;
-        const sampleRate = event.data.sampleRate;
-        
-        // Convert to Int16Array for transmission
-        const audioArray = convertFloat32ToInt16(audioBuffer);
-        
-        console.log(`Sending ${audioArray.length} samples`);
-        
-        // Send the audio packet
-        sendAudioStream(audioArray, sampleRate);
+      // Handle data available event
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          opusChunks.current.push(event.data);
+          
+          // Convert to binary data and send via WebSocket
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (reader.result && typeof reader.result !== 'string') {
+              const audioData = new Uint8Array(reader.result);
+              
+              // Send to WebSocket
+              sendAudioStream("opus", "webm", Array.from(audioData)
+              );
+              
+              console.log(`Envoi d'un paquet Opus de ${audioData.length} octets`);
+            }
+          };
+          reader.readAsArrayBuffer(event.data);
+        }
       };
       
+      // Start recording with 500ms timeslices
+      mediaRecorder.start(500);
+      console.log("Enregistrement avec Opus commencé");
+      
       setIsTalking(true);
-      console.log("Push to Talk activated - simple mode");
     } catch (error) {
-      console.error("Error starting audio capture:", error);
-      setErrorMessage(error instanceof Error ? error.message : "Unknown error");
+      console.error("Erreur lors du démarrage de l'enregistrement:", error);
+      setErrorMessage(error instanceof Error ? error.message : "Erreur inconnue");
       setIsTalking(false);
     }
   };
 
   const stopTalk = () => {
     setIsTalking(false);
-    console.log("Push to Talk deactivated");
+    console.log("Microphone désactivé");
+
+    // Stop MediaRecorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
 
     // Stop the stream tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-
-    // Disconnect audio nodes
-    if (sourceNodeRef.current && audioWorkletNodeRef.current) {
-      sourceNodeRef.current.disconnect(audioWorkletNodeRef.current);
-      sourceNodeRef.current = null;
-    }
-
-    if (audioWorkletNodeRef.current) {
-      audioWorkletNodeRef.current.disconnect();
-      audioWorkletNodeRef.current = null;
-    }
-  };
-
-  // Helper function to convert Float32Array to Int16Array
-  const convertFloat32ToInt16 = (buffer: Float32Array): number[] => {
-    const output = new Int16Array(buffer.length);
     
-    for (let i = 0; i < buffer.length; i++) {
-      // Simple linear conversion from float to int16
-      const s = Math.max(-1, Math.min(1, buffer[i]));
-      output[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    
-    return Array.from(output);
+    // Clear chunks
+    opusChunks.current = [];
   };
 
   return (

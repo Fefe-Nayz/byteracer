@@ -510,7 +510,7 @@ class ByteRacer:
             
             elif data["name"] == "audio_stream":
                 # Handle audio stream data
-                if "audio" in data["data"]:
+                if "audio" in data["data"] or "codec" in data["data"]:
                     await self.handle_audio_stream(data["data"])
                 
             else:
@@ -814,10 +814,63 @@ class ByteRacer:
     async def handle_audio_stream(self, data):
         """Handle incoming audio stream from push-to-talk feature"""
         try:
-            if "audio" in data and "sampleRate" in data:
+            if "codec" in data and data["codec"] == "opus":
+                # Traitement des données audio Opus
+                audio_data = data.get("data", [])
+                format_type = data.get("format", "webm")
+                
+                if not audio_data:
+                    logging.warning("Received empty Opus audio data")
+                    return
+                
+                logging.info(f"Received Opus audio data: {len(audio_data)} bytes")
+                
+                # Créer un process FFmpeg pour décoder l'Opus et jouer l'audio
+                import subprocess
+                import numpy as np
+                
+                # Convertir la liste en bytes
+                audio_bytes = bytes(audio_data)
+                
+                # Lancer FFmpeg comme sous-processus
+                try:
+                    process = subprocess.Popen(
+                        [
+                            "ffmpeg",
+                            "-i", "pipe:0",         # lire depuis stdin
+                            "-acodec", "pcm_s16le", # décoder l'Opus en PCM
+                            "-f", "alsa", "default" # jouer sur la sortie audio "default"
+                        ],
+                        stdin=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
+                    
+                    # Envoyer les données audio au process FFmpeg
+                    process.stdin.write(audio_bytes)
+                    process.stdin.close()
+                    
+                    # Récupérer les messages d'erreur éventuels (non bloquant)
+                    stderr_data = process.stderr.read()
+                    if stderr_data:
+                        logging.debug(f"FFmpeg stderr: {stderr_data.decode('utf-8', errors='ignore')}")
+                    
+                    # Attendre la fin du processus (avec timeout)
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        logging.warning("FFmpeg process timed out, killing it")
+                        process.kill()
+                    
+                    logging.debug("Audio stream played successfully via FFmpeg")
+                    
+                except Exception as e:
+                    logging.error(f"Error processing audio with FFmpeg: {e}")
+                
+            elif "audio" in data and "sampleRate" in data:
+                # Ancienne méthode pour la rétrocompatibilité
                 audio_data = data["audio"]
                 sample_rate = data["sampleRate"]
-                logging.info(f"Received audio stream data: {len(audio_data)} samples at {sample_rate}Hz")
+                logging.info(f"Received legacy audio stream data: {len(audio_data)} samples at {sample_rate}Hz")
                 
                 # Convert audio data to numpy array for processing
                 import numpy as np

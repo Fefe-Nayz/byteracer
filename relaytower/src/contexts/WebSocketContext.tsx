@@ -201,7 +201,7 @@ interface WebSocketContextValue {
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
   sendGptCommand: (prompt: string, useCamera: boolean) => void;
-  sendAudioStream: (audio: number[] | Int16Array, sampleRate: number) => void;
+  sendAudioStream: (codec: string, format: string, data: number[]) => void;
 }
 
 // Create context with default values
@@ -765,13 +765,18 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   // Function to send audio stream data
-  const sendAudioStream = useCallback((audio: number[] | Int16Array, sampleRate: number) => {
+  const sendAudioStream = useCallback((
+    codec: string,
+    format: string,
+    data: number[]
+  ) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const audioData = {
         name: "audio_stream",
         data: {
-          audio,
-          sampleRate,
+          codec,
+          format,
+          data,
           timestamp: Date.now(),
         },
         createdAt: Date.now(),
