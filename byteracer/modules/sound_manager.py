@@ -6,6 +6,12 @@ import logging
 import random
 from pathlib import Path
 import pygame  # For sound effects
+import tempfile
+import subprocess
+import numpy as np
+from pydub import AudioSegment
+from pydub.playback import play
+from concurrent.futures import ThreadPoolExecutor
 
 from robot_hat import Music
 
@@ -14,7 +20,7 @@ logger = logging.getLogger(__name__)
 class SoundManager:
     """
     Manages sound effects and music for the robot.
-    Handles acceleration, braking, drift sounds and custom sound effects.
+    Handles acceleration, braking, drift sounds, custom sound effects, and WebRTC audio playback.
     """
     def __init__(self, assets_dir=None, enabled=True, volume=100):
         self.music_player = Music()
@@ -60,6 +66,14 @@ class SoundManager:
         self.is_accelerating = False
         self.is_braking = False
         self.is_drifting = False
+        
+        # WebRTC audio state
+        self.webrtc_active = False
+        self.webrtc_track = None
+        self.webrtc_task = None
+        
+        # Thread pool for background playback
+        self.executor = ThreadPoolExecutor(max_workers=2)
         
         logger.info(f"Sound Manager initialized with {sum(len(s) for s in self.sounds.values())} sounds")
     
@@ -275,6 +289,100 @@ class SoundManager:
         logger.warning("No available sound channels for voice stream")
         return None
     
+    async def play_webrtc_track(self, track):
+        """
+        Play audio from a WebRTC track.
+        
+        Args:
+            track: The WebRTC audio track to play
+        """
+        # Cancel any existing WebRTC playback task
+        if self.webrtc_task and not self.webrtc_task.done():
+            self.webrtc_task.cancel()
+            try:
+                await self.webrtc_task
+            except asyncio.CancelledError:
+                logger.info("Previous WebRTC playback task cancelled")
+        
+        # Store the track reference
+        self.webrtc_track = track
+        self.webrtc_active = True
+        
+        # Create a new task for continuous playback
+        self.webrtc_task = asyncio.create_task(self._process_webrtc_audio())
+        logger.info("WebRTC audio track playback started")
+    
+    async def _process_webrtc_audio(self):
+        """
+        Process and play audio frames from the WebRTC track.
+        This runs as a background task.
+        """
+        try:
+            # Set up temporary file for buffering audio if needed
+            temp_file = None
+            
+            # Method 1: Direct playback using PyGame
+            pygame_channel = pygame.mixer.Channel(1)  # Use a specific channel for WebRTC
+            
+            # Set the volume for this channel
+            effective_volume = (self.volume / 100.0) * (self.voice_volume / 100.0)
+            pygame_channel.set_volume(effective_volume)
+            
+            while self.webrtc_active and self.webrtc_track:
+                if not self.enabled:
+                    # If sound is disabled, still receive frames but don't play
+                    frame = await self.webrtc_track.recv()
+                    await asyncio.sleep(0.01)
+                    continue
+                
+                # Get the next audio frame
+                frame = await self.webrtc_track.recv()
+                
+                if frame:
+                    try:
+                        # Convert the frame to a format pygame can play
+                        # This depends on the frame format from aiortc
+                        # Typically, frames are in 48kHz, stereo, 16-bit PCM
+                        
+                        # Extract raw PCM data from the frame
+                        audio_data = frame.to_ndarray()
+                        
+                        # Convert to PyGame sound object and play
+                        # This is a simplified approach - in practice, you might need
+                        # to handle buffering, resampling, and format conversion
+                        sound = pygame.mixer.Sound(buffer=audio_data.tobytes())
+                        pygame_channel.play(sound)
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing WebRTC audio frame: {e}")
+                
+                # Control playback rate to avoid buffer overflows
+                await asyncio.sleep(0.02)  # 20ms pause between frames
+                
+        except asyncio.CancelledError:
+            logger.info("WebRTC audio processing task cancelled")
+        except Exception as e:
+            logger.error(f"Error in WebRTC audio processing: {e}")
+        finally:
+            # Clean up resources
+            self.webrtc_active = False
+            if temp_file and os.path.exists(temp_file.name):
+                os.unlink(temp_file.name)
+    
+    def stop_webrtc_audio(self):
+        """
+        Stop the WebRTC audio playback.
+        """
+        logger.info("Stopping WebRTC audio playback")
+        self.webrtc_active = False
+        
+        # Stop the task (will be cleaned up in the task's finally block)
+        if self.webrtc_task and not self.webrtc_task.done():
+            self.webrtc_task.cancel()
+        
+        # Clear track reference
+        self.webrtc_track = None
+    
     def set_voice_volume(self, volume):
         """Set volume for push-to-talk voice streams (0-100)"""
         self.voice_volume = max(0, min(100, volume))
@@ -334,7 +442,7 @@ class SoundManager:
         Set volume for a specific sound category
         
         Args:
-            category (str): Category of sound ('driving', 'alert', 'custom')
+            category (str): Category of sound ('driving', 'alert', 'custom', 'voice', 'webrtc')
             volume (int): Volume level from 0 (mute) to 100 (max)
         """
         volume = max(0, min(100, volume))
@@ -369,10 +477,25 @@ class SoundManager:
                         sound = pygame.mixer.Channel(channel_id).get_sound()
                         sound.set_volume(effective_volume)
     
-    def shutdown(self):
+    async def shutdown(self):
         """Clean shutdown of sound manager"""
         self._running = False
         self.stop_sound()  # Stop all sound effects
         self.music_stop()  # Stop music
+        self.stop_webrtc_audio()  # Stop WebRTC audio
+        
+        # Wait for any pending tasks
+        if self.webrtc_task and not self.webrtc_task.done():
+            try:
+                self.webrtc_task.cancel()
+                await self.webrtc_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error cancelling WebRTC task: {e}")
+        
+        # Close the thread pool
+        self.executor.shutdown(wait=False)
+        
         pygame.mixer.quit()
         logger.info("Sound Manager shutdown")

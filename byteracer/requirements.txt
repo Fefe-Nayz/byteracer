@@ -1,1 +1,10 @@
 websockets
+aiortc
+aiohttp
+numpy
+pydub
+psutil
+openai
+pillow
+av
+RPi.GPIO

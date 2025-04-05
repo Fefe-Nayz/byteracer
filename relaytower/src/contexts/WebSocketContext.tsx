@@ -26,7 +26,10 @@ export type WebSocketMessageType =
   | "network_scan"
   | "network_list"
   | "network_update"
-  | "audio_stream";
+  | "webrtc_offer"
+  | "webrtc_answer"
+  | "webrtc_ice_candidate"
+  | "webrtc_disconnect"
 
 // Define WebSocket connection status type
 export type WebSocketStatus = "connecting" | "connected" | "disconnected";
@@ -201,7 +204,12 @@ interface WebSocketContextValue {
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
   sendGptCommand: (prompt: string, useCamera: boolean) => void;
-  sendAudioStream: (codec: string, format: string, data: number[]) => void;
+  
+  // WebRTC Methods
+  sendWebRTCOffer: (offer: RTCSessionDescriptionInit) => void;
+  sendWebRTCAnswer: (answer: RTCSessionDescriptionInit) => void;
+  sendWebRTCIceCandidate: (candidate: RTCIceCandidate) => void;
+  sendWebRTCDisconnect: () => void;
 }
 
 // Create context with default values
@@ -423,6 +431,41 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               // Keep only the most recent 500 logs to avoid memory issues
               return newLogs.slice(-500);
             });
+            break;
+          case "webrtc_offer":
+            // Forward WebRTC offer to client-side handlers
+            window.dispatchEvent(
+              new CustomEvent("webrtc:offer", {
+                detail: event.data.offer
+              })
+            );
+            break;
+            
+          case "webrtc_answer":
+            // Forward WebRTC answer to client-side handlers
+            window.dispatchEvent(
+              new CustomEvent("webrtc:answer", {
+                detail: event.data.answer
+              })
+            );
+            break;
+            
+          case "webrtc_ice_candidate":
+            // Forward WebRTC ICE candidate to client-side handlers
+            window.dispatchEvent(
+              new CustomEvent("webrtc:ice-candidate", {
+                detail: event.data.candidate
+              })
+            );
+            break;
+            
+          case "webrtc_disconnect":
+            // Handle WebRTC disconnect request
+            window.dispatchEvent(
+              new CustomEvent("webrtc:disconnect", {
+                detail: { timestamp: event.data.timestamp }
+              })
+            );
             break;
         }
       } catch (e) {
@@ -764,29 +807,88 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
-  // Function to send audio stream data
-  const sendAudioStream = useCallback((
-    codec: string,
-    format: string,
-    data: number[]
-  ) => {
+  // WebRTC signaling functions
+  const sendWebRTCOffer = useCallback((offer: RTCSessionDescriptionInit) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      const audioData = {
-        name: "audio_stream",
+      const offerData = {
+        name: "webrtc_offer",
         data: {
-          codec,
-          format,
-          data,
+          offer,
           timestamp: Date.now(),
         },
         createdAt: Date.now(),
       };
 
-      socket.send(JSON.stringify(audioData));
-      trackWsMessage("sent", audioData);
-      console.log("Audio stream data sent");
+      socket.send(JSON.stringify(offerData));
+      trackWsMessage("sent", offerData);
+      console.log("WebRTC offer sent");
     } else {
-      logError("Cannot send audio stream data", {
+      logError("Cannot send WebRTC offer", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  const sendWebRTCAnswer = useCallback((answer: RTCSessionDescriptionInit) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const answerData = {
+        name: "webrtc_answer",
+        data: {
+          answer,
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(answerData));
+      trackWsMessage("sent", answerData);
+      console.log("WebRTC answer sent");
+    } else {
+      logError("Cannot send WebRTC answer", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  const sendWebRTCIceCandidate = useCallback((candidate: RTCIceCandidate) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const candidateData = {
+        name: "webrtc_ice_candidate",
+        data: {
+          candidate,
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(candidateData));
+      trackWsMessage("sent", candidateData);
+      console.log("WebRTC ICE candidate sent");
+    } else {
+      logError("Cannot send WebRTC ICE candidate", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  const sendWebRTCDisconnect = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const disconnectData = {
+        name: "webrtc_disconnect",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(disconnectData));
+      trackWsMessage("sent", disconnectData);
+      console.log("WebRTC disconnect sent");
+    } else {
+      logError("Cannot send WebRTC disconnect", {
         reason: "Socket not connected",
         readyState: socket?.readyState,
       });
@@ -829,7 +931,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     scanNetworks,
     updateNetwork,
     sendGptCommand,
-    sendAudioStream,
+    sendWebRTCOffer,
+    sendWebRTCAnswer,
+    sendWebRTCIceCandidate,
+    sendWebRTCDisconnect,
   };
 
   return (
