@@ -120,6 +120,8 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 - Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
 - Lifting de l'interface utilisateur
 
+- ajout d'un micro avec transmission audio (https://www.sunfounder.com/products/mini-usb-microphone?_pos=1&_sid=f7cb6af2f&_ss=r)
+
 
 Gerardo :
 - Implémenter le mode démo (envoi de commandes préenregistrées au robot pour le faire avancer, tourner, reculer, freiner, etc.)
