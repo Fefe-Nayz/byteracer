@@ -176,7 +176,8 @@ class ByteRacer:
             vflip=settings["camera"]["vflip"],
             hflip=settings["camera"]["hflip"],
             local=settings["camera"]["local_display"],
-            web=settings["camera"]["web_display"]
+            web=settings["camera"]["web_display"],
+            camera_size=tuple(settings["camera"]["camera_size"])  # Convert list to tuple
         )
         
         if restart_camera:
@@ -923,6 +924,10 @@ class ByteRacer:
             if "web_display" in camera:
                 self.config_manager.set("camera.web_display", camera["web_display"])
                 restart_needed |= self.camera_manager.update_settings(web=camera["web_display"])
+
+            if "resolution" in camera:
+                self.config_manager.set("camera.resolution", camera["resolution"])
+                restart_needed |= self.camera_manager.update_settings(camera_size=camera["resolution"])
             
             if restart_needed:
                 await self.camera_manager.restart()

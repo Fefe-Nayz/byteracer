@@ -53,6 +53,7 @@ class ConfigManager:
                 "hflip": False,
                 "local_display": False,
                 "web_display": True,
+                "camera_size": [1920, 1080],  # Default camera resolution [width, height]
             },
             
             # Safety settings
@@ -353,6 +354,7 @@ class ConfigManager:
                 "hflip": False,
                 "local_display": False,
                 "web_display": True,
+                "camera_size": [1920, 1080],  # Default camera resolution
             },
             
             # Safety settings

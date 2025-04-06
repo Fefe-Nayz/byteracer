@@ -127,6 +127,7 @@ export interface RobotSettings {
     hflip: boolean;
     local_display: boolean;
     web_display: boolean;
+    camera_size: Array<number>;
   };
   safety: {
     collision_avoidance: boolean;

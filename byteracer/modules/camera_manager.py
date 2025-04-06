@@ -5,6 +5,7 @@ import threading
 import importlib
 from enum import Enum, auto
 from vilib import Vilib
+from picamera2 import Picamera2
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,12 @@ class CameraManager:
     Manages the camera feed and monitoring.
     Handles restart requests initiated by client.
     """
-    def __init__(self, vflip=False, hflip=False, local=False, web=True):
+    def __init__(self, vflip=False, hflip=False, local=False, web=True, camera_size=(1920, 1080)):
         self.vflip = vflip
         self.hflip = hflip
         self.local = local
         self.web = web
+        self.camera_size = camera_size
         self.state = CameraState.INACTIVE
         self.last_error = None
         self.last_start_time = 0
@@ -34,7 +36,7 @@ class CameraManager:
         # Access to shared data
         self._lock = threading.Lock()
         
-        logger.info("Camera Manager initialized")
+        logger.info(f"Camera Manager initialized with resolution {self.camera_size}")
     
     async def start(self, status_callback=None):
         """
@@ -71,37 +73,10 @@ class CameraManager:
             self.last_start_time = time.time()
             
             try:
-                # Start the camera with vilib
-                try:
-                    # First attempt to set any required static variables
-                    # This is to help avoid the NoneType error
-                    if not hasattr(Vilib, 'camera_size') or Vilib.camera_size is None:
-                        Vilib.camera_size = (640, 480)
-                        
-                    Vilib.camera_start(vflip=self.vflip, hflip=self.hflip)
-                    Vilib.display(local=self.local, web=self.web)
-                except AttributeError as e:
-                    logger.warning(f"Encountered AttributeError during camera start: {e}")
-                    logger.info("Attempting to reinitialize Vilib")
-                    
-                    # Try to reset the Vilib module
-                    try:
-                        # Reload the Vilib module to reset its internal state
-                        importlib.reload(Vilib)
-                        
-                        # Ensure camera_size is set
-                        if not hasattr(Vilib, 'camera_size') or Vilib.camera_size is None:
-                            Vilib.camera_size = (1920, 1080)
-                            
-                        # Wait a bit before retrying
-                        await asyncio.sleep(2)
-                        
-                        # Try starting the camera again
-                        Vilib.camera_start(vflip=self.vflip, hflip=self.hflip)
-                        Vilib.display(local=self.local, web=self.web)
-                    except Exception as inner_e:
-                        logger.error(f"Failed to reinitialize Vilib: {inner_e}")
-                        raise inner_e
+                # Start the camera with vilib, using the specified resolution
+                logger.info(f"Starting camera with resolution {self.camera_size}")
+                Vilib.camera_start(vflip=self.vflip, hflip=self.hflip, size=self.camera_size)
+                Vilib.display(local=self.local, web=self.web)
                 
                 # Wait a moment for camera to initialize
                 await asyncio.sleep(2)
@@ -142,17 +117,6 @@ class CameraManager:
     def _close_camera(self):
         """Close the camera safely using vilib"""
         try:
-            # First try to clean up with vilib_exit which should do a more thorough cleanup
-            try:
-                if hasattr(Vilib, 'vilib_exit'):
-                    logger.info("Calling Vilib.vilib_exit() for thorough cleanup")
-                    Vilib.vilib_exit()
-                    time.sleep(1)  # Small delay to allow threads to clean up
-                    return True
-            except Exception as e:
-                logger.warning(f"Error calling Vilib.vilib_exit(): {e}")
-            
-            # Fall back to camera_close if vilib_exit failed or doesn't exist
             Vilib.camera_close()
             logger.info("Camera closed via vilib")
             return True
@@ -162,12 +126,13 @@ class CameraManager:
     
     async def restart(self):
         """
-        Improved restart method: properly close and reinitialize camera.
+        Completely reinitialize the camera by resetting the Vilib Picamera2 instance.
+        This avoids the NoneType errors when restarting.
         
         Returns:
             bool: True if restart was successful, False otherwise
         """
-        logger.info("Camera restart requested")
+        logger.info("Camera restart requested - using full reinit approach")
         
         # Update state
         self.state = CameraState.RESTARTING
@@ -185,20 +150,31 @@ class CameraManager:
         # Close the camera
         self._close_camera()
         
-        # Wait longer (10 seconds) to ensure complete shutdown of camera resources
-        logger.info("Waiting 10 seconds before reopening camera...")
-        await asyncio.sleep(10)
+        # Wait for resources to be released
+        logger.info("Waiting for camera resources to be released...")
+        await asyncio.sleep(5)
         
-        # Try to reset the Vilib module's state
+        # Completely reinitialize the Picamera2 instance in Vilib
         try:
-            importlib.reload(Vilib)
-            logger.info("Reloaded Vilib module")
+            logger.info("Reinitializing Picamera2 instance...")
+            # Reset the static Picamera2 instance in Vilib
+            Vilib.picam2 = Picamera2()
+            Vilib.camera_run = False  # Ensure the camera thread is stopped
+            
+            # Set the camera size before starting
+            Vilib.camera_size = self.camera_size
+            
+            # Wait a bit more for the new instance to initialize
+            await asyncio.sleep(1)
+            
+            # Start the camera again
+            logger.info(f"Starting camera with new Picamera2 instance and resolution {self.camera_size}...")
+            return await self._start_camera()
         except Exception as e:
-            logger.warning(f"Failed to reload Vilib module: {e}")
-        
-        # Start the camera again
-        logger.info("Reopening camera...")
-        return await self._start_camera()
+            logger.error(f"Error reinitializing camera: {e}")
+            self.state = CameraState.ERROR
+            self.last_error = str(e)
+            return False
     
     def get_status(self):
         """Get the current camera status"""
@@ -210,12 +186,13 @@ class CameraManager:
                 "vflip": self.vflip,
                 "hflip": self.hflip,
                 "local": self.local,
-                "web": self.web
+                "web": self.web,
+                "resolution": f"{self.camera_size[0]}x{self.camera_size[1]}"
             }
         }
         return status
     
-    def update_settings(self, vflip=None, hflip=None, local=None, web=None):
+    def update_settings(self, vflip=None, hflip=None, local=None, web=None, camera_size=None):
         """
         Update camera settings.
         
@@ -239,6 +216,11 @@ class CameraManager:
             
             if web is not None and web != self.web:
                 self.web = web
+                restart_needed = True
+                
+            if camera_size is not None and camera_size != self.camera_size:
+                self.camera_size = camera_size
+                logger.info(f"Camera resolution changed to {self.camera_size}")
                 restart_needed = True
         
         return restart_needed

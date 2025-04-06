@@ -342,58 +342,85 @@ export default function RobotSettings() {
       <Card className="p-4">
         <h3 className="font-bold mb-4">Camera Settings</h3>
         
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Camera className="h-4 w-4" />
-              <span className="text-sm">Vertical Flip</span>
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Camera className="h-4 w-4" />
+                <span className="text-sm">Vertical Flip</span>
+              </div>
+              <Switch 
+                checked={localSettings.camera.vflip}
+                onCheckedChange={(checked) => 
+                  updateSetting("camera", "vflip", checked)
+                }
+              />
             </div>
-            <Switch 
-              checked={localSettings.camera.vflip}
-              onCheckedChange={(checked) => 
-                updateSetting("camera", "vflip", checked)
-              }
-            />
-          </div>
-          
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Camera className="h-4 w-4" />
-              <span className="text-sm">Horizontal Flip</span>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Camera className="h-4 w-4" />
+                <span className="text-sm">Horizontal Flip</span>
+              </div>
+              <Switch 
+                checked={localSettings.camera.hflip}
+                onCheckedChange={(checked) => 
+                  updateSetting("camera", "hflip", checked)
+                }
+              />
             </div>
-            <Switch 
-              checked={localSettings.camera.hflip}
-              onCheckedChange={(checked) => 
-                updateSetting("camera", "hflip", checked)
-              }
-            />
-          </div>
-          
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Camera className="h-4 w-4" />
-              <span className="text-sm">Local Display</span>
-              <span className="text-xs text-gray-500">(if connected)</span>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Camera className="h-4 w-4" />
+                <span className="text-sm">Local Display</span>
+                <span className="text-xs text-gray-500">(if connected)</span>
+              </div>
+              <Switch 
+                checked={localSettings.camera.local_display}
+                onCheckedChange={(checked) => 
+                  updateSetting("camera", "local_display", checked)
+                }
+              />
             </div>
-            <Switch 
-              checked={localSettings.camera.local_display}
-              onCheckedChange={(checked) => 
-                updateSetting("camera", "local_display", checked)
-              }
-            />
-          </div>
-          
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Camera className="h-4 w-4" />
-              <span className="text-sm">Web Display</span>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Camera className="h-4 w-4" />
+                <span className="text-sm">Web Display</span>
+              </div>
+              <Switch 
+                checked={localSettings.camera.web_display}
+                onCheckedChange={(checked) => 
+                  updateSetting("camera", "web_display", checked)
+                }
+              />
             </div>
-            <Switch 
-              checked={localSettings.camera.web_display}
-              onCheckedChange={(checked) => 
-                updateSetting("camera", "web_display", checked)
-              }
-            />
+            
+            <div className="pt-2">
+              <div className="mb-1 text-xs">Camera Resolution</div>
+              <Select
+                value={Array.isArray(localSettings.camera.camera_size) ? 
+                  `${localSettings.camera.camera_size[0]}x${localSettings.camera.camera_size[1]}` : 
+                  "1920x1080"}
+                onValueChange={(value) => {
+                  const [width, height] = value.split('x').map(Number);
+                  updateSetting("camera", "camera_size", [width, height]);
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select resolution" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="640x480">640 x 480 (SD)</SelectItem>
+                  <SelectItem value="1280x720">1280 x 720 (HD)</SelectItem>
+                  <SelectItem value="1920x1080">1920 x 1080 (Full HD)</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="mt-1 text-xs text-gray-500">
+                Higher resolution provides better image quality but may affect performance.
+              </div>
+            </div>
           </div>
         </div>
       </Card>
