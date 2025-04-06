@@ -35,12 +35,12 @@ export default function PushToTalk() {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
       
-      // Choose a MIME type that produces valid chunks
+      // Prefer OGG with opus for complete container chunks if available
       const options: MediaRecorderOptions = {};
-      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        options.mimeType = 'audio/webm;codecs=opus';
-      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+      if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
         options.mimeType = 'audio/ogg;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        options.mimeType = 'audio/webm;codecs=opus';
       } else {
         options.mimeType = 'audio/webm';
       }
@@ -70,8 +70,8 @@ export default function PushToTalk() {
         cleanupRecording();
       };
       
-      // Increase the chunk time to around 1000ms to ensure a complete header
-      mediaRecorder.start(1000);
+      // Use a longer chunk duration to allow a complete header (2000ms)
+      mediaRecorder.start(2000);
       setIsConnecting(false);
     } catch (error) {
       console.error("Error starting audio recording:", error);

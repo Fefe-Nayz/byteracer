@@ -515,34 +515,46 @@ class ByteRacer:
                     try:
                         import base64, tempfile
                         from pydub import AudioSegment
-                        # Remove header if present
+                        # Check if there's a DataURL header and determine the file extension and format
                         if audio_base64.startswith("data:"):
                             header, encoded = audio_base64.split(",", 1)
-                            # Optionally, you could check the header to see if it's webm or ogg
+                            if "ogg" in header:
+                                ext = ".ogg"
+                                fmt = "ogg"
+                            elif "webm" in header:
+                                ext = ".webm"
+                                fmt = "webm"
+                            else:
+                                ext = ".webm"
+                                fmt = "webm"
                         else:
                             encoded = audio_base64
+                            ext = ".webm"
+                            fmt = "webm"
+                        
                         audio_bytes = base64.b64decode(encoded)
                         
-                        # Save the chunk to a temporary file; use .webm or .ogg based on the MIME type
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_file:
+                        # Save the chunk to a temporary file with the appropriate extension
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
                             temp_file.write(audio_bytes)
-                            webm_path = temp_file.name
-                        logging.info(f"Saved WebM audio to {webm_path}")
+                            input_path = temp_file.name
+                        logging.info(f"Saved audio chunk to {input_path}")
                         
-                        # Convert the WebM file to WAV using pydub (ffmpeg must be installed)
+                        # Convert the file to WAV for playback using pydub (ffmpeg must be installed)
                         try:
-                            sound = AudioSegment.from_file(webm_path, format="webm")
+                            sound = AudioSegment.from_file(input_path, format=fmt)
                         except Exception as conv_err:
                             logging.error(f"Conversion error: {conv_err}")
                             raise conv_err
-                        wav_path = webm_path.replace(".webm", ".wav")
-                        sound.export(wav_path, format="wav")
-                        logging.info(f"Converted audio to WAV: {wav_path}")
+                        output_path = input_path.replace(ext, ".wav")
+                        sound.export(output_path, format="wav")
+                        logging.info(f"Converted audio to WAV: {output_path}")
                         
-                        # Play the WAV file via the sound manager
-                        self.sound_manager.play_voice_stream(wav_path)
+                        # Play the WAV file using your sound manager
+                        self.sound_manager.play_voice_stream(output_path)
                     except Exception as e:
                         logging.error(f"Error processing audio_stream: {e}")
+
 
             else:
                 logging.info(f"Received message of type: {data['name']}")
