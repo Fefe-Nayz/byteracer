@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useCallback } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Mic2, Mic, Circle } from "lucide-react";
