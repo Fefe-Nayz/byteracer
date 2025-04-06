@@ -514,21 +514,31 @@ class ByteRacer:
                 if audio_base64:
                     try:
                         import base64, tempfile
-                        # If the data URL header exists, remove it
+                        from pydub import AudioSegment
+                        # Remove header if present
                         if audio_base64.startswith("data:"):
                             header, encoded = audio_base64.split(",", 1)
                         else:
                             encoded = audio_base64
                         audio_bytes = base64.b64decode(encoded)
-                        # Save to a temporary file; here we use .webm as that's what the browser is sending.
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio_file:
-                            temp_audio_file.write(audio_bytes)
-                            temp_file_path = temp_audio_file.name
-                        logging.info(f"Received audio chunk, saved to temporary file: {temp_file_path}")
-                        # Use the sound manager to play the voice stream; this assumes that play_voice_stream can handle .webm files (or that your system has ffmpeg installed to do conversion)
-                        self.sound_manager.play_voice_stream(temp_file_path)
+                        
+                        # Save the original WebM file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_webm:
+                            temp_webm.write(audio_bytes)
+                            webm_path = temp_webm.name
+                        logging.info(f"Saved WebM audio to {webm_path}")
+
+                        # Convert the WebM file to WAV (or OGG)
+                        sound = AudioSegment.from_file(webm_path, format="webm")
+                        wav_path = webm_path.replace(".webm", ".wav")
+                        sound.export(wav_path, format="wav")
+                        logging.info(f"Converted audio to WAV: {wav_path}")
+
+                        # Use the sound manager to play the WAV file
+                        self.sound_manager.play_voice_stream(wav_path)
                     except Exception as e:
                         logging.error(f"Error processing audio_stream: {e}")
+
                 
             else:
                 logging.info(f"Received message of type: {data['name']}")
