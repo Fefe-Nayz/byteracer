@@ -95,9 +95,12 @@ class CameraManager:
             self.last_start_time = time.time()
             
             try:
+                # Ensure camera_size is a tuple before passing to camera_start
+                camera_size = tuple(self.camera_size) if isinstance(self.camera_size, list) else self.camera_size
+                
                 # Start the camera with vilib, using the specified resolution
-                logger.info(f"Starting camera with resolution {self.camera_size}")
-                Vilib.camera_start(vflip=self.vflip, hflip=self.hflip, size=self.camera_size)
+                logger.info(f"Starting camera with resolution {camera_size}")
+                Vilib.camera_start(vflip=self.vflip, hflip=self.hflip, size=camera_size)
                 Vilib.display(local=self.local, web=self.web)
                 
                 # Wait a moment for camera to initialize
@@ -240,15 +243,20 @@ class CameraManager:
             bool: True if frames are different, False if identical
         """
         try:
-            # Make sure frames have the same shape
-            if frame1.shape != frame2.shape:
-                # Different shapes means different frames
-                return True
-                
-            # Check if frames are identical - np.array_equal is faster than pixel-by-pixel comparison
-            # We could use a tolerance for minor differences, but for freeze detection 
-            # we want to detect even small changes
-            return not np.array_equal(frame1, frame2)
+            # FOR TESTING PURPOSES: Always return False to simulate a frozen camera
+            # This will cause the freeze detection to always detect a frozen camera
+            return False
+            
+            # Original code (commented out for testing)
+            # # Make sure frames have the same shape
+            # if frame1.shape != frame2.shape:
+            #     # Different shapes means different frames
+            #     return True
+            #     
+            # # Check if frames are identical - np.array_equal is faster than pixel-by-pixel comparison
+            # # We could use a tolerance for minor differences, but for freeze detection 
+            # # we want to detect even small changes
+            # return not np.array_equal(frame1, frame2)
         except Exception as e:
             logger.error(f"Error comparing frames: {e}")
             # On error, assume frames are different to avoid false positives
@@ -296,13 +304,15 @@ class CameraManager:
             Vilib.camera_run = False  # Ensure the camera thread is stopped
             
             # Set the camera size before starting
-            Vilib.camera_size = self.camera_size
+            # Ensure camera_size is a tuple
+            camera_size = tuple(self.camera_size) if isinstance(self.camera_size, list) else self.camera_size
+            Vilib.camera_size = camera_size
             
             # Wait a bit more for the new instance to initialize
             await asyncio.sleep(1)
             
             # Start the camera again
-            logger.info(f"Starting camera with new Picamera2 instance and resolution {self.camera_size}...")
+            logger.info(f"Starting camera with new Picamera2 instance and resolution {camera_size}...")
             return await self._start_camera()
         except Exception as e:
             logger.error(f"Error reinitializing camera: {e}")
@@ -354,6 +364,9 @@ class CameraManager:
                 restart_needed = True
                 
             if camera_size is not None and camera_size != self.camera_size:
+                # Convert camera_size to tuple if it's a list
+                if isinstance(camera_size, list):
+                    camera_size = tuple(camera_size)
                 self.camera_size = camera_size
                 logger.info(f"Camera resolution changed to {self.camera_size}")
                 restart_needed = True
