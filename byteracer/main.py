@@ -509,52 +509,45 @@ class ByteRacer:
                 await self.tts_manager.say(f"Settings reset to defaults{' for ' + section if section else ''}", priority=1)
 
             elif data["name"] == "audio_stream":
-                # Handle audio stream: Base64 encoded audio data from the web client
                 audio_base64 = data["data"].get("audio")
                 if audio_base64:
                     try:
-                        import base64, tempfile
-                        from pydub import AudioSegment
-                        # Determine file extension and format from the DataURL header
+                        import base64, tempfile, os
+                        
+                        # Remove "data:audio/wav;base64," header if present
                         if audio_base64.startswith("data:"):
                             header, encoded = audio_base64.split(",", 1)
-                            if "ogg" in header:
-                                ext = ".ogg"
-                                fmt = "ogg"
-                            elif "webm" in header:
-                                ext = ".webm"
-                                fmt = "webm"
-                            else:
-                                ext = ".webm"
-                                fmt = "webm"
                         else:
                             encoded = audio_base64
-                            ext = ".webm"
-                            fmt = "webm"
                         
+                        # Decode from base64
                         audio_bytes = base64.b64decode(encoded)
                         
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
-                            temp_file.write(audio_bytes)
-                            input_path = temp_file.name
-                        logging.info(f"Saved audio chunk to {input_path}")
+                        # Save to a temporary WAV file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
+                            temp_wav.write(audio_bytes)
+                            wav_path = temp_wav.name
                         
-                        # Convert the file to WAV for playback (ensure ffmpeg is installed)
-                        try:
-                            sound = AudioSegment.from_file(input_path, format=fmt)
-                        except Exception as conv_err:
-                            logging.error(f"Conversion error: {conv_err}")
-                            raise conv_err
-                        output_path = input_path.replace(ext, ".wav")
-                        sound.export(output_path, format="wav")
-                        logging.info(f"Converted audio to WAV: {output_path}")
+                        logging.info(f"Received WAV audio chunk -> {wav_path}")
                         
-                        self.sound_manager.play_voice_stream(output_path)
+                        # Play the audio file - each chunk should now be a complete WAV
+                        self.sound_manager.play_voice_stream(wav_path)
+                        
+                        # Schedule cleanup of temporary file after a delay
+                        def cleanup_temp_file(path, delay=5):
+                            import time
+                            time.sleep(delay)
+                            try:
+                                if os.path.exists(path):
+                                    os.unlink(path)
+                                    logging.debug(f"Cleaned up temporary audio file: {path}")
+                            except Exception as e:
+                                logging.error(f"Error cleaning up temp file {path}: {e}")
+                                
+                        threading.Thread(target=cleanup_temp_file, args=(wav_path,), daemon=True).start()
+                        
                     except Exception as e:
-                        logging.error(f"Error processing audio_stream: {e}")
-
-
-
+                        logging.error(f"Error processing audio_stream (WAV): {e}")
             else:
                 logging.info(f"Received message of type: {data['name']}")
             

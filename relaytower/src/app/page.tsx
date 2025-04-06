@@ -17,7 +17,11 @@ import NetworkSettings from "@/components/NetworkSettings";
 import GamepadInputHandler from "@/components/GamepadInputHandler";
 import LogViewer from "@/components/LogViewer";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import PushToTalk from "@/components/PushToTalk";
+import dynamic from "next/dynamic";
+
+const PushToTalk = dynamic(() => import("@/components/PushToTalk"), {
+  ssr: false,
+});
 
 function GamepadPage() {
   const { selectedGamepadId } = useGamepadContext();
