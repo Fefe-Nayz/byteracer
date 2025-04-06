@@ -515,7 +515,7 @@ class ByteRacer:
                     try:
                         import base64, tempfile
                         from pydub import AudioSegment
-                        # Check if there's a DataURL header and determine the file extension and format
+                        # Determine file extension and format from the DataURL header
                         if audio_base64.startswith("data:"):
                             header, encoded = audio_base64.split(",", 1)
                             if "ogg" in header:
@@ -534,13 +534,12 @@ class ByteRacer:
                         
                         audio_bytes = base64.b64decode(encoded)
                         
-                        # Save the chunk to a temporary file with the appropriate extension
                         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
                             temp_file.write(audio_bytes)
                             input_path = temp_file.name
                         logging.info(f"Saved audio chunk to {input_path}")
                         
-                        # Convert the file to WAV for playback using pydub (ffmpeg must be installed)
+                        # Convert the file to WAV for playback (ensure ffmpeg is installed)
                         try:
                             sound = AudioSegment.from_file(input_path, format=fmt)
                         except Exception as conv_err:
@@ -550,10 +549,10 @@ class ByteRacer:
                         sound.export(output_path, format="wav")
                         logging.info(f"Converted audio to WAV: {output_path}")
                         
-                        # Play the WAV file using your sound manager
                         self.sound_manager.play_voice_stream(output_path)
                     except Exception as e:
                         logging.error(f"Error processing audio_stream: {e}")
+
 
 
             else:

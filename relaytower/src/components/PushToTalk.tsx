@@ -7,54 +7,30 @@ import { useWebSocket } from "@/contexts/WebSocketContext";
 
 export default function PushToTalk() {
   const [isRecording, setIsRecording] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<string>("idle");
   const { status, sendAudioStream } = useWebSocket();
   
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-
-  const cleanupRecording = useCallback(() => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-    setIsRecording(false);
-    setIsConnecting(false);
-    setConnectionStatus("idle");
-  }, []);
-
-  const startRecording = async () => {
+  const recorderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const isTransmittingRef = useRef(false);
+  
+  // Preferred MIME type – try OGG with opus first
+  const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+    ? 'audio/ogg;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+  
+  const startRecordingCycle = useCallback(async () => {
     try {
-      setIsConnecting(true);
-      setConnectionStatus("connecting");
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStreamRef.current = stream;
-      
-      // Prefer OGG with opus for complete container chunks if available
-      const options: MediaRecorderOptions = {};
-      if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-        options.mimeType = 'audio/ogg;codecs=opus';
-      } else if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        options.mimeType = 'audio/webm;codecs=opus';
-      } else {
-        options.mimeType = 'audio/webm';
+      if (!localStreamRef.current) {
+        localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
+      const recorder = new MediaRecorder(localStreamRef.current, { mimeType });
+      mediaRecorderRef.current = recorder;
       
-      const mediaRecorder = new MediaRecorder(stream, options);
-      mediaRecorderRef.current = mediaRecorder;
-      
-      mediaRecorder.onstart = () => {
-        console.log("MediaRecorder started");
-        setIsRecording(true);
-        setConnectionStatus("recording");
-      };
-      
-      mediaRecorder.ondataavailable = (event) => {
+      recorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           const reader = new FileReader();
           reader.onloadend = () => {
@@ -65,58 +41,84 @@ export default function PushToTalk() {
         }
       };
       
-      mediaRecorder.onerror = (event) => {
+      recorder.onerror = (event) => {
         console.error("MediaRecorder error:", event.error);
-        cleanupRecording();
+        stopRecordingCycle();
       };
       
-      // Use a longer chunk duration to allow a complete header (2000ms)
-      mediaRecorder.start(2000);
-      setIsConnecting(false);
+      recorder.onstart = () => {
+        setIsRecording(true);
+        setConnectionStatus("recording");
+      };
+      
+      recorder.onstop = () => {
+        setIsRecording(false);
+        // If we're still transmitting, immediately restart the cycle
+        if (isTransmittingRef.current) {
+          startRecordingCycle();
+        }
+      };
+      
+      recorder.start();
+      
+      // Stop recorder after 2 seconds to force a complete file blob
+      recorderTimeoutRef.current = setTimeout(() => {
+        recorder.stop();
+      }, 200);
     } catch (error) {
-      console.error("Error starting audio recording:", error);
+      console.error("Error in recording cycle:", error);
       setConnectionStatus("error");
-      setIsConnecting(false);
     }
+  }, [sendAudioStream, mimeType]);
+  
+  const stopRecordingCycle = useCallback(() => {
+    isTransmittingRef.current = false;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (recorderTimeoutRef.current) {
+      clearTimeout(recorderTimeoutRef.current);
+      recorderTimeoutRef.current = null;
+    }
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
+    setIsRecording(false);
+    setConnectionStatus("idle");
+  }, []);
+  
+  const startTransmit = async () => {
+    if (status !== "connected") return;
+    isTransmittingRef.current = true;
+    setConnectionStatus("connecting");
+    await startRecordingCycle();
   };
-
-  const stopRecording = () => {
-    cleanupRecording();
-  };
-
+  
   return (
     <Card className="p-4">
-      <div className="flex flex-col justify-between gap-3">
+      <div className="flex flex-col gap-3">
         <div className="flex items-center space-x-2">
           <Mic2 className="h-5 w-5" />
-          <h3 className="font-bold">Push To Talk (MediaRecorder)</h3>
+          <h3 className="font-bold">Push To Talk (Periodic Recorder)</h3>
         </div>
         <div className="flex flex-col justify-center items-center space-y-2 min-h-[200px]">
           {connectionStatus !== "idle" && connectionStatus !== "recording" && (
-            <div className="text-sm text-gray-500 mb-2">
-              {connectionStatus === "connecting" ? "Establishing connection..." : `Status: ${connectionStatus}`}
+            <div className="text-sm text-gray-500">
+              {connectionStatus === "connecting" ? "Connecting..." : `Status: ${connectionStatus}`}
             </div>
           )}
           
           {!isRecording ? (
-            <Button 
-              disabled={status !== "connected" || isConnecting} 
-              onClick={startRecording}
-            >
+            <Button disabled={status !== "connected"} onClick={startTransmit}>
               <Mic className="h-4 w-4 mr-1" />
-              {isConnecting ? "Connecting..." : "Transmit"}
+              Transmit
             </Button>
           ) : (
-            <Button variant="destructive" onClick={stopRecording}>
+            <Button variant="destructive" onClick={stopRecordingCycle}>
               <Circle className="h-4 w-4 mr-1" />
               Mute
             </Button>
-          )}
-          
-          {connectionStatus === "error" && (
-            <div className="text-sm text-red-500 mt-2">
-              Connection error. Please try again.
-            </div>
           )}
         </div>
       </div>
