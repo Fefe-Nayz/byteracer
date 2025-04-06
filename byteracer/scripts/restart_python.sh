@@ -11,12 +11,12 @@ LOG_FILE="${SCRIPTS_DIR}/restart_python.log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== RESTART PYTHON STARTED =========="
 
-# Log function
+# Function to log with timestamp
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-# Run command and log its output
+# Function to run a command and log its output
 run_cmd() {
     local cmd="$1"
     log "Executing: $cmd"
@@ -31,7 +31,7 @@ run_cmd() {
     return $exit_code
 }
 
-# TTS function
+# Function to speak with TTS
 speak() {
     if [ -f "$TTS_SCRIPT" ]; then
         python3 "$TTS_SCRIPT" "$1"
@@ -43,33 +43,34 @@ speak() {
 log "Restarting Python controller..."
 speak "Restarting robot controller."
 
-# Check the status of the 'byteracer' screen session (run as default user)
-SESSION_INFO=$(sudo -u pi screen -list | grep byteracer)
-if echo "$SESSION_INFO" | grep -q "(Dead"; then
-    log "Screen session 'byteracer' is dead. Wiping dead sessions and creating a new one..."
-    run_cmd "sudo -u pi screen -wipe"
+# First, check if an active (non-dead) 'byteracer' screen session exists.
+SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep byteracer)
+
+if [ -n "$SESSION_ACTIVE" ]; then
+    log "Active screen session 'byteracer' found. Sending SIGINT for graceful shutdown..."
+    run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \$'\003'"
+    sleep 5  # Wait for graceful shutdown
+
+    PID=$(pgrep -f "python3 main.py" || echo "")
+    if [ -n "$PID" ]; then
+        log "Python process did not exit gracefully after SIGINT, force killing PID $PID..."
+        run_cmd "kill -9 $PID"
+        sleep 2
+    else
+        log "Python process exited gracefully."
+    fi
+else
+    log "No active screen session 'byteracer' found."
+fi
+
+# Re-check for an active session after waiting
+SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep byteracer)
+if [ -z "$SESSION_ACTIVE" ]; then
+    log "No active session for 'byteracer' found. Creating a new screen session..."
     run_cmd "sudo -u pi screen -dmS byteracer bash -c 'cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py; exec bash'"
 else
-    if [ -n "$SESSION_INFO" ]; then
-        log "Screen session 'byteracer' is active. Sending SIGINT for graceful shutdown..."
-        run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \$'\003'"
-        sleep 5  # Allow time for graceful shutdown
-
-        PID=$(pgrep -f "python3 main.py" || echo "")
-        if [ -n "$PID" ]; then
-            log "Python process did not exit gracefully after SIGINT, force killing PID $PID..."
-            run_cmd "kill -9 $PID"
-            sleep 2
-        else
-            log "Python process exited gracefully."
-        fi
-
-        log "Restarting Python controller in existing screen session..."
-        run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py$(printf '\\r')\""
-    else
-        log "Screen session 'byteracer' not found. Creating a new session..."
-        run_cmd "sudo -u pi screen -dmS byteracer bash -c 'cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py; exec bash'"
-    fi
+    log "Active session found. Injecting restart command into 'byteracer'..."
+    run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py$(printf '\\r')\""
 fi
 
 log "Waiting for process to start..."
@@ -77,7 +78,7 @@ sleep 3
 
 PID=$(pgrep -f "python3 main.py" || echo "")
 if [ -n "$PID" ]; then
-    log "Python controller has been restarted successfully with PID $PID."
+    log "Python controller restarted successfully with PID $PID."
     run_cmd "ps -p $PID -o pid,cmd,etime"
     speak "Robot controller has been restarted successfully."
 else
