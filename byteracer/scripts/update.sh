@@ -12,7 +12,7 @@ LOG_FILE="${SCRIPTS_DIR}/update.log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== UPDATE STARTED =========="
 
-# Function to log with timestamp
+# Function to log with timestamp (logs to stdout)
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
@@ -46,16 +46,16 @@ get_config() {
     local key=$1
     local default=$2
     
-    # Check if the config file exists
+    # If the config file doesn't exist, log (to stderr) and output default
     if [ ! -f "$CONFIG_FILE" ]; then
-        log "Config file not found: $CONFIG_FILE, using default: $default"
+        log "Config file not found: $CONFIG_FILE, using default: $default" >&2
         echo "$default"
         return
     fi
     
-    # Check if jq is installed
+    # If jq is not available, log (to stderr) and output default
     if ! command -v jq &> /dev/null; then
-        log "jq command not found, using default: $default"
+        log "jq command not found, using default: $default" >&2
         echo "$default"
         return
     fi
@@ -64,12 +64,12 @@ get_config() {
     value=$(jq -r "$key" "$CONFIG_FILE" 2>/dev/null)
     result=$?
     
-    # Return the default value if the key doesn't exist or value is null
+    # If the key wasn't found or the value is null, log (to stderr) and output default
     if [ $result -ne 0 ] || [ "$value" = "null" ]; then
-        log "Key $key not found in config or is null, using default: $default"
+        log "Key $key not found in config or is null, using default: $default" >&2
         echo "$default"
     else
-        log "Found configuration $key = $value"
+        log "Found configuration $key = $value" >&2
         echo "$value"
     fi
 }
@@ -80,7 +80,7 @@ speak "Starting update process for ByteRacer."
 
 run_cmd "cd \"${BYTERACER_PATH}\""
 
-# Get the branch from configuration
+# Get the branch and repository URL from configuration.
 BRANCH=$(get_config ".github.branch" "working-2")
 REPO_URL=$(get_config ".github.repo_url" "https://github.com/nayzflux/byteracer.git")
 

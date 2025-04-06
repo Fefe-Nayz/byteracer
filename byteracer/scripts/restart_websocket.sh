@@ -48,7 +48,7 @@ if screen -list | grep -q "eaglecontrol"; then
     run_cmd "screen -S eaglecontrol -p 0 -X stuff \$'\003'"
     sleep 5  # Allow time for graceful shutdown
 
-    PID=$(pgrep -f "bun run .* eaglecontrol" || echo "")
+    PID=$(ps aux | grep "bun run start" | grep "eaglecontrol" | grep -v grep | awk '{print $2}' | head -n 1)
     if [ -n "$PID" ]; then
          log "WebSocket process did not exit gracefully, force killing PID $PID..."
          run_cmd "kill -9 $PID"
@@ -65,9 +65,9 @@ else
 fi
 
 log "Waiting for process to start..."
-sleep 3
+sleep 5
 
-PID=$(pgrep -f "bun run .* eaglecontrol" || echo "")
+PID=$(ps aux | grep "bun run start" | grep "eaglecontrol" | grep -v grep | awk '{print $2}' | head -n 1)
 if [ -n "$PID" ]; then
     log "WebSocket server has been restarted successfully with PID $PID."
     run_cmd "ps -p $PID -o pid,cmd,etime"
