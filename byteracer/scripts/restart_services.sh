@@ -77,16 +77,16 @@ fi
 log "All services restart process completed."
 speak "All services restart process completed."
 
-# Function to check if a screen session exists
+# Function to check if a screen session exists (executed as pi)
 session_exists() {
-    screen -ls | grep -q "$1"
+    sudo -u pi screen -ls | grep -q "$1"
     return $?
 }
 
 # Verify all services are running
 all_running=true
 for session in "eaglecontrol" "relaytower" "byteracer"; do
-    if ! run_cmd "screen -list" | grep -q "$session"; then
+    if ! run_cmd "sudo -u pi screen -list" | grep -q "$session"; then
         log "Warning: $session is not running!"
         speak "Warning! $session is not running."
         all_running=false
@@ -101,7 +101,7 @@ run_cmd "ps aux | grep -E 'python3 main.py|bun run .* eaglecontrol|bun run .* re
 
 # Show screen sessions
 log "Screen sessions:"
-run_cmd "screen -list"
+run_cmd "sudo -u pi screen -list"
 
 if [ "$all_running" = true ]; then
     log "All services are now running correctly."

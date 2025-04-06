@@ -43,9 +43,9 @@ speak() {
 log "Restarting WebSocket server (eaglecontrol)..."
 speak "Restarting WebSocket service. Please wait."
 
-if screen -list | grep -q "eaglecontrol"; then
+if sudo -u pi screen -list | grep -q "eaglecontrol"; then
     log "Screen session 'eaglecontrol' found. Sending SIGINT for graceful shutdown..."
-    run_cmd "screen -S eaglecontrol -p 0 -X stuff \$'\003'"
+    run_cmd "sudo -u pi screen -S eaglecontrol -p 0 -X stuff \$'\003'"
     sleep 5  # Allow time for graceful shutdown
 
     PID=$(ps aux | grep "bun run start" | grep "eaglecontrol" | grep -v grep | awk '{print $2}' | head -n 1)
@@ -58,10 +58,10 @@ if screen -list | grep -q "eaglecontrol"; then
     fi
 
     log "Restarting WebSocket server in existing screen session..."
-    run_cmd "screen -S eaglecontrol -p 0 -X stuff \"cd ${BYTERACER_PATH}/eaglecontrol && bun run start$(printf '\\r')\""
+    run_cmd "sudo -u pi screen -S eaglecontrol -p 0 -X stuff \"cd ${BYTERACER_PATH}/eaglecontrol && bun run start$(printf '\\r')\""
 else
     log "Screen session 'eaglecontrol' not found. Creating new eaglecontrol screen session..."
-    run_cmd "screen -dmS eaglecontrol bash -c \"cd ${BYTERACER_PATH}/eaglecontrol && bun run start; exec bash\""
+    run_cmd "sudo -u pi screen -dmS eaglecontrol bash -c \"cd ${BYTERACER_PATH}/eaglecontrol && bun run start; exec bash\""
 fi
 
 log "Waiting for process to start..."

@@ -43,9 +43,9 @@ speak() {
 log "Restarting Web server (relaytower)..."
 speak "Restarting Web server. Please wait."
 
-if screen -list | grep -q "relaytower"; then
+if sudo -u pi screen -list | grep -q "relaytower"; then
     log "Screen session 'relaytower' found. Sending SIGINT for graceful shutdown..."
-    run_cmd "screen -S relaytower -p 0 -X stuff \$'\003'"
+    run_cmd "sudo -u pi screen -S relaytower -p 0 -X stuff \$'\003'"
     sleep 5  # Allow time for graceful shutdown
 
     PID=$(ps aux | grep "bun run start" | grep "relaytower" | grep -v grep | awk '{print $2}' | head -n 1)
@@ -58,10 +58,10 @@ if screen -list | grep -q "relaytower"; then
     fi
 
     log "Restarting Web server in existing screen session..."
-    run_cmd "screen -S relaytower -p 0 -X stuff \"cd ${BYTERACER_PATH}/relaytower && bun run start$(printf '\\r')\""
+    run_cmd "sudo -u pi screen -S relaytower -p 0 -X stuff \"cd ${BYTERACER_PATH}/relaytower && bun run start$(printf '\\r')\""
 else
     log "Screen session 'relaytower' not found. Creating new relaytower screen session..."
-    run_cmd "screen -dmS relaytower bash -c \"cd ${BYTERACER_PATH}/relaytower && bun run start; exec bash\""
+    run_cmd "sudo -u pi screen -dmS relaytower bash -c \"cd ${BYTERACER_PATH}/relaytower && bun run start; exec bash\""
 fi
 
 log "Waiting for process to start..."

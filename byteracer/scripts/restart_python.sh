@@ -43,11 +43,10 @@ speak() {
 log "Restarting Python controller..."
 speak "Restarting robot controller."
 
-# Check if the 'byteracer' screen session exists
-if screen -list | grep -q "byteracer"; then
+# Check if the 'byteracer' screen session exists (executed as pi)
+if sudo -u pi screen -list | grep -q "byteracer"; then
     log "Screen session 'byteracer' found. Sending SIGINT for graceful shutdown..."
-    # Send SIGINT (Ctrl+C) into the session to let the process shut down gracefully
-    run_cmd "screen -S byteracer -p 0 -X stuff \$'\003'"
+    run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \$'\003'"
     sleep 5  # Allow time for graceful shutdown
 
     # Check if the Python process is still running
@@ -61,11 +60,10 @@ if screen -list | grep -q "byteracer"; then
     fi
 
     log "Restarting Python controller in existing screen session..."
-    # Inject the restart command (with a carriage return) into the session
-    run_cmd "screen -S byteracer -p 0 -X stuff \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py$(printf '\\r')\""
+    run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py$(printf '\\r')\""
 else
     log "Screen session 'byteracer' not found. Creating a new session..."
-    run_cmd "screen -dmS byteracer bash -c \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py; exec bash\""
+    run_cmd "sudo -u pi screen -dmS byteracer bash -c \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py; exec bash\""
 fi
 
 log "Waiting for process to start..."
