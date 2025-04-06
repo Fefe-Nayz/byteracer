@@ -9,15 +9,11 @@ export default function PushToTalk() {
   const [isRecording, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<string>("idle");
-  
-  // Access WebSocket context – now we can send audio chunks via sendAudioStream
   const { status, sendAudioStream } = useWebSocket();
   
-  // Refs to hold the MediaRecorder and MediaStream
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
 
-  // Clean-up function to stop recording and release audio resources
   const cleanupRecording = useCallback(() => {
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
@@ -31,18 +27,24 @@ export default function PushToTalk() {
     setConnectionStatus("idle");
   }, []);
 
-  // Start recording and sending audio chunks
   const startRecording = async () => {
     try {
       setIsConnecting(true);
       setConnectionStatus("connecting");
       
-      // Get audio stream from the microphone
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
       
-      // Create a MediaRecorder – adjust the MIME type as needed (audio/webm is common)
-      const options = { mimeType: 'audio/webm' };
+      // Choose a MIME type that produces valid chunks
+      let options: MediaRecorderOptions = {};
+      if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        options.mimeType = 'audio/webm;codecs=opus';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        options.mimeType = 'audio/ogg;codecs=opus';
+      } else {
+        options.mimeType = 'audio/webm';
+      }
+      
       const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
       
@@ -52,7 +54,6 @@ export default function PushToTalk() {
         setConnectionStatus("recording");
       };
       
-      // When data is available, convert the Blob to a Base64 data URL and send it via WebSocket
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
           const reader = new FileReader();
@@ -69,8 +70,8 @@ export default function PushToTalk() {
         cleanupRecording();
       };
       
-      // Start recording and request a chunk every 250ms (tweak the interval as needed)
-      mediaRecorder.start(250);
+      // Increase the chunk time to around 1000ms to ensure a complete header
+      mediaRecorder.start(1000);
       setIsConnecting(false);
     } catch (error) {
       console.error("Error starting audio recording:", error);
@@ -79,7 +80,6 @@ export default function PushToTalk() {
     }
   };
 
-  // Stop recording and clean up resources
   const stopRecording = () => {
     cleanupRecording();
   };
