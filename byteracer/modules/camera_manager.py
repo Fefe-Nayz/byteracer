@@ -243,20 +243,15 @@ class CameraManager:
             bool: True if frames are different, False if identical
         """
         try:
-            # FOR TESTING PURPOSES: Always return False to simulate a frozen camera
-            # This will cause the freeze detection to always detect a frozen camera
-            return False
-            
-            # Original code (commented out for testing)
-            # # Make sure frames have the same shape
-            # if frame1.shape != frame2.shape:
-            #     # Different shapes means different frames
-            #     return True
-            #     
-            # # Check if frames are identical - np.array_equal is faster than pixel-by-pixel comparison
-            # # We could use a tolerance for minor differences, but for freeze detection 
-            # # we want to detect even small changes
-            # return not np.array_equal(frame1, frame2)
+            # Make sure frames have the same shape
+            if frame1.shape != frame2.shape:
+                # Different shapes means different frames
+                return True
+                
+            # Check if frames are identical - np.array_equal is faster than pixel-by-pixel comparison
+            # We could use a tolerance for minor differences, but for freeze detection 
+            # we want to detect even small changes
+            return not np.array_equal(frame1, frame2)
         except Exception as e:
             logger.error(f"Error comparing frames: {e}")
             # On error, assume frames are different to avoid false positives

@@ -1,9 +1,109 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { RefreshCw, Maximize, X, AlertCircle } from "lucide-react";
+import { RefreshCw, Maximize, X, AlertCircle, ChevronRight } from "lucide-react";
 import { Button } from "./ui/button";
 import { useWebSocket } from "@/contexts/WebSocketContext";
+
+// Memoized freeze notification component to prevent unnecessary re-renders
+const FreezeNotification = memo(({ 
+  isFullscreen, 
+  onRestart, 
+  onDismiss 
+}: { 
+  isFullscreen: boolean; 
+  onRestart: () => void; 
+  onDismiss: (e?: React.MouseEvent) => void; 
+}) => {
+  const [isHovered, setIsHovered] = useState(false);
+  
+  // For non-fullscreen mode, just show a button in the header
+  if (!isFullscreen) {
+    return (
+      <Button
+        variant="destructive"
+        size="sm"
+        onClick={onRestart}
+        className="h-8 px-2 flex items-center"
+      >
+        <AlertCircle className="h-4 w-4 mr-1" />
+        <span>Restart Camera</span>
+        <X
+          className="h-3.5 w-3.5 ml-2 opacity-70 hover:opacity-100"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDismiss(e);
+          }}
+        />
+      </Button>
+    );
+  }
+
+  // For fullscreen mode, show a notification that expands on hover
+  const baseClasses = "absolute top-6 left-6 z-50 rounded-md shadow-lg transition-all duration-300";
+  
+  if (isHovered) {
+    // Expanded notification
+    return (
+      <div
+        className={`${baseClasses} bg-destructive text-white p-4 max-w-md animate-in fade-in-0 duration-150`}
+        onMouseLeave={() => setIsHovered(false)}
+      >
+        <div className="flex items-start gap-3">
+          <div className="shrink-0">
+            <AlertCircle className="h-5 w-5" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-medium mb-1">Camera Feed Frozen</h3>
+            <p className="text-sm opacity-90 mb-3">
+              The camera feed appears to be frozen. Would you like to restart it?
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={onRestart}
+                className="text-black border-white hover:bg-white/20"
+              >
+                Restart Camera
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onDismiss}
+                className="text-white hover:bg-white/20"
+              >
+                Dismiss
+              </Button>
+            </div>
+          </div>
+          <button
+            onClick={onDismiss}
+            className="shrink-0 rounded-full p-1 transition-colors hover:bg-white/20"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    );
+  } else {
+    // Compact notification
+    return (
+      <div
+        className={`${baseClasses} bg-destructive text-white py-2 px-3 flex items-center cursor-pointer`}
+        onMouseEnter={() => setIsHovered(true)}
+      >
+        <AlertCircle className="h-4 w-4 mr-2" />
+        <span className="mr-2">Camera frozen</span>
+        <ChevronRight className="h-4 w-4 opacity-70" />
+      </div>
+    );
+  }
+});
+
+// Ensure the component has a display name for debugging
+FreezeNotification.displayName = "FreezeNotification";
 
 export default function CameraFeed() {
   // Use window.location.hostname to get the current server hostname dynamically
@@ -14,7 +114,15 @@ export default function CameraFeed() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [aspectRatio, setAspectRatio] = useState("4/3"); // Default aspect ratio
-  const [showFreezeNotification, setShowFreezeNotification] = useState(false);
+  
+  // Use refs for values that shouldn't trigger re-renders when they change
+  const isFrozenRef = useRef(false);
+  const userDismissedRef = useRef(false);
+  const prevFrozenStateRef = useRef(false);
+  
+  // State to force notification rendering - will only change when truly needed
+  const [notificationKey, setNotificationKey] = useState(0);
+  
   const { cameraStatus, restartCameraFeed } = useWebSocket();
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -32,15 +140,29 @@ export default function CameraFeed() {
     }
   }, []);
 
-  // Monitor camera status for freezes
+  // Monitor camera status for freezes - with a stable comparison approach
   useEffect(() => {
     if (!cameraStatus) return;
 
-    // Check if camera is in FROZEN state
-    if (cameraStatus.state === "FROZEN") {
-      setShowFreezeNotification(true);
-    } else {
-      setShowFreezeNotification(false);
+    const isCameraCurrentlyFrozen = cameraStatus.state === "FROZEN";
+    const wasFrozenBefore = prevFrozenStateRef.current;
+
+    // Only take action if the frozen state actually changed
+    if (isCameraCurrentlyFrozen !== wasFrozenBefore) {
+      prevFrozenStateRef.current = isCameraCurrentlyFrozen;
+      isFrozenRef.current = isCameraCurrentlyFrozen;
+      
+      if (isCameraCurrentlyFrozen) {
+        // Camera just became frozen
+        userDismissedRef.current = false;
+        // Force a notification update by changing the key
+        setNotificationKey(prev => prev + 1);
+      } else {
+        // Camera is no longer frozen
+        userDismissedRef.current = false;
+        // Force a notification update by changing the key
+        setNotificationKey(prev => prev + 1);
+      }
     }
 
     // Update aspect ratio based on camera resolution
@@ -105,25 +227,25 @@ export default function CameraFeed() {
     };
   }, [isFullscreen]);
 
-  const refreshStream = () => {
+  const refreshStream = useCallback(() => {
     setIsLoading(true);
     setError(null);
     setKey(Date.now()); // Change key to force img reload
-  };
+  }, []);
 
-  const handleImageLoad = () => {
+  const handleImageLoad = useCallback(() => {
     setIsLoading(false);
     setError(null);
-  };
+  }, []);
 
-  const handleImageError = () => {
+  const handleImageError = useCallback(() => {
     setIsLoading(false);
     setError(
       "Unable to connect to camera stream. Check if the camera is online."
     );
-  };
+  }, []);
 
-  const toggleFullscreen = () => {
+  const toggleFullscreen = useCallback(() => {
     if (!isFullscreen) {
       if (fullscreenContainerRef.current && document.fullscreenEnabled) {
         fullscreenContainerRef.current.requestFullscreen().catch((err) => {
@@ -140,59 +262,23 @@ export default function CameraFeed() {
       }
     }
     setIsFullscreen(!isFullscreen);
-  };
+  }, [isFullscreen]);
 
-  const restartCamera = () => {
+  const restartCamera = useCallback(() => {
     restartCameraFeed();
-  };
+  }, [restartCameraFeed]);
 
-  // Custom error bubble component for frozen camera
-  const FreezeNotification = ({
-    onClose,
-    onRestart,
-  }: {
-    onClose: () => void;
-    onRestart: () => void;
-  }) => (
-    <div className="absolute top-3 right-3 z-50 max-w-md p-4 bg-destructive text-white rounded-lg shadow-lg animate-in fade-in slide-in-from-top-5 duration-300">
-      <div className="flex items-start gap-3">
-        <div className="shrink-0">
-          <AlertCircle className="h-5 w-5" />
-        </div>
-        <div className="flex-1">
-          <h3 className="font-medium mb-1">Camera Feed Frozen</h3>
-          <p className="text-sm opacity-90 mb-3">
-            The camera feed appears to be frozen. Would you like to restart it?
-          </p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={onRestart}
-              className="text-white border-white hover:bg-white/20"
-            >
-              Restart Camera
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              className="text-white hover:bg-white/20"
-            >
-              Dismiss
-            </Button>
-          </div>
-        </div>
-        <button
-          onClick={onClose}
-          className="shrink-0 rounded-full p-1 transition-colors hover:bg-white/20"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
-  );
+  const dismissCurrentFreezeNotification = useCallback((e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    userDismissedRef.current = true;
+    // Force re-render of notification state
+    setNotificationKey(prev => prev + 1);
+  }, []);
+
+  // Determine if we should show the notification
+  const shouldShowNotification = isFrozenRef.current && !userDismissedRef.current;
 
   if (isFullscreen) {
     return (
@@ -245,28 +331,14 @@ export default function CameraFeed() {
           </div>
         )}
 
-        {/* Custom error bubble notification for frozen camera */}
-        {showFreezeNotification && (
-          <FreezeNotification
-            onClose={() => setShowFreezeNotification(false)}
+        {/* Freeze notification - only rendered when needed, with a stable key to prevent flickering */}
+        {shouldShowNotification && (
+          <FreezeNotification 
+            key={`fullscreen-notification-${notificationKey}`}
+            isFullscreen={true}
             onRestart={restartCamera}
+            onDismiss={dismissCurrentFreezeNotification}
           />
-        )}
-
-        {/* Camera frozen notification - visible even when controls are hidden */}
-        {cameraStatus?.state === "FROZEN" && (
-          <div className="absolute top-6 left-6 z-50 bg-destructive text-white p-3 rounded-md shadow-lg flex items-center">
-            <AlertCircle className="h-5 w-5 mr-2" />
-            <span className="mr-3">Camera feed frozen</span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={restartCamera}
-              className="mr-2 text-white border-white hover:bg-white/20"
-            >
-              Restart
-            </Button>
-          </div>
         )}
 
         {/* Exit fullscreen button - visible only on mouse movement */}
@@ -294,16 +366,14 @@ export default function CameraFeed() {
         <div className="flex justify-between items-center">
           <CardTitle className="text-lg">Camera Feed</CardTitle>
           <div className="flex gap-2">
-            {cameraStatus?.state === "FROZEN" && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={restartCamera}
-                className="h-8 px-2"
-              >
-                <AlertCircle className="h-4 w-4 mr-1" />
-                Restart Camera
-              </Button>
+            {/* Freeze notification for card view - only rendered when needed */}
+            {shouldShowNotification && (
+              <FreezeNotification 
+                key={`card-notification-${notificationKey}`}
+                isFullscreen={false}
+                onRestart={restartCamera}
+                onDismiss={dismissCurrentFreezeNotification}
+              />
             )}
             <Button
               variant="outline"
@@ -343,14 +413,6 @@ export default function CameraFeed() {
                 Try Again
               </Button>
             </div>
-          )}
-
-          {/* Custom error bubble notification for frozen camera */}
-          {showFreezeNotification && (
-            <FreezeNotification
-              onClose={() => setShowFreezeNotification(false)}
-              onRestart={restartCamera}
-            />
           )}
 
           {/* Blurred background version (full width) */}
