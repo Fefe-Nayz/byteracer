@@ -20,17 +20,13 @@ log() {
 run_cmd() {
     local cmd="$1"
     log "Executing: $cmd"
-    # Execute the command and capture its output while logging it
     output=$(eval "$cmd" 2>&1)
     exit_code=$?
-    
-    # Log the command output with timestamp for each line
     if [ -n "$output" ]; then
         echo "$output" | while IFS= read -r line; do
             log "  > $line"
         done
     fi
-    
     log "Command exit code: $exit_code"
     return $exit_code
 }
@@ -47,48 +43,34 @@ speak() {
 log "Restarting Python controller..."
 speak "Restarting robot controller."
 
-# Find and kill existing python process (without killing the screen)
-PID=$(pgrep -f "python3 main.py" || echo "")
-if [ -n "$PID" ]; then
-    log "Found Python controller process with PID $PID, sending SIGINT (graceful shutdown)..."
-    run_cmd "kill -2 $PID"  # Send SIGINT (equivalent to Ctrl+C)
-    
-    # Wait for process to terminate (max 10 seconds)
-    COUNTER=0
-    while kill -0 $PID 2>/dev/null && [ $COUNTER -lt 10 ]; do
-        log "Waiting for Python process to exit... ($COUNTER/10)"
-        sleep 1
-        COUNTER=$((COUNTER+1))
-    done
-    
-    # Force kill if still running
-    if kill -0 $PID 2>/dev/null; then
-        log "Python process didn't exit gracefully, force killing..."
+# Check if the 'byteracer' screen session exists
+if screen -list | grep -q "byteracer"; then
+    log "Screen session 'byteracer' found. Sending SIGINT for graceful shutdown..."
+    # Send SIGINT (Ctrl+C) into the session to let the process shut down gracefully
+    run_cmd "screen -S byteracer -p 0 -X stuff \$'\003'"
+    sleep 5  # Allow time for graceful shutdown
+
+    # Check if the Python process is still running
+    PID=$(pgrep -f "python3 main.py" || echo "")
+    if [ -n "$PID" ]; then
+        log "Python process did not exit gracefully after SIGINT, force killing PID $PID..."
         run_cmd "kill -9 $PID"
         sleep 2
     else
         log "Python process exited gracefully."
     fi
-else
-    log "No Python controller process found running."
-fi
 
-# Check if screen session exists
-if ! run_cmd "screen -list" | grep -q "byteracer"; then
-    log "Creating new byteracer screen session..."
-    # Start in a new screen session
-    run_cmd "screen -dmS byteracer bash -c \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py; exec bash\""
-else
     log "Restarting Python controller in existing screen session..."
-    # Send command to restart Python in the screen session
-    run_cmd "screen -S byteracer -X stuff \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py^M\""
+    # Inject the restart command (with a carriage return) into the session
+    run_cmd "screen -S byteracer -p 0 -X stuff \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py$(printf '\\r')\""
+else
+    log "Screen session 'byteracer' not found. Creating a new session..."
+    run_cmd "screen -dmS byteracer bash -c \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py; exec bash\""
 fi
 
-# Give it a moment to start
 log "Waiting for process to start..."
 sleep 3
 
-# Verify the service is running
 PID=$(pgrep -f "python3 main.py" || echo "")
 if [ -n "$PID" ]; then
     log "Python controller has been restarted successfully with PID $PID."

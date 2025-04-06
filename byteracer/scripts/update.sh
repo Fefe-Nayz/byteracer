@@ -21,17 +21,13 @@ log() {
 run_cmd() {
     local cmd="$1"
     log "Executing: $cmd"
-    # Execute the command and capture its output while logging it
     output=$(eval "$cmd" 2>&1)
     exit_code=$?
-    
-    # Log the command output with timestamp for each line
     if [ -n "$output" ]; then
         echo "$output" | while IFS= read -r line; do
             log "  > $line"
         done
     fi
-    
     log "Command exit code: $exit_code"
     return $exit_code
 }

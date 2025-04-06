@@ -20,17 +20,13 @@ log() {
 run_cmd() {
     local cmd="$1"
     log "Executing: $cmd"
-    # Execute the command and capture its output while logging it
     output=$(eval "$cmd" 2>&1)
     exit_code=$?
-    
-    # Log the command output with timestamp for each line
     if [ -n "$output" ]; then
         echo "$output" | while IFS= read -r line; do
             log "  > $line"
         done
     fi
-    
     log "Command exit code: $exit_code"
     return $exit_code
 }
@@ -47,48 +43,30 @@ speak() {
 log "Restarting Web server (relaytower)..."
 speak "Restarting Web server. Please wait."
 
-# Find and kill existing bun process for relaytower (without killing the screen)
-PID=$(pgrep -f "bun run .* relaytower" || echo "")
-if [ -n "$PID" ]; then
-    log "Found Web server process with PID $PID, sending SIGINT (graceful shutdown)..."
-    run_cmd "kill -2 $PID"  # Send SIGINT (equivalent to Ctrl+C)
-    
-    # Wait for process to terminate (max 10 seconds)
-    COUNTER=0
-    while kill -0 $PID 2>/dev/null && [ $COUNTER -lt 10 ]; do
-        log "Waiting for Web server process to exit... ($COUNTER/10)"
-        sleep 1
-        COUNTER=$((COUNTER+1))
-    done
-    
-    # Force kill if still running
-    if kill -0 $PID 2>/dev/null; then
-        log "Web server process didn't exit gracefully, force killing..."
-        run_cmd "kill -9 $PID"
-        sleep 2
+if screen -list | grep -q "relaytower"; then
+    log "Screen session 'relaytower' found. Sending SIGINT for graceful shutdown..."
+    run_cmd "screen -S relaytower -p 0 -X stuff \$'\003'"
+    sleep 5  # Allow time for graceful shutdown
+
+    PID=$(pgrep -f "bun run .* relaytower" || echo "")
+    if [ -n "$PID" ]; then
+         log "Web server process did not exit gracefully, force killing PID $PID..."
+         run_cmd "kill -9 $PID"
+         sleep 2
     else
-        log "Web server process exited gracefully."
+         log "Web server process exited gracefully."
     fi
-else
-    log "No Web server process found running."
-fi
 
-# Check if screen session exists
-if ! run_cmd "screen -list" | grep -q "relaytower"; then
-    log "Creating new relaytower screen session..."
-    # Start in a new screen session
-    run_cmd "screen -dmS relaytower bash -c \"cd ${BYTERACER_PATH}/relaytower && bun run start; exec bash\""
-else
     log "Restarting Web server in existing screen session..."
-    # Send command to restart Web server in the screen session
-    run_cmd "screen -S relaytower -X stuff \"cd ${BYTERACER_PATH}/relaytower && bun run start^M\""
+    run_cmd "screen -S relaytower -p 0 -X stuff \"cd ${BYTERACER_PATH}/relaytower && bun run start$(printf '\\r')\""
+else
+    log "Screen session 'relaytower' not found. Creating new relaytower screen session..."
+    run_cmd "screen -dmS relaytower bash -c \"cd ${BYTERACER_PATH}/relaytower && bun run start; exec bash\""
 fi
 
-# Give it a moment to start
 log "Waiting for process to start..."
 sleep 3
 
-# Verify the service is running
 PID=$(pgrep -f "bun run .* relaytower" || echo "")
 if [ -n "$PID" ]; then
     log "Web server has been restarted successfully with PID $PID."

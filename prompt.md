@@ -112,7 +112,6 @@ PUR PYTHON:
 - Implémenter l'intégration avec chatGPT
 
 CLIENT + PYTHON:
-- Ajouter un bouton pour changer de branche
 - Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
 
 PUR CLIENT:

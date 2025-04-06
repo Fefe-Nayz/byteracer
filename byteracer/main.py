@@ -1022,15 +1022,16 @@ class ByteRacer:
                 threading.Timer(2.0, lambda: subprocess.run("sudo shutdown -h now", shell=True)).start()
                 
             elif command == "restart_all_services":
+
+                result["success"] = True
+                result["message"] = "All services restarted"
                 # Restart all three services
-                success = subprocess.run(
-                    f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/restart_services.sh",
-                    shell=True,
-                    check=False
-                ).returncode == 0
-                
-                result["success"] = success
-                result["message"] = "All services restarted" if success else "Failed to restart services"
+                subprocess.Popen(
+                    ["sudo", "bash", f"{PROJECT_DIR}/byteracer/scripts/restart_services.sh"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
                 
             elif command == "restart_websocket":
                 # Restart just the WebSocket service
@@ -1062,7 +1063,7 @@ class ByteRacer:
                 
                 # Run restart_python.sh in a new session so it stays alive
                 subprocess.Popen(
-                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/restart_python.sh"],
+                    ["sudo", "bash", f"{PROJECT_DIR}/byteracer/scripts/restart_python.sh"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
@@ -1078,14 +1079,16 @@ class ByteRacer:
                 
             elif command == "check_for_updates":
                 # Check for updates
-                success = subprocess.run(
-                    f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/update.sh",
-                    shell=True,
-                    check=False
-                ).returncode == 0
                 
-                result["success"] = success
-                result["message"] = "Update check completed" if success else "Failed to check for updates"
+                result["success"] = True
+                result["message"] = "Update check completed"
+
+                subprocess.Popen(
+                    ["sudo", "bash", f"{PROJECT_DIR}/byteracer/scripts/update.sh"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
                 
             elif command == "emergency_stop":
                 # Trigger emergency stop
