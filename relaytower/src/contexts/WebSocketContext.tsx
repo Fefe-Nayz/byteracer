@@ -26,16 +26,12 @@ export type WebSocketMessageType =
   | "network_scan"
   | "network_list"
   | "network_update"
-  | "webrtc_offer"
-  | "webrtc_answer"
-  | "webrtc_ice_candidate"
-  | "webrtc_disconnect"
-
+  | "audio_stream"
 // Define WebSocket connection status type
 export type WebSocketStatus = "connecting" | "connected" | "disconnected";
 
 // Define robot command types
-export type RobotCommand = 
+export type RobotCommand =
   | "restart_robot"
   | "stop_robot"
   | "restart_all_services"
@@ -48,10 +44,10 @@ export type RobotCommand =
   | "clear_emergency";
 
 // Define network action types
-export type NetworkAction = 
+export type NetworkAction =
   | "connect_wifi"
   | "create_ap"
-  | "add_network" 
+  | "add_network"
   | "remove_network"
   | "update_ap_settings"
   | "connect_wifi_mode"
@@ -179,7 +175,7 @@ interface WebSocketContextValue {
   setCustomWsUrl: (url: string | null) => void;
   customCameraUrl: string | null;
   setCustomCameraUrl: (url: string | null) => void;
-  
+
   // Data state
   batteryLevel: number | null;
   sensorData: SensorData | null;
@@ -188,7 +184,7 @@ interface WebSocketContextValue {
   commandResponse: CommandResponse | null;
   logs: LogMessage[];
   clearLogs: () => void;
-  
+
   // Commands
   sendGamepadState: (gamepadState: Record<string, boolean | string | number>) => void;
   sendRobotCommand: (command: RobotCommand) => void;
@@ -204,12 +200,7 @@ interface WebSocketContextValue {
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
   sendGptCommand: (prompt: string, useCamera: boolean) => void;
-  
-  // WebRTC Methods
-  sendWebRTCOffer: (offer: RTCSessionDescriptionInit) => void;
-  sendWebRTCAnswer: (answer: RTCSessionDescriptionInit) => void;
-  sendWebRTCIceCandidate: (candidate: RTCIceCandidate) => void;
-  sendWebRTCDisconnect: () => void;
+  sendAudioStream: (audioData: string) => void;
 }
 
 // Create context with default values
@@ -224,7 +215,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [pingTime, setPingTime] = useState<number | null>(null);
   const [customWsUrl, setCustomWsUrl] = useState<string | null>(null);
   const [customCameraUrl, setCustomCameraUrl] = useState<string | null>(null);
-  
+
   // Data state
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
   const [sensorData, setSensorData] = useState<SensorData | null>(null);
@@ -232,37 +223,37 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<RobotSettings | null>(null);
   const [commandResponse, setCommandResponse] = useState<CommandResponse | null>(null);
   const [logs, setLogs] = useState<LogMessage[]>([]);
-  
+
   // Function to clear logs
   const clearLogs = useCallback(() => {
     setLogs([]);
   }, []);
-  
+
   // Refs
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
-  
+
   // Connect to WebSocket
   const connect = useCallback(() => {
     setReconnectTrigger(prev => prev + 1);
   }, []);
-  
+
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
     if (socketRef.current) {
-      if (socketRef.current.readyState === WebSocket.OPEN || 
-          socketRef.current.readyState === WebSocket.CONNECTING) {
+      if (socketRef.current.readyState === WebSocket.OPEN ||
+        socketRef.current.readyState === WebSocket.CONNECTING) {
         socketRef.current.close();
       }
     }
   }, []);
-  
+
   // WebSocket connection effect
   useEffect(() => {
     // Clean up any existing socket first
     if (socket) {
-      if (socket.readyState === WebSocket.OPEN || 
-          socket.readyState === WebSocket.CONNECTING) {
+      if (socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING) {
         socket.close();
       }
       if (pingIntervalRef.current) {
@@ -308,7 +299,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
       // Request battery level immediately after connection
       requestBatteryLevel();
-      
+
       // Request settings immediately after connection - directly send the request
       // instead of calling requestSettings() to avoid closure issues
       const settingsRequestData = {
@@ -373,7 +364,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             const latency = now - event.data.sentAt;
             setPingTime(latency);
             break;
-            
+
           case "battery_info":
             setBatteryLevel(event.data.level);
             window.dispatchEvent(
@@ -382,21 +373,21 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               })
             );
             break;
-            
+
           case "sensor_data":
             setSensorData(event.data);
             break;
-            
+
           case "camera_status":
             setCameraStatus(event.data);
             break;
-            
+
           case "settings":
             if (event.data.settings) {
               setSettings(event.data.settings);
             }
             break;
-            
+
           case "command_response":
             setCommandResponse(event.data);
             // Dispatch event for other components
@@ -406,7 +397,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               })
             );
             break;
-            
+
           case "network_list":
             // Dispatch event for network settings component
             window.dispatchEvent(
@@ -415,7 +406,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               })
             );
             break;
-            
+
           case "gpt_response":
             // Dispatch event for GPT response handler
             window.dispatchEvent(
@@ -431,41 +422,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               // Keep only the most recent 500 logs to avoid memory issues
               return newLogs.slice(-500);
             });
-            break;
-          case "webrtc_offer":
-            // Forward WebRTC offer to client-side handlers
-            window.dispatchEvent(
-              new CustomEvent("webrtc:offer", {
-                detail: event.data.offer
-              })
-            );
-            break;
-            
-          case "webrtc_answer":
-            // Forward WebRTC answer to client-side handlers
-            window.dispatchEvent(
-              new CustomEvent("webrtc:answer", {
-                detail: event.data.answer
-              })
-            );
-            break;
-            
-          case "webrtc_ice_candidate":
-            // Forward WebRTC ICE candidate to client-side handlers
-            window.dispatchEvent(
-              new CustomEvent("webrtc:ice-candidate", {
-                detail: event.data.candidate
-              })
-            );
-            break;
-            
-          case "webrtc_disconnect":
-            // Handle WebRTC disconnect request
-            window.dispatchEvent(
-              new CustomEvent("webrtc:disconnect", {
-                detail: { timestamp: event.data.timestamp }
-              })
-            );
             break;
         }
       } catch (e) {
@@ -483,8 +439,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
       }
-      if (ws.readyState === WebSocket.OPEN || 
-          ws.readyState === WebSocket.CONNECTING) {
+      if (ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING) {
         ws.close();
       }
     };
@@ -806,94 +762,28 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       });
     }
   }, [socket]);
-
-  // WebRTC signaling functions
-  const sendWebRTCOffer = useCallback((offer: RTCSessionDescriptionInit) => {
+  // Function to send audio stream data
+  const sendAudioStream = useCallback((audioData: string) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
-      const offerData = {
-        name: "webrtc_offer",
+      const message = {
+        name: "audio_stream",
         data: {
-          offer,
+          audio: audioData,
           timestamp: Date.now(),
         },
         createdAt: Date.now(),
       };
-
-      socket.send(JSON.stringify(offerData));
-      trackWsMessage("sent", offerData);
-      console.log("WebRTC offer sent");
+      socket.send(JSON.stringify(message));
+      trackWsMessage("sent", message);
+      console.log("Audio stream chunk sent");
     } else {
-      logError("Cannot send WebRTC offer", {
+      logError("Cannot send audio stream", {
         reason: "Socket not connected",
         readyState: socket?.readyState,
       });
     }
   }, [socket]);
 
-  const sendWebRTCAnswer = useCallback((answer: RTCSessionDescriptionInit) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const answerData = {
-        name: "webrtc_answer",
-        data: {
-          answer,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
-
-      socket.send(JSON.stringify(answerData));
-      trackWsMessage("sent", answerData);
-      console.log("WebRTC answer sent");
-    } else {
-      logError("Cannot send WebRTC answer", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
-
-  const sendWebRTCIceCandidate = useCallback((candidate: RTCIceCandidate) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const candidateData = {
-        name: "webrtc_ice_candidate",
-        data: {
-          candidate,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
-
-      socket.send(JSON.stringify(candidateData));
-      trackWsMessage("sent", candidateData);
-      console.log("WebRTC ICE candidate sent");
-    } else {
-      logError("Cannot send WebRTC ICE candidate", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
-
-  const sendWebRTCDisconnect = useCallback(() => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const disconnectData = {
-        name: "webrtc_disconnect",
-        data: {
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
-
-      socket.send(JSON.stringify(disconnectData));
-      trackWsMessage("sent", disconnectData);
-      console.log("WebRTC disconnect sent");
-    } else {
-      logError("Cannot send WebRTC disconnect", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
 
   // Combine all values and functions for the context
   const contextValue: WebSocketContextValue = {
@@ -906,7 +796,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     setCustomWsUrl,
     customCameraUrl,
     setCustomCameraUrl,
-    
+
     // Data state
     batteryLevel,
     sensorData,
@@ -915,7 +805,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     commandResponse,
     logs,
     clearLogs,
-    
+
     // Commands
     sendGamepadState,
     sendRobotCommand,
@@ -931,10 +821,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     scanNetworks,
     updateNetwork,
     sendGptCommand,
-    sendWebRTCOffer,
-    sendWebRTCAnswer,
-    sendWebRTCIceCandidate,
-    sendWebRTCDisconnect,
+    sendAudioStream,
   };
 
   return (

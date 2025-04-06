@@ -53,10 +53,6 @@ type WebSocketEventName =
   | "network_scan"        // For requesting network scan
   | "network_list"        // For receiving network list
   | "network_update"      // For updating network settings
-  | "webrtc_offer"        // For WebRTC signaling - offer
-  | "webrtc_answer"       // For WebRTC signaling - answer
-  | "webrtc_ice_candidate" // For WebRTC signaling - ICE candidates
-  | "webrtc_disconnect"   // For WebRTC signaling - disconnect
   | "audio_stream"        // For streaming audio data to the robot
   | "log_message";
 
@@ -329,50 +325,15 @@ const wsHandlers = {
           broadcastToType(message, "car", ws);
           break;
 
-        // WebRTC signaling messages
-        case "webrtc_offer":
-          console.log("WebRTC offer received from: " + client.type);
+        // Existing cases ...
+        case "audio_stream":
+          console.log("Audio stream received");
+          // Forward the audio stream from a controller to all connected cars
           if (client.type === "controller") {
-            // Forward offer from controller to cars
             broadcastToType(message, "car", ws);
-          } else if (client.type === "car") {
-            // Forward offer from car to all controllers
-            broadcastToType(message, "controller", ws);
           }
           break;
 
-        case "webrtc_answer":
-          console.log("WebRTC answer received from: " + client.type);
-          if (client.type === "controller") {
-            // Forward answer from controller to cars
-            broadcastToType(message, "car", ws);
-          } else if (client.type === "car") {
-            // Forward answer from car to all controllers
-            broadcastToType(message, "controller", ws);
-          }
-          break;
-
-        case "webrtc_ice_candidate":
-          // Avoid logging too much for ICE candidates
-          if (client.type === "controller") {
-            // Forward ICE candidate from controller to cars
-            broadcastToType(message, "car", ws);
-          } else if (client.type === "car") {
-            // Forward ICE candidate from car to all controllers
-            broadcastToType(message, "controller", ws);
-          }
-          break;
-
-        case "webrtc_disconnect":
-          console.log("WebRTC disconnect received from: " + client.type);
-          if (client.type === "controller") {
-            // Forward disconnect from controller to cars
-            broadcastToType(message, "car", ws);
-          } else if (client.type === "car") {
-            // Forward disconnect from car to all controllers
-            broadcastToType(message, "controller", ws);
-          }
-          break;
 
         case "log_message":
           // Forward log messages to all controllers and viewers

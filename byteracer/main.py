@@ -23,7 +23,6 @@ from modules.config_manager import ConfigManager
 from modules.log_manager import LogManager
 from modules.gpt_manager import GPTManager
 from modules.network_manager import NetworkManager
-from modules.webrtc_manager import WebRTCManager
 
 # Define project directory
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
@@ -47,9 +46,6 @@ class ByteRacer:
         self.camera_manager = CameraManager(vflip=False, hflip=False, local=False, web=True)
         self.network_manager = NetworkManager()
         self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager)
-        
-        # Initialize WebRTC manager
-        self.webrtc_manager = WebRTCManager(sound_manager=self.sound_manager)
         
         # WebSocket state
         self.websocket = None
@@ -511,73 +507,28 @@ class ByteRacer:
                 
                 # Announce via TTS
                 await self.tts_manager.say(f"Settings reset to defaults{' for ' + section if section else ''}", priority=1)
-            
-            elif data["name"] == "webrtc_offer":
-                # Handle WebRTC offer
-                if "offer" in data["data"]:
-                    offer_data = data["data"]["offer"]
-                    logging.info("Received WebRTC offer from client")
-                    
-                    # Process the offer and generate an answer
+
+            elif data["name"] == "audio_stream":
+                # Handle audio stream: Base64 encoded audio data from the web client
+                audio_base64 = data["data"].get("audio")
+                if audio_base64:
                     try:
-                        answer = await self.webrtc_manager.handle_offer(offer_data)
-                        
-                        # Send the answer back to the client
-                        if answer:
-                            await self.websocket.send(json.dumps({
-                                "name": "webrtc_answer",
-                                "data": {
-                                    "answer": answer,
-                                    "timestamp": int(time.time() * 1000)
-                                },
-                                "createdAt": int(time.time() * 1000)
-                            }))
-                            logging.info("Sent WebRTC answer to client")
+                        import base64, tempfile
+                        # If the data URL header exists, remove it
+                        if audio_base64.startswith("data:"):
+                            header, encoded = audio_base64.split(",", 1)
+                        else:
+                            encoded = audio_base64
+                        audio_bytes = base64.b64decode(encoded)
+                        # Save to a temporary file; here we use .webm as that's what the browser is sending.
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio_file:
+                            temp_audio_file.write(audio_bytes)
+                            temp_file_path = temp_audio_file.name
+                        logging.info(f"Received audio chunk, saved to temporary file: {temp_file_path}")
+                        # Use the sound manager to play the voice stream; this assumes that play_voice_stream can handle .webm files (or that your system has ffmpeg installed to do conversion)
+                        self.sound_manager.play_voice_stream(temp_file_path)
                     except Exception as e:
-                        logging.error(f"Error processing WebRTC offer: {e}")
-                        await self.send_command_response({
-                            "success": False,
-                            "message": f"Error processing WebRTC offer: {str(e)}"
-                        })
-            
-            elif data["name"] == "webrtc_answer":
-                # Handle WebRTC answer
-                if "answer" in data["data"]:
-                    answer_data = data["data"]["answer"]
-                    logging.info("Received WebRTC answer from client")
-                    
-                    try:
-                        await self.webrtc_manager.handle_answer(answer_data)
-                    except Exception as e:
-                        logging.error(f"Error processing WebRTC answer: {e}")
-            
-            elif data["name"] == "webrtc_ice_candidate":
-                # Handle WebRTC ICE candidate
-                if "candidate" in data["data"]:
-                    candidate_data = data["data"]["candidate"]
-                    logging.debug("Received WebRTC ICE candidate from client")
-                    
-                    try:
-                        await self.webrtc_manager.handle_ice_candidate(candidate_data)
-                    except Exception as e:
-                        logging.error(f"Error processing WebRTC ICE candidate: {e}")
-            
-            elif data["name"] == "webrtc_disconnect":
-                # Handle WebRTC disconnect request
-                logging.info("Received WebRTC disconnect request from client")
-                
-                try:
-                    await self.webrtc_manager.close_connection()
-                    await self.send_command_response({
-                        "success": True,
-                        "message": "WebRTC connection closed"
-                    })
-                except Exception as e:
-                    logging.error(f"Error disconnecting WebRTC: {e}")
-                    await self.send_command_response({
-                        "success": False,
-                        "message": f"Error disconnecting WebRTC: {str(e)}"
-                    })
+                        logging.error(f"Error processing audio_stream: {e}")
                 
             else:
                 logging.info(f"Received message of type: {data['name']}")
