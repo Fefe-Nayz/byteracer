@@ -97,8 +97,8 @@ export default function WebSocketStatus() {
         {pythonStatus !== null && (
           <div className="flex items-center mt-3 pt-2 border-t border-gray-200">
             <span className="text-sm font-medium">Python Status:</span>
-            <span className={`ml-2 text-xs font-medium ${pythonStatus === "connected" ? "text-green-500" : "text-red-500"}`}>
-              {pythonStatus === "connected" ? "Connected" : "Disconnected"}
+            <span className={`ml-2 text-xs font-medium ${status === "connected" && pythonStatus === "connected" ? "text-green-500" : "text-red-500"}`}>
+              {status === "connected" && pythonStatus === "connected" ? "Connected" : "Disconnected"}
             </span>
           </div>
         )}

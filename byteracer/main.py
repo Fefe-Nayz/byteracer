@@ -38,12 +38,31 @@ class ByteRacer:
         # Then initialize hardware
         self.px = Picarx()
         
-        # Initialize managers - order matters for dependencies
+        # Initialize config manager first to get camera settings
         self.config_manager = ConfigManager()
+        
+        # Get camera settings from config
+        camera_config = self.config_manager.get("camera")
+        vflip = camera_config.get("vflip", False)
+        hflip = camera_config.get("hflip", False)
+        local_display = camera_config.get("local_display", False)
+        web_display = camera_config.get("web_display", True)
+        camera_size = tuple(camera_config.get("camera_size", [1920, 1080]))
+        
+        # Initialize managers - order matters for dependencies
         self.sound_manager = SoundManager()  # Initialize sound manager first
         self.tts_manager = TTSManager(sound_manager=self.sound_manager)  # Pass sound manager to TTS manager
         self.sensor_manager = SensorManager(self.px, self.handle_emergency)
-        self.camera_manager = CameraManager(vflip=False, hflip=False, local=False, web=True)
+        
+        # Initialize camera with config settings directly
+        self.camera_manager = CameraManager(
+            vflip=vflip, 
+            hflip=hflip, 
+            local=local_display, 
+            web=web_display, 
+            camera_size=camera_size
+        )
+        
         self.network_manager = NetworkManager()
         self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager)
         
@@ -171,17 +190,6 @@ class ByteRacer:
         if "emergency_tts_volume" in settings["sound"]:
             self.tts_manager.set_emergency_tts_volume(settings["sound"]["emergency_tts_volume"])
 
-        # Apply camera settings
-        restart_camera = self.camera_manager.update_settings(
-            vflip=settings["camera"]["vflip"],
-            hflip=settings["camera"]["hflip"],
-            local=settings["camera"]["local_display"],
-            web=settings["camera"]["web_display"],
-            camera_size=tuple(settings["camera"]["camera_size"])  # Convert list to tuple
-        )
-        if restart_camera:
-            await self.camera_manager.restart()
-        
         # Apply safety settings
         self.sensor_manager.set_collision_avoidance(settings["safety"]["collision_avoidance"])
         self.sensor_manager.set_edge_detection(settings["safety"]["edge_detection"])
@@ -1027,7 +1035,7 @@ class ByteRacer:
                 result["message"] = "All services restarted"
                 # Restart all three services
                 subprocess.Popen(
-                    ["sudo", "bash", f"{PROJECT_DIR}/byteracer/scripts/restart_services.sh"],
+                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/restart_services.sh"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
@@ -1057,13 +1065,13 @@ class ByteRacer:
                 
             elif command == "restart_python_service":
                 # Restart just the Python service
-                await self.tts_manager.say("Restarting Python controller. Goodbye!", priority=2, blocking=True)
+
                 result["success"] = True
                 result["message"] = "Python service will restart"
                 
                 # Run restart_python.sh in a new session so it stays alive
                 subprocess.Popen(
-                    ["sudo", "bash", f"{PROJECT_DIR}/byteracer/scripts/restart_python.sh"],
+                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/restart_python.sh"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
@@ -1084,7 +1092,7 @@ class ByteRacer:
                 result["message"] = "Update check completed"
 
                 subprocess.Popen(
-                    ["sudo", "bash", f"{PROJECT_DIR}/byteracer/scripts/update.sh"],
+                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/update.sh"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     start_new_session=True
