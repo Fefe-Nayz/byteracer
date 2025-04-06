@@ -2,6 +2,8 @@ import asyncio
 import time
 import logging
 import threading
+import subprocess
+import re
 from enum import Enum, auto
 from vilib import Vilib
 
@@ -18,7 +20,7 @@ class CameraState(Enum):
 class CameraManager:
     """
     Manages the camera feed and monitoring.
-    Detects camera issues and handles restart requests.
+    Handles restart requests initiated by client.
     """
     def __init__(self, vflip=False, hflip=False, local=False, web=True):
         self.vflip = vflip
@@ -28,23 +30,20 @@ class CameraManager:
         self.state = CameraState.INACTIVE
         self.last_error = None
         self.last_start_time = 0
-        self.last_health_check = 0
-        self.health_check_interval = 5  # seconds
-        self.max_restart_attempts = 3
         self.restart_attempts = 0
+        self.max_restart_attempts = 3
         self.restart_cooldown = 10  # seconds
         self.status_callback = None
         
         # Access to shared data
         self._lock = threading.Lock()
-        self._health_check_task = None
         self._running = True
         
         logger.info("Camera Manager initialized")
     
     async def start(self, status_callback=None):
         """
-        Start the camera and monitoring.
+        Start the camera.
         
         Args:
             status_callback (callable): Optional callback for status updates
@@ -54,29 +53,16 @@ class CameraManager:
         # Start the camera
         success = await self._start_camera()
         
-        # Begin health monitoring if camera started successfully
-        if success:
-            self._health_check_task = asyncio.create_task(self._monitor_camera_health())
-            logger.info("Camera health monitoring started")
-        
         return success
     
     async def stop(self):
-        """Stop the camera and monitoring"""
+        """Stop the camera"""
         self._running = False
-        
-        # Cancel the health check task
-        if self._health_check_task:
-            self._health_check_task.cancel()
-            try:
-                await self._health_check_task
-            except asyncio.CancelledError:
-                pass
         
         # Close the camera
         with self._lock:
             if self.state != CameraState.INACTIVE:
-                self._close_camera()
+                await self._close_camera_completely()
                 self.state = CameraState.INACTIVE
         
         logger.info("Camera stopped")
@@ -128,123 +114,131 @@ class CameraManager:
                 return False
     
     def _close_camera(self):
-        """Close the camera safely"""
+        """Close the camera safely using vilib"""
         try:
             Vilib.camera_close()
-            logger.info("Camera closed successfully")
+            logger.info("Camera closed via vilib")
             return True
         except Exception as e:
-            logger.error(f"Error closing camera: {e}")
+            logger.error(f"Error closing camera via vilib: {e}")
             return False
     
-    async def _monitor_camera_health(self):
-        """Monitor camera health periodically"""
-        logger.info("Starting camera health monitoring")
-        
-        while self._running:
-            try:
-                now = time.time()
-                
-                # Only check health at specified intervals
-                if now - self.last_health_check >= self.health_check_interval:
-                    self.last_health_check = now
-                    
-                    with self._lock:
-                        # Only check if camera should be running
-                        if self.state == CameraState.RUNNING:
-                            # Check if camera is still responsive
-                            # This depends on how vilib provides camera status
-                            # For now, we'll use a simple approach
-                            is_healthy = self._check_camera_health()
-                            
-                            if not is_healthy:
-                                logger.warning("Camera health check failed")
-                                await self._handle_camera_failure("Health check failed")
-                
-                # Sleep a bit to avoid tight loop
-                await asyncio.sleep(1)
-                
-            except asyncio.CancelledError:
-                logger.info("Camera health monitoring cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Error in camera health monitoring: {e}")
-                await asyncio.sleep(2)  # Longer sleep on error
-    
-    def _check_camera_health(self):
+    async def _run_libcamera_hello(self, timeout=60):
         """
-        Check if the camera is responsive and working properly.
+        Run libcamera-hello to check camera availability and wait for it to finish.
+        
+        Args:
+            timeout (int): Maximum time to wait for camera to become available
         
         Returns:
-            bool: True if camera is healthy, False otherwise
+            bool: True if camera became available, False if still unavailable after timeout
         """
-        try:
-            # check if the camera feed (localhost:9000/mjpeg) is accessible and not frozen
-
-
-            return True
-        except Exception as e:
-            logger.error(f"Camera health check error: {e}")
-            return False
+        logger.info("Running libcamera-hello to test camera availability")
+        
+        process = await asyncio.create_subprocess_exec(
+            "sudo", "libcamera-hello",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT
+        )
+        
+        start_time = time.time()
+        camera_available = False
+        output_lines = []
+        
+        while True:
+            # Check if we've exceeded timeout
+            if time.time() - start_time > timeout:
+                logger.error(f"Timeout waiting for camera to become available")
+                try:
+                    process.terminate()
+                except:
+                    pass
+                break
+            
+            # Read line from process output
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), 1.0)
+                if not line:
+                    break
+                
+                line_str = line.decode('utf-8', errors='replace').strip()
+                output_lines.append(line_str)
+                
+                # Log output for debugging
+                logger.debug(f"libcamera-hello output: {line_str}")
+                
+                # Check for successful initialization pattern
+                # This indicates camera is not in use by another process
+                if re.search(r'#\d+ \(\d+\.\d+ fps\)', line_str):
+                    camera_available = True
+                    logger.info("Camera appears to be available (seeing frame rates)")
+                    try:
+                        process.terminate()
+                    except:
+                        pass
+                    break
+                
+                # Check for error pattern indicating camera is in use
+                if "Camera pipeline handler in use by another process" in line_str or \
+                   "failed to acquire camera" in line_str or \
+                   "Camera.cpp:1008 Pipeline handler in use by another process" in line_str:
+                    logger.warning("Camera still in use by another process")
+                    # Don't break here, continue waiting until timeout
+            
+            except asyncio.TimeoutError:
+                # This is just the read timeout, continue waiting
+                await asyncio.sleep(0.1)
+                continue
+            except Exception as e:
+                logger.error(f"Error reading libcamera-hello output: {e}")
+                break
+        
+        # Ensure process is terminated
+        if process.returncode is None:
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), 5.0)
+            except:
+                pass
+        
+        if not camera_available:
+            logger.error("Camera did not become available within timeout period")
+            logger.debug("Full libcamera-hello output:")
+            for line in output_lines:
+                logger.debug(f"  {line}")
+        
+        return camera_available
     
-    async def _handle_camera_failure(self, reason):
-        """Handle camera failure by attempting restart"""
-        with self._lock:
-            if self.state == CameraState.RESTARTING:
-                # Already restarting, don't overlap
-                return
+    async def _close_camera_completely(self):
+        """Close camera and ensure it's fully released using libcamera-hello"""
+        # First close with vilib
+        self._close_camera()
+        
+        # Then wait for camera to be fully released by checking with libcamera-hello
+        camera_released = False
+        max_attempts = 5
+        attempt = 0
+        
+        while not camera_released and attempt < max_attempts:
+            attempt += 1
+            logger.info(f"Waiting for camera to be fully released (attempt {attempt}/{max_attempts})")
             
-            self.state = CameraState.ERROR
-            self.last_error = reason
+            # Sleep to give time for resources to be released
+            await asyncio.sleep(2)
             
-            # Notify via callback
-            if self.status_callback:
-                await self.status_callback({
-                    "state": self.state.name,
-                    "error": self.last_error,
-                    "message": "Camera failure detected"
-                })
+            # Check camera availability
+            camera_released = await self._run_libcamera_hello()
             
-            # Check if we can attempt restart
-            now = time.time()
-            if self.restart_attempts < self.max_restart_attempts and \
-               now - self.last_start_time > self.restart_cooldown:
-                
-                logger.info(f"Attempting camera restart ({self.restart_attempts + 1}/{self.max_restart_attempts})")
-                self.state = CameraState.RESTARTING
-                
-                # Notify via callback
-                if self.status_callback:
-                    await self.status_callback({
-                        "state": self.state.name,
-                        "message": f"Restarting camera (attempt {self.restart_attempts + 1}/{self.max_restart_attempts})"
-                    })
-                
-                # Close the camera
-                self._close_camera()
-                await asyncio.sleep(2)  # Give it time to fully close
-                
-                # Attempt restart
-                self.restart_attempts += 1
-                success = await self._start_camera()
-                
-                if not success:
-                    logger.warning(f"Camera restart failed (attempt {self.restart_attempts}/{self.max_restart_attempts})")
-            
-            elif self.restart_attempts >= self.max_restart_attempts:
-                logger.error("Maximum camera restart attempts reached")
-                
-                # Notify via callback
-                if self.status_callback:
-                    await self.status_callback({
-                        "state": self.state.name,
-                        "error": "Maximum restart attempts reached",
-                        "message": "Unable to recover camera"
-                    })
+            if camera_released:
+                logger.info("Camera successfully released")
+            else:
+                logger.warning(f"Camera not fully released yet (attempt {attempt}/{max_attempts})")
+        
+        return camera_released
     
     async def restart(self):
         """
-        Manually restart the camera.
+        Manually restart the camera with proper release and initialization checks.
         
         Returns:
             bool: True if restart was successful, False otherwise
@@ -263,10 +257,26 @@ class CameraManager:
                     "message": "Manual camera restart initiated"
                 })
             
-            # Close the camera
-            self._close_camera()
-            await asyncio.sleep(2)  # Give it time to fully close
+            # Close the camera and ensure it's fully released
+            logger.info("Closing camera and waiting for full release...")
+            camera_released = await self._close_camera_completely()
             
+            if not camera_released:
+                self.state = CameraState.ERROR
+                self.last_error = "Failed to fully release camera"
+                logger.error("Failed to fully release camera for restart")
+                
+                # Notify via callback
+                if self.status_callback:
+                    await self.status_callback({
+                        "state": self.state.name,
+                        "error": self.last_error,
+                        "message": "Camera restart failed - could not release camera"
+                    })
+                
+                return False
+            
+            logger.info("Camera fully released, restarting...")
             # Start the camera again
             return await self._start_camera()
     

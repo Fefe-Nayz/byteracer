@@ -107,18 +107,20 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 ---
 
 # TODO:
+PUR PYTHON:
 - Refactor de l'implémentation des Etats du robot (avec différents modes et différents états pour mieux gérer la détection de connection)
 - Implémenter l'intégration avec chatGPT
-- Parler à travers le websocket (https://stackoverflow.com/questions/67118642/audiocontext-getusermedia-and-websockets-audio-streaming)
 
 - Refactoriser du module caméra pour mieux gérer les erreurs et les redémarrages (changement de wifi, affichage de l'etat sur le client)
 - Refactoriser les scripts bash pour les commandes systèmes pour ne pas qu'ils quittens les sessions screen mais juste stoppent les programmes à l'intérieur
 
+CLIENT + PYTHON:
 - Ajouter un bouton pour changer de branche
+- Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
+
+PUR CLIENT:
 - Afficher les données des capteurs dans un overlay en plein écran
 - Ajouter un DarkMode pour l'interface utilisateur
-- Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
-- Voir l'utilisation des ressources du robot (CPU, RAM, etc.) sur l'interface utilisateur
 - Lifting de l'interface utilisateur
 
 - Ajout d'un micro avec transmission audio (https://www.sunfounder.com/products/mini-usb-microphone?_pos=1&_sid=f7cb6af2f&_ss=r)
