@@ -36,7 +36,7 @@ export default function PushToTalk() {
       localStreamRef.current = stream;
       
       // Choose a MIME type that produces valid chunks
-      let options: MediaRecorderOptions = {};
+      const options: MediaRecorderOptions = {};
       if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
         options.mimeType = 'audio/webm;codecs=opus';
       } else if (MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {

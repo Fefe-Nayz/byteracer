@@ -118,9 +118,10 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 - Afficher les données des capteurs dans un overlay en plein écran
 - Ajouter un DarkMode pour l'interface utilisateur
 - Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
+- Voir l'utilisation des ressources du robot (CPU, RAM, etc.) sur l'interface utilisateur
 - Lifting de l'interface utilisateur
 
-- ajout d'un micro avec transmission audio (https://www.sunfounder.com/products/mini-usb-microphone?_pos=1&_sid=f7cb6af2f&_ss=r)
+- Ajout d'un micro avec transmission audio (https://www.sunfounder.com/products/mini-usb-microphone?_pos=1&_sid=f7cb6af2f&_ss=r)
 
 
 Gerardo :
