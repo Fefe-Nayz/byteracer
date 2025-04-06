@@ -570,7 +570,12 @@ class SensorManager:
         # self.circuit_mode_enabled = not enabled
         # logger.info(f"Normal mode {'enabled' if enabled else 'disabled'}")
         if enabled:
-            self.robot_state = RobotState.CONTROLLED_BY_CLIENT
+            if self.robot_state == RobotState.WAITING_FOR_CLIENT:
+                self.robot_state = RobotState.WAITING_FOR_CLIENT
+            elif self.robot_state == RobotState.WAITING_FOR_INPUT:
+                self.robot_state = RobotState.WAITING_FOR_INPUT
+            else:
+                self.robot_state = RobotState.CONTROLLED_BY_CLIENT
             logger.info("Normal mode enabled")
     
     def set_demo_mode(self, enabled):

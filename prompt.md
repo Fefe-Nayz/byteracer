@@ -113,7 +113,6 @@ PUR PYTHON:
 
 PUR CLIENT:
 - Afficher les données des capteurs dans un overlay en plein écran
-- Ajouter un DarkMode pour l'interface utilisateur
 - Lifting de l'interface utilisateur
 
 AUTRES:

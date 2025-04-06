@@ -384,7 +384,7 @@ class ByteRacer:
                 # Ensure client is marked as connected when we receive input
                 if self.sensor_manager.robot_state != RobotState.CONTROLLED_BY_CLIENT:
                     logging.info("Received gamepad input from client, marking as connected")
-                    self.sensor_manager.robot_state = RobotState.WAITING_FOR_INPUT
+                    self.sensor_manager.robot_state = RobotState.CONTROLLED_BY_CLIENT
                     self.sensor_manager.update_client_status(True, True)
             
             elif data["name"] == "robot_command":

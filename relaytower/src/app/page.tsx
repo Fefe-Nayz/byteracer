@@ -17,6 +17,7 @@ import NetworkSettings from "@/components/NetworkSettings";
 import GamepadInputHandler from "@/components/GamepadInputHandler";
 import LogViewer from "@/components/LogViewer";
 import RobotModeIndicator from "@/components/RobotModeIndicator";
+import { ThemeToggle } from "@/components/ThemeToggle"; 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import dynamic from "next/dynamic";
 
@@ -29,7 +30,10 @@ function GamepadPage() {
 
   return (
     <div className="container mx-auto p-4 max-w-6xl">
-      <h1 className="text-2xl font-bold mb-6">ByteRacer Control Panel</h1>
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">ByteRacer Control Panel</h1>
+        <ThemeToggle />
+      </div>
 
       {/* GamepadInputHandler renders invisibly to process controller inputs */}
       <GamepadInputHandler />
