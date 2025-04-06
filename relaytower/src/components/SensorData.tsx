@@ -20,6 +20,58 @@ export default function SensorData() {
   const { sensorData, status, settings } = useWebSocket();
   const [emergencyAlert, setEmergencyAlert] = useState<boolean>(false);
   
+  // These states track the last non-zero sign of speed and turn
+  // so that if the value snaps to zero, the bar remains anchored
+  // on the correct side for the shrink animation.
+  const [prevSpeedSign, setPrevSpeedSign] = useState(0);
+  const [prevTurnSign, setPrevTurnSign] = useState(0);
+
+  // Update prevSpeedSign whenever speed changes sign
+  useEffect(() => {
+    const s = sensorData?.speed || 0;
+    if (s > 0) setPrevSpeedSign(1);
+    else if (s < 0) setPrevSpeedSign(-1);
+    // if s === 0, keep the last sign as is
+  }, [sensorData?.speed]);
+
+  // Update prevTurnSign whenever turn changes sign
+  useEffect(() => {
+    const t = sensorData?.turn || 0;
+    if (t > 0) setPrevTurnSign(1);
+    else if (t < 0) setPrevTurnSign(-1);
+    // if t === 0, keep the last sign as is
+  }, [sensorData?.turn]);
+
+  // Helper to compute the correct left/right anchoring for speed
+  const getSpeedAnchor = () => {
+    const s = sensorData?.speed || 0;
+    if (s < 0) {
+      return { left: "auto", right: 0 };
+    } else if (s > 0) {
+      return { left: 0, right: "auto" };
+    } else {
+      // If speed is zero, anchor according to last known sign
+      return prevSpeedSign < 0
+        ? { left: "auto", right: 0 }
+        : { left: 0, right: "auto" };
+    }
+  };
+
+  // Helper to compute the correct left/right anchoring for turn
+  const getTurnAnchor = () => {
+    const t = sensorData?.turn || 0;
+    if (t < 0) {
+      return { left: "auto", right: 0 };
+    } else if (t > 0) {
+      return { left: 0, right: "auto" };
+    } else {
+      // If turn is zero, anchor according to last known sign
+      return prevTurnSign < 0
+        ? { left: "auto", right: 0 }
+        : { left: 0, right: "auto" };
+    }
+  };
+
   // Flash emergency alert when emergency state changes
   useEffect(() => {
     if (sensorData?.emergencyState) {
@@ -32,7 +84,7 @@ export default function SensorData() {
           audio.volume = 0.3;
           audio.play().catch(() => {});
         } catch (_) {
-            console.error("Failed to play alert sound:", _);
+          console.error("Failed to play alert sound:", _);
         }
       }
       
@@ -61,7 +113,7 @@ export default function SensorData() {
   }
 
   // Get thresholds from settings or use defaults
-  const lineBlackThreshold = (settings?.safety?.edge_threshold  || 200 ) * 1000
+  const lineBlackThreshold = (settings?.safety?.edge_threshold  || 200 ) * 1000;
   const collisionDangerThreshold = settings?.safety?.collision_threshold || 10;
   const collisionWarningThreshold = (settings?.safety?.collision_threshold || 10 ) + 5;
 
@@ -126,7 +178,7 @@ export default function SensorData() {
   const isSafetyActive = sensorData.isCollisionAvoidanceActive || sensorData.isEdgeDetectionActive;
 
   return (
-    <Card className={`p-4 ${emergencyAlert ? 'bg-red-50 border-red-200' : 'border-gray-200 bg-white'}`}>
+    <Card className={`p-4 ${emergencyAlert ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 'border bg-card'}`}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-bold">Sensor Data</h3>
         
@@ -155,62 +207,88 @@ export default function SensorData() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-       {/* Motion data - New section for speed, turn, and acceleration */}
-       <div className="p-3 rounded-md bg-gray-50">
+       {/* Motion data - section for speed, turn, and acceleration */}
+       <div className="p-3 rounded-md bg-muted">
           <div className="flex items-center mb-2">
             <Car className="h-4 w-4 mr-2" />
             <span className="text-sm font-medium">Motion Data:</span>
           </div>
           <div className="space-y-2">
+            {/* Speed */}
             <div className="flex items-center justify-between text-xs">
               <span>Speed:</span>
-              <span className={`font-medium ${Math.abs(sensorData.speed || 0) > 0.1 ? 'text-blue-600' : 'text-gray-500'}`}>
+              <span
+                className={`font-medium ${
+                  (sensorData.speed || 0) === 0
+                    ? 'text-gray-500'
+                    : (sensorData.speed || 0) > 0
+                      ? 'text-blue-600'
+                      : 'text-orange-600'
+                }`}
+              >
                 {((sensorData.speed || 0) * 100).toFixed(0)}%
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div 
-                className={`absolute top-0 bottom-0 transition-all duration-300 ease-out ${
+                className={`absolute top-0 bottom-0 transition-[width] duration-300 ease-out ${
                   (sensorData.speed || 0) > 0 
                     ? 'bg-gradient-to-r from-blue-400 to-blue-600' 
                     : 'bg-gradient-to-r from-orange-400 to-orange-600'
                 }`}
                 style={{ 
                   width: `${Math.min(100, Math.abs((sensorData.speed || 0) * 100))}%`,
-                  left: (sensorData.speed || 0) < 0 ? 'auto' : '0',
-                  right: (sensorData.speed || 0) < 0 ? '0' : 'auto'
+                  ...getSpeedAnchor()
                 }}
               >
                 <div className="absolute right-0 top-0 bottom-0 w-1 bg-white opacity-70"></div>
               </div>
             </div>
             
+            {/* Turn */}
             <div className="flex items-center justify-between text-xs mt-3">
               <span>Turn:</span>
-              <span className={`font-medium ${Math.abs(sensorData.turn || 0) > 0.1 ? 'text-emerald-600' : 'text-gray-500'}`}>
+              <span
+                className={`font-medium ${
+                  (sensorData.turn || 0) === 0
+                    ? 'text-gray-500'
+                    : (sensorData.turn || 0) > 0
+                      ? 'text-emerald-600'
+                      : 'text-purple-600'
+                }`}
+              >
                 {((sensorData.turn || 0) * 100).toFixed(0)}%
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div 
-                className={`absolute top-0 bottom-0 transition-all duration-300 ease-out ${
+                className={`absolute top-0 bottom-0 transition-[width] duration-300 ease-out ${
                   (sensorData.turn || 0) > 0 
                     ? 'bg-gradient-to-r from-emerald-400 to-emerald-600' 
                     : 'bg-gradient-to-r from-purple-400 to-purple-600'
                 }`}
                 style={{ 
                   width: `${Math.min(100, Math.abs((sensorData.turn || 0) * 100))}%`,
-                  left: (sensorData.turn || 0) < 0 ? 'auto' : '0',
-                  right: (sensorData.turn || 0) < 0 ? '0' : 'auto'
+                  ...getTurnAnchor()
                 }}
               >
                 <div className="absolute right-0 top-0 bottom-0 w-1 bg-white opacity-70"></div>
               </div>
             </div>
             
+            {/* Acceleration */}
             <div className="flex items-center justify-between text-xs mt-3">
               <span>Acceleration:</span>
-              <span className={`font-medium ${Math.abs(sensorData.acceleration || 0) > 0.5 ? 'text-amber-600' : 'text-gray-500'}`}>
+              {/* Fix for color matching positive/negative */}
+              <span
+                className={`font-medium ${
+                  (sensorData.acceleration || 0) === 0
+                    ? 'text-gray-500'
+                    : (sensorData.acceleration || 0) > 0
+                      ? 'text-amber-600'
+                      : 'text-red-600'
+                }`}
+              >
                 {((sensorData.acceleration || 0) * 100).toFixed(0)}%
               </span>
             </div>
@@ -224,7 +302,9 @@ export default function SensorData() {
                 }`}
                 style={{ 
                   width: `${Math.min(50, Math.abs((sensorData.acceleration || 0) * 50))}%`,
-                  left: (sensorData.acceleration || 0) >= 0 ? '50%' : `calc(50% - ${Math.min(50, Math.abs((sensorData.acceleration || 0) * 50))}%)`,
+                  left: (sensorData.acceleration || 0) >= 0
+                    ? '50%'
+                    : `calc(50% - ${Math.min(50, Math.abs((sensorData.acceleration || 0) * 50))}%)`,
                 }}
               >
                 <div className={`absolute ${(sensorData.acceleration || 0) >= 0 ? 'right' : 'left'}-0 top-0 bottom-0 w-1 bg-white opacity-70`}></div>
@@ -233,41 +313,57 @@ export default function SensorData() {
           </div>
         </div>
         
-        {/* Safety status - New consolidated indicator */}
-        <div className={`p-3 rounded-md ${isSafetyActive ? 'bg-green-50' : 'bg-gray-50'}`}>
+        {/* Safety status */}
+        <div className={`p-3 rounded-md ${isSafetyActive 
+          ? 'bg-green-50 dark:bg-green-900/20' 
+          : 'bg-muted'}`}>
           <div className="flex items-center mb-1">
-            <ShieldAlert className={`h-4 w-4 mr-2 ${isSafetyActive ? 'text-green-500' : 'text-gray-400'}`} />
+            <ShieldAlert className={`h-4 w-4 mr-2 ${isSafetyActive 
+              ? 'text-green-500 dark:text-green-400' 
+              : 'text-gray-400 dark:text-gray-500'}`} />
             <span className="text-sm font-medium">Safety Systems:</span>
-            <span className={`ml-auto text-xs font-medium ${isSafetyActive ? 'text-green-500' : 'text-gray-400'}`}>
+            <span className={`ml-auto text-xs font-medium ${isSafetyActive 
+              ? 'text-green-500 dark:text-green-400' 
+              : 'text-gray-400 dark:text-gray-500'}`}>
               {isSafetyActive ? 'Active' : 'Inactive'}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs mt-1">
             <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isCollisionAvoidanceActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isCollisionAvoidanceActive 
+          ? 'bg-green-500 dark:bg-green-400' 
+          : 'bg-gray-300 dark:bg-gray-600'}`}></div>
               <span>Collision Avoidance</span>
             </div>
             <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isEdgeDetectionActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isEdgeDetectionActive 
+          ? 'bg-green-500 dark:bg-green-400' 
+          : 'bg-gray-300 dark:bg-gray-600'}`}></div>
               <span>Edge Detection</span>
             </div>
             <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isAutoStopActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isAutoStopActive 
+          ? 'bg-green-500 dark:bg-green-400' 
+          : 'bg-gray-300 dark:bg-gray-600'}`}></div>
               <span>Auto Stop</span>
             </div>
             <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isTrackingActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isTrackingActive 
+          ? 'bg-green-500 dark:bg-green-400' 
+          : 'bg-gray-300 dark:bg-gray-600'}`}></div>
               <span>Tracking</span>
             </div>
             <div className="flex items-center">
-              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isCircuitModeActive ? 'bg-green-500' : 'bg-gray-300'}`}></div>
+              <div className={`w-2 h-2 rounded-full mr-1 ${sensorData.isCircuitModeActive 
+          ? 'bg-green-500 dark:bg-green-400' 
+          : 'bg-gray-300 dark:bg-gray-600'}`}></div>
               <span>Circuit Mode</span>
             </div>
           </div>
         </div>
 
         {/* Ultrasonic distance */}
-        <div className="flex flex-col p-3 rounded-md bg-gray-50">
+        <div className="flex flex-col p-3 rounded-md bg-muted">
           <div className="flex items-center mb-1">
             <MoveHorizontal className="h-4 w-4 mr-2" />
             <span className="text-sm font-medium">Distance Sensor:</span>
@@ -284,24 +380,42 @@ export default function SensorData() {
         </div>
 
         {/* Line sensors */}
-        <div className="p-3 rounded-md bg-gray-50">
+        <div className="p-3 rounded-md bg-muted">
           <div className="flex items-center mb-2">
             <Car className="h-4 w-4 mr-2" />
             <span className="text-sm font-medium">Line Sensors:</span>
           </div>
           <div className="flex justify-between items-center">
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowLeft < lineBlackThreshold ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div
+                className={`w-6 h-6 mx-auto rounded-full ${
+                  sensorData.lineFollowLeft < lineBlackThreshold
+                    ? 'bg-black'
+                    : 'bg-white border border-gray-300'
+                }`}
+              ></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowLeft)}</div>
               <div className="text-xs text-gray-500">Left</div>
             </div>
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowMiddle < lineBlackThreshold ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div
+                className={`w-6 h-6 mx-auto rounded-full ${
+                  sensorData.lineFollowMiddle < lineBlackThreshold
+                    ? 'bg-black'
+                    : 'bg-white border border-gray-300'
+                }`}
+              ></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowMiddle)}</div>
               <div className="text-xs text-gray-500">Middle</div>
             </div>
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowRight < lineBlackThreshold ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div
+                className={`w-6 h-6 mx-auto rounded-full ${
+                  sensorData.lineFollowRight < lineBlackThreshold
+                    ? 'bg-black'
+                    : 'bg-white border border-gray-300'
+                }`}
+              ></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowRight)}</div>
               <div className="text-xs text-gray-500">Right</div>
             </div>
@@ -309,7 +423,7 @@ export default function SensorData() {
         </div>
 
         {/* Client status */}
-        <div className="p-3 rounded-md bg-gray-50">
+        <div className="p-3 rounded-md bg-muted">
           <div className="flex items-center mb-1">
             <RadioTower className="h-4 w-4 mr-2" />
             <span className="text-sm font-medium">Client Status:</span>
@@ -328,7 +442,8 @@ export default function SensorData() {
           </div>
         </div>
 
-        {/* System Resource Usage - New Section */}
+        {/* System Resource Usage */}
+        <div className="p-3 rounded-md bg-muted">
         <div className="mb-4">
           <div className="flex items-center mb-1">
             <Cpu className="h-5 w-5" />
@@ -354,6 +469,7 @@ export default function SensorData() {
             className={`h-2 ${getResourceProgressColor(sensorData.ramUsage || 0)}`}
           />
         </div>
+      </div>
       </div>
     </Card>
   );

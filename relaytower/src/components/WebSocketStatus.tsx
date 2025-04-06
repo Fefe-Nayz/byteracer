@@ -93,7 +93,7 @@ export default function WebSocketStatus() {
         )}
 
         {batteryLevel !== null && (
-          <div className="flex items-center mt-3 pt-2 border-t border-gray-200">
+          <div className="flex items-center mt-3 pt-2 border-t border-muted">
             <Battery className="h-4 w-4 mr-2" />
             <div className="flex-1 h-4 bg-gray-200 rounded-full overflow-hidden">
               <div 
@@ -106,7 +106,7 @@ export default function WebSocketStatus() {
         )}
 
         {pythonStatus !== null && (
-          <div className="flex items-center mt-3 pt-2 border-t border-gray-200">
+          <div className="flex items-center mt-3 pt-2 border-t border-muted">
             <span className="text-sm font-medium">Python Status:</span>
             <span className={`ml-2 text-xs font-medium ${status === "connected" && pythonStatus === "connected" ? "text-green-500" : "text-red-500"}`}>
               {status === "connected" && pythonStatus === "connected" ? "Connected" : "Disconnected"}

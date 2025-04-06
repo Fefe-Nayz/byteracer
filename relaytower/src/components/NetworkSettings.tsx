@@ -430,7 +430,7 @@ export default function NetworkSettings() {
                         <div
                           key={ssid}
                           className={`flex justify-between items-center p-2 hover:bg-muted/50 rounded cursor-pointer ${
-                            isConnected ? "bg-green-50" : ""
+                            isConnected ? "bg-green-100 dark:bg-green-900/30" : ""
                           }`}
                           onClick={() => handleUseNetwork(ssid)}
                         >
@@ -438,7 +438,7 @@ export default function NetworkSettings() {
                             <Wifi className={`h-4 w-4 ${isConnected ? "text-green-500" : ""}`} />
                             <span className="text-sm">{ssid}</span>
                             {isSaved && <Badge variant="outline" className="text-xs">Saved</Badge>}
-                            {isConnected && <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200 text-xs">Connected</Badge>}
+                            {isConnected && <Badge variant="outline" className="bg-green-100 text-green-600 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800 text-xs">Connected</Badge>}
                           </div>
                           <Button
                             variant="ghost"

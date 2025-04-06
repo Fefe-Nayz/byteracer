@@ -85,7 +85,7 @@ export default function LogViewer({ maxHeight = "400px", className = "" }: LogVi
       </div>
 
       <div 
-        className="font-mono text-sm bg-gray-100 p-3 rounded overflow-y-auto whitespace-pre-wrap"
+        className="font-mono text-sm bg-muted p-3 rounded overflow-y-auto whitespace-pre-wrap"
         style={{ maxHeight }}
       >
         {filteredLogs.length === 0 ? (
