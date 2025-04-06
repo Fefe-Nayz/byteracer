@@ -17,6 +17,25 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+# Function to run a command and log its output
+run_cmd() {
+    local cmd="$1"
+    log "Executing: $cmd"
+    # Execute the command and capture its output while logging it
+    output=$(eval "$cmd" 2>&1)
+    exit_code=$?
+    
+    # Log the command output with timestamp for each line
+    if [ -n "$output" ]; then
+        echo "$output" | while IFS= read -r line; do
+            log "  > $line"
+        done
+    fi
+    
+    log "Command exit code: $exit_code"
+    return $exit_code
+}
+
 # Function to speak with TTS
 speak() {
     if [ -f "$TTS_SCRIPT" ]; then
@@ -27,32 +46,35 @@ speak() {
 }
 
 # Make sure all scripts are executable
-chmod +x "${SCRIPTS_PATH}/restart_websocket.sh"
-chmod +x "${SCRIPTS_PATH}/restart_web_server.sh"
-chmod +x "${SCRIPTS_PATH}/restart_python.sh"
+run_cmd "chmod +x \"${SCRIPTS_PATH}/restart_websocket.sh\""
+run_cmd "chmod +x \"${SCRIPTS_PATH}/restart_web_server.sh\""
+run_cmd "chmod +x \"${SCRIPTS_PATH}/restart_python.sh\""
 
 log "Restarting all ByteRacer services..."
 speak "Restarting all ByteRacer services. This may take a moment."
 
 # Restart WebSocket server (eaglecontrol)
 log "Calling restart_websocket.sh"
-"${SCRIPTS_PATH}/restart_websocket.sh"
-if [ $? -ne 0 ]; then
-    log "Error: restart_websocket.sh failed with exit code $?"
+run_cmd "\"${SCRIPTS_PATH}/restart_websocket.sh\""
+WEBSOCKET_EXIT=$?
+if [ $WEBSOCKET_EXIT -ne 0 ]; then
+    log "Error: restart_websocket.sh failed with exit code $WEBSOCKET_EXIT"
 fi
 
 # Restart Web server (relaytower)
 log "Calling restart_web_server.sh"
-"${SCRIPTS_PATH}/restart_web_server.sh"
-if [ $? -ne 0 ]; then
-    log "Error: restart_web_server.sh failed with exit code $?"
+run_cmd "\"${SCRIPTS_PATH}/restart_web_server.sh\""
+WEBSERVER_EXIT=$?
+if [ $WEBSERVER_EXIT -ne 0 ]; then
+    log "Error: restart_web_server.sh failed with exit code $WEBSERVER_EXIT"
 fi
 
 # Restart Python controller (byteracer)
 log "Calling restart_python.sh"
-"${SCRIPTS_PATH}/restart_python.sh"
-if [ $? -ne 0 ]; then
-    log "Error: restart_python.sh failed with exit code $?"
+run_cmd "\"${SCRIPTS_PATH}/restart_python.sh\""
+PYTHON_EXIT=$?
+if [ $PYTHON_EXIT -ne 0 ]; then
+    log "Error: restart_python.sh failed with exit code $PYTHON_EXIT"
 fi
 
 # Final message
@@ -68,7 +90,7 @@ session_exists() {
 # Verify all services are running
 all_running=true
 for session in "eaglecontrol" "relaytower" "byteracer"; do
-    if ! session_exists "$session"; then
+    if ! run_cmd "screen -list" | grep -q "$session"; then
         log "Warning: $session is not running!"
         speak "Warning! $session is not running."
         all_running=false
@@ -76,6 +98,14 @@ for session in "eaglecontrol" "relaytower" "byteracer"; do
         log "Session $session is running."
     fi
 done
+
+# Check all processes separately to capture details in logs
+log "Process status check:"
+run_cmd "ps aux | grep -E 'python3 main.py|bun run .* eaglecontrol|bun run .* relaytower' | grep -v grep"
+
+# Show screen sessions
+log "Screen sessions:"
+run_cmd "screen -list"
 
 if [ "$all_running" = true ]; then
     log "All services are now running correctly."
