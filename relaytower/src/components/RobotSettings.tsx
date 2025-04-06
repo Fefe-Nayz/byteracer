@@ -5,10 +5,12 @@ import { Card } from "./ui/card";
 import { Slider } from "./ui/slider";
 import { Switch } from "./ui/switch";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { 
   Volume2, Megaphone, Camera, AlertTriangle,
-  PersonStanding, TrafficCone, BarChart, Gamepad2
+  PersonStanding, TrafficCone, BarChart, Gamepad2,
+  Repeat, GitBranch
 } from "lucide-react";
 
 export default function RobotSettings() {
@@ -660,6 +662,54 @@ export default function RobotSettings() {
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+        </div>
+      </Card>
+      
+      {/* GitHub & System Settings - NEW CARD */}
+      <Card className="p-4 md:col-span-2">
+        <h3 className="font-bold mb-4">System Settings</h3>
+        
+        <div className="space-y-6">
+          {/* GitHub settings */}
+          <div className="space-y-4">
+            <div className="flex items-center space-x-2 mb-2">
+              <GitBranch className="h-4 w-4" />
+              <span className="text-sm font-medium">GitHub Repository Settings</span>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className="mb-1 text-xs">Repository URL</div>
+                <Input 
+                  value={localSettings.github?.repo_url || "https://github.com/nayzflux/byteracer.git"}
+                  onChange={(e) => updateSetting("github", "repo_url", e.target.value)}
+                  placeholder="https://github.com/user/repo.git"
+                />
+              </div>
+              
+              <div>
+                <div className="mb-1 text-xs">Branch Name</div>
+                <Input 
+                  value={localSettings.github?.branch || "working-2"}
+                  onChange={(e) => updateSetting("github", "branch", e.target.value)}
+                  placeholder="main"
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Repeat className="h-4 w-4" />
+                <span className="text-sm">Auto Update on Boot</span>
+              </div>
+              <Switch 
+                checked={localSettings.github?.auto_update !== false}
+                onCheckedChange={(checked) => 
+                  updateSetting("github", "auto_update", checked)
+                }
+              />
             </div>
           </div>
         </div>

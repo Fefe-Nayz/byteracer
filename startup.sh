@@ -7,6 +7,7 @@ set -e
 # Project paths
 BYTERACER_PATH="/home/pi/ByteRacer"
 TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
+CONFIG_FILE="${BYTERACER_PATH}/byteracer/config/settings.json"
 
 # Function to speak with TTS
 speak() {
@@ -14,13 +15,46 @@ speak() {
     python3 "${TTS_SCRIPT}" "$1"
 }
 
+# Function to get a value from the config file
+get_config() {
+    local key=$1
+    local default=$2
+    
+    # Check if the config file exists
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "$default"
+        return
+    fi
+    
+    # Check if jq is installed
+    if ! command -v jq &> /dev/null; then
+        echo "$default"
+        return
+    fi
+    
+    # Get the value from the config file
+    value=$(jq -r "$key" "$CONFIG_FILE" 2>/dev/null)
+    
+    # Return the default value if the key doesn't exist or value is null
+    if [ $? -ne 0 ] || [ "$value" = "null" ]; then
+        echo "$default"
+    else
+        echo "$value"
+    fi
+}
+
 echo "=== ByteRacer Startup Script ==="
 speak "Starting ByteRacer boot sequence"
 
-# Configuration
-REPO_URL="https://github.com/nayzflux/byteracer.git"
+# Configuration - use config file if available, otherwise use defaults
+REPO_URL=$(get_config ".github.repo_url" "https://github.com/nayzflux/byteracer.git")
 FOLDER_PATH="/home/pi/ByteRacer"
-BRANCH="working-2"
+BRANCH=$(get_config ".github.branch" "working-2")
+AUTO_UPDATE=$(get_config ".github.auto_update" "true")
+
+echo "Using GitHub Repository: $REPO_URL"
+echo "Using branch: $BRANCH"
+echo "Auto update: $AUTO_UPDATE"
 
 # Create the parent directory if it doesn't exist
 mkdir -p "$(dirname "$FOLDER_PATH")"
@@ -51,7 +85,7 @@ fi
 
 # Check if the repository exists and is valid
 UPDATED=false
-if $internet_available; then
+if $internet_available && [ "$AUTO_UPDATE" = "true" ]; then
     echo "Internet is available. Proceeding with GitHub fetch."
     speak "Checking for software updates"
     
@@ -80,7 +114,7 @@ if $internet_available; then
     fi
 
 else
-    echo "No internet connection detected. Skipping GitHub fetch."
+    echo "No internet connection detected or auto-update disabled. Skipping GitHub fetch."
 fi
 
 

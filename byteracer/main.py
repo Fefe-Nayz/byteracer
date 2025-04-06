@@ -170,7 +170,7 @@ class ByteRacer:
         
         if "emergency_tts_volume" in settings["sound"]:
             self.tts_manager.set_emergency_tts_volume(settings["sound"]["emergency_tts_volume"])
-        
+
         # Apply camera settings
         restart_camera = self.camera_manager.update_settings(
             vflip=settings["camera"]["vflip"],
@@ -179,7 +179,6 @@ class ByteRacer:
             web=settings["camera"]["web_display"],
             camera_size=tuple(settings["camera"]["camera_size"])  # Convert list to tuple
         )
-        
         if restart_camera:
             await self.camera_manager.restart()
         
@@ -993,19 +992,13 @@ class ByteRacer:
             if "turn_in_place" in drive:
                 self.config_manager.set("drive.turn_in_place", drive["turn_in_place"])
 
-        if "network" in settings:
-            network = settings["network"]
-            if "mode" in network:
-                self.config_manager.set("network.mode", network["mode"])
-            
-            if "ap_name" in network:
-                self.config_manager.set("network.ap_name", network["ap_name"])
-            
-            if "ap_password" in network:
-                self.config_manager.set("network.ap_password", network["ap_password"])
-
-            if "known_networks" in network:
-                self.config_manager.set("network.known_networks", network["known_networks"])
+        if "github" in settings:
+            if "branch" in settings["github"]:
+                self.config_manager.set("github.branch", settings["github"]["branch"])
+            if "repo_url" in settings["github"]:
+                self.config_manager.set("github.repo_url", settings["github"]["repo_url"])
+            if "auto_update" in settings["github"]:
+                self.config_manager.set("github.auto_update", settings["github"]["auto_update"])
         
         # Save settings
         await self.save_config_settings()

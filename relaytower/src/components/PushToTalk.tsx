@@ -261,7 +261,7 @@ export default function PushToTalk() {
 
           {!isRecording ? (
             <Button 
-              disabled={status !== "connected" || isConnecting || !encoderReady}
+              disabled={status !== "connected" || isConnecting}
               onClick={startRecording}
             >
               <Mic className="h-4 w-4 mr-1" />

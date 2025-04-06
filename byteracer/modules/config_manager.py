@@ -83,12 +83,11 @@ class ConfigManager:
                 "normal_mode_enabled": True,
             },
             
-            # Network settings
-            "network": {
-                "mode": "wifi",  # "wifi" or "ap"
-                "known_networks": [],
-                "ap_name": "ByteRacer",
-                "ap_password": "byteracer123",
+            # Github settings
+            "github": {
+                "branch": "working-2",
+                "repo_url": "https://github.com/nayzflux/byteracer.git",
+                "auto_update": True
             },
         }
         
@@ -384,7 +383,12 @@ class ConfigManager:
                 "normal_mode_enabled": True,
             },
             
-            # Network settings are not reset by default
+            # Github settings
+            "github": {
+                "branch": "working-2",
+                "repo_url": "https://github.com/nayzflux/byteracer.git",
+                "auto_update": True
+            },
         }
         
         with self._lock:

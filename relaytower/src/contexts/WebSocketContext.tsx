@@ -153,14 +153,10 @@ export interface RobotSettings {
     circuit_mode_enabled: boolean;
     demo_mode_enabled: boolean;
   };
-  network: {
-    mode: "wifi" | "ap";
-    known_networks: Array<{
-      ssid: string;
-      password: string;
-    }>;
-    ap_name: string;
-    ap_password: string;
+  github: {
+    branch: string;
+    repo_url: string;
+    auto_update: boolean;
   };
 }
 

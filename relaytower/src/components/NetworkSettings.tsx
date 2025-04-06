@@ -31,7 +31,7 @@ interface SavedNetwork {
 
 export default function NetworkSettings() {
   const { toast } = useToast();
-  const { status, settings, scanNetworks, updateNetwork, requestSettings } = useWebSocket();
+  const { status, scanNetworks, updateNetwork, requestSettings } = useWebSocket();
   
   // Local state for form values
   const [mode, setMode] = useState<NetworkMode>("wifi");
@@ -47,16 +47,7 @@ export default function NetworkSettings() {
     current_ip: "",
     internet_connected: false
   });
-  
-  // Update local state when we get settings from server
-  useEffect(() => {
-    if (settings?.network) {
-      setMode(settings.network.mode);
-      setApName(settings.network.ap_name);
-      setApPassword(settings.network.ap_password);
-      setKnownNetworks([...settings.network.known_networks]);
-    }
-  }, [settings]);
+
   
   // Request settings when component mounts or reconnects
   useEffect(() => {
