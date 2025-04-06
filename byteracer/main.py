@@ -1150,6 +1150,11 @@ class ByteRacer:
                 # Get raw sensor data
                 sensor_data = self.sensor_manager.get_sensor_data()
                 
+                # Get system resource data
+                cpu_usage = psutil.cpu_percent()
+                ram = psutil.virtual_memory()
+                ram_usage = ram.percent
+                
                 # Transform sensor data to match client expectations
                 transformed_data = {
                     "ultrasonicDistance": sensor_data["ultrasonic"],
@@ -1167,7 +1172,9 @@ class ByteRacer:
                     "lastClientActivity": int(self.last_activity_time * 1000),  # Convert to milliseconds
                     "speed": sensor_data["speed"],  # Add speed value
                     "turn": sensor_data["turn"],    # Add turn value
-                    "acceleration": sensor_data["acceleration"]  # Add acceleration value
+                    "acceleration": sensor_data["acceleration"],  # Add acceleration value
+                    "cpuUsage": cpu_usage,  # Add CPU usage
+                    "ramUsage": ram_usage   # Add RAM usage
                 }
                 
                 await self.websocket.send(json.dumps({

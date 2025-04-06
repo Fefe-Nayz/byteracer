@@ -87,6 +87,8 @@ export interface SensorData {
   speed: number;
   turn: number;
   acceleration: number;
+  ramUsage: number;
+  cpuUsage: number;
 }
 
 // Define camera status interface

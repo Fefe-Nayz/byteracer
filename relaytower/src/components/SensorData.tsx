@@ -11,7 +11,9 @@ import {
   Battery,
   BatteryWarning,
   BatteryCharging,
-  ShieldAlert
+  ShieldAlert,
+  Cpu,
+  MemoryStick
 } from "lucide-react";
 
 export default function SensorData() {
@@ -88,6 +90,20 @@ export default function SensorData() {
   const getBatteryProgressColor = (level: number) => {
     if (level <= 20) return "bg-red-500";
     if (level <= 40) return "bg-yellow-500";
+    return "bg-green-500";
+  };
+  
+  // Get resource usage color
+  const getResourceColor = (usage: number) => {
+    if (usage >= 80) return "text-red-500";
+    if (usage >= 60) return "text-yellow-500";
+    return "text-green-500";
+  };
+  
+  // Get resource progress color
+  const getResourceProgressColor = (usage: number) => {
+    if (usage >= 80) return "bg-red-500";
+    if (usage >= 60) return "bg-yellow-500";
     return "bg-green-500";
   };
   
@@ -288,6 +304,33 @@ export default function SensorData() {
             </span>
           </div>
         </div>
+
+              {/* System Resource Usage - New Section */}
+      <div className="mb-4">
+        <div className="flex items-center mb-1">
+          <Cpu className="h-5 w-5 text-blue-500" />
+          <span className="text-sm font-medium ml-2">CPU Usage:</span>
+          <span className={`ml-auto font-medium ${getResourceColor(sensorData.cpuUsage || 0)}`}>
+            {sensorData.cpuUsage?.toFixed(1) || 0}%
+          </span>
+        </div>
+        <Progress 
+          value={sensorData.cpuUsage || 0} 
+          className={`h-2 mb-2 ${getResourceProgressColor(sensorData.cpuUsage || 0)}`}
+        />
+        
+        <div className="flex items-center mb-1">
+          <MemoryStick className="h-5 w-5 text-purple-500" />
+          <span className="text-sm font-medium ml-2">RAM Usage:</span>
+          <span className={`ml-auto font-medium ${getResourceColor(sensorData.ramUsage || 0)}`}>
+            {sensorData.ramUsage?.toFixed(1) || 0}%
+          </span>
+        </div>
+        <Progress 
+          value={sensorData.ramUsage || 0} 
+          className={`h-2 ${getResourceProgressColor(sensorData.ramUsage || 0)}`}
+        />
+      </div>
       </div>
     </Card>
   );
