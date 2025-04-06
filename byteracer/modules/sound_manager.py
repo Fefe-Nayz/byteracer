@@ -61,9 +61,6 @@ class SoundManager:
         self.is_braking = False
         self.is_drifting = False
         
-        # Thread pool for background playback
-        self.executor = ThreadPoolExecutor(max_workers=2)
-        
         logger.info(f"Sound Manager initialized with {sum(len(s) for s in self.sounds.values())} sounds")
     
     def _load_sounds(self, category):
