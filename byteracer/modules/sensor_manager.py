@@ -336,9 +336,14 @@ class SensorManager:
                 self.px.forward(0)
                 self.px.set_dir_servo_angle(0)
                 
-                # Wait until manual stop is cleared
-                while self.emergency_active and self.current_emergency == EmergencyState.MANUAL_STOP:
-                    await asyncio.sleep(0.5)
+                # Wait 2 seconds before auto-clearing
+                await asyncio.sleep(2)
+
+                # If we are *still* in manual stop after 2 seconds, clear it automatically
+                if self.current_emergency == EmergencyState.MANUAL_STOP:
+                    logger.warning("Auto-clearing manual stop after 2 seconds")
+                    self.emergency_active = False
+                    self.current_emergency = EmergencyState.NONE
         
         except asyncio.CancelledError:
             logger.info(f"Emergency handling for {emergency.name} was cancelled")

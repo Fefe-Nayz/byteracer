@@ -1,8 +1,9 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { RefreshCw, Maximize, X } from "lucide-react";
+import { RefreshCw, Maximize, X, AlertCircle } from "lucide-react";
 import { Button } from "./ui/button";
+import { useWebSocket } from "@/contexts/WebSocketContext";
 
 export default function CameraFeed() {
   // Use window.location.hostname to get the current server hostname dynamically
@@ -12,6 +13,10 @@ export default function CameraFeed() {
   const [key, setKey] = useState(Date.now()); // Used to force refresh the stream
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState("4/3"); // Default aspect ratio
+  const [showFreezeNotification, setShowFreezeNotification] = useState(false);
+  const { cameraStatus, restartCameraFeed } = useWebSocket();
+
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fullscreenContainerRef = useRef<HTMLDivElement>(null);
 
@@ -27,6 +32,28 @@ export default function CameraFeed() {
     }
   }, []);
 
+  // Monitor camera status for freezes
+  useEffect(() => {
+    if (!cameraStatus) return;
+
+    // Check if camera is in FROZEN state
+    if (cameraStatus.state === "FROZEN") {
+      setShowFreezeNotification(true);
+    } else {
+      setShowFreezeNotification(false);
+    }
+
+    // Update aspect ratio based on camera resolution
+    if (cameraStatus.settings && cameraStatus.settings.resolution) {
+      const resolution = cameraStatus.settings.resolution;
+      const [width, height] = resolution.split("x").map(Number);
+      if (width && height) {
+        setAspectRatio(`${width}/${height}`);
+      }
+    }
+  }, [cameraStatus]);
+
+  // Handle escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && isFullscreen) {
@@ -115,9 +142,64 @@ export default function CameraFeed() {
     setIsFullscreen(!isFullscreen);
   };
 
+  const restartCamera = () => {
+    restartCameraFeed();
+  };
+
+  // Custom error bubble component for frozen camera
+  const FreezeNotification = ({
+    onClose,
+    onRestart,
+  }: {
+    onClose: () => void;
+    onRestart: () => void;
+  }) => (
+    <div className="absolute top-3 right-3 z-50 max-w-md p-4 bg-destructive text-white rounded-lg shadow-lg animate-in fade-in slide-in-from-top-5 duration-300">
+      <div className="flex items-start gap-3">
+        <div className="shrink-0">
+          <AlertCircle className="h-5 w-5" />
+        </div>
+        <div className="flex-1">
+          <h3 className="font-medium mb-1">Camera Feed Frozen</h3>
+          <p className="text-sm opacity-90 mb-3">
+            The camera feed appears to be frozen. Would you like to restart it?
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRestart}
+              className="text-white border-white hover:bg-white/20"
+            >
+              Restart Camera
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="text-white hover:bg-white/20"
+            >
+              Dismiss
+            </Button>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="shrink-0 rounded-full p-1 transition-colors hover:bg-white/20"
+          aria-label="Close"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+
   if (isFullscreen) {
     return (
-      <div ref={fullscreenContainerRef} className="fixed inset-0 z-50 bg-black m-0">
+      <div
+        ref={fullscreenContainerRef}
+        className="fixed inset-0 z-50 bg-black m-0"
+      >
         {/* Blurred background */}
         <div className="absolute inset-0 overflow-hidden">
           <img
@@ -163,6 +245,30 @@ export default function CameraFeed() {
           </div>
         )}
 
+        {/* Custom error bubble notification for frozen camera */}
+        {showFreezeNotification && (
+          <FreezeNotification
+            onClose={() => setShowFreezeNotification(false)}
+            onRestart={restartCamera}
+          />
+        )}
+
+        {/* Camera frozen notification - visible even when controls are hidden */}
+        {cameraStatus?.state === "FROZEN" && (
+          <div className="absolute top-6 left-6 z-50 bg-destructive text-white p-3 rounded-md shadow-lg flex items-center">
+            <AlertCircle className="h-5 w-5 mr-2" />
+            <span className="mr-3">Camera feed frozen</span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={restartCamera}
+              className="mr-2 text-white border-white hover:bg-white/20"
+            >
+              Restart
+            </Button>
+          </div>
+        )}
+
         {/* Exit fullscreen button - visible only on mouse movement */}
         <div
           className={`absolute top-6 right-6 transition-opacity duration-300 z-50 ${
@@ -188,6 +294,17 @@ export default function CameraFeed() {
         <div className="flex justify-between items-center">
           <CardTitle className="text-lg">Camera Feed</CardTitle>
           <div className="flex gap-2">
+            {cameraStatus?.state === "FROZEN" && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={restartCamera}
+                className="h-8 px-2"
+              >
+                <AlertCircle className="h-4 w-4 mr-1" />
+                Restart Camera
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -228,6 +345,14 @@ export default function CameraFeed() {
             </div>
           )}
 
+          {/* Custom error bubble notification for frozen camera */}
+          {showFreezeNotification && (
+            <FreezeNotification
+              onClose={() => setShowFreezeNotification(false)}
+              onRestart={restartCamera}
+            />
+          )}
+
           {/* Blurred background version (full width) */}
           <div className="absolute inset-0 overflow-hidden">
             <img
@@ -244,9 +369,9 @@ export default function CameraFeed() {
             <div className="absolute inset-0"></div>
           </div>
 
-          {/* Centered 4:3 aspect ratio version */}
+          {/* Main camera feed with dynamic aspect ratio */}
           <div className="absolute inset-0 flex items-center justify-center z-10">
-            <div className="relative aspect-[4/3] h-full">
+            <div className="relative h-full" style={{ aspectRatio }}>
               <img
                 key={key}
                 src={streamUrl}

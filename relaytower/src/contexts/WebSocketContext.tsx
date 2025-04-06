@@ -27,6 +27,8 @@ export type WebSocketMessageType =
   | "network_list"
   | "network_update"
   | "audio_stream"
+  | "python_status_request"
+  | "python_status";
 // Define WebSocket connection status type
 export type WebSocketStatus = "connecting" | "connected" | "disconnected";
 
@@ -102,6 +104,7 @@ export interface CameraStatus {
     hflip: boolean;
     local: boolean;
     web: boolean;
+    resolution: string;
   }
 }
 
@@ -178,6 +181,8 @@ interface WebSocketContextValue {
   setCustomWsUrl: (url: string | null) => void;
   customCameraUrl: string | null;
   setCustomCameraUrl: (url: string | null) => void;
+  pythonStatus: "connected" | "disconnected" | "unknown";
+  requestPythonStatus: () => void;
 
   // Data state
   batteryLevel: number | null;
@@ -218,6 +223,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [pingTime, setPingTime] = useState<number | null>(null);
   const [customWsUrl, setCustomWsUrl] = useState<string | null>(null);
   const [customCameraUrl, setCustomCameraUrl] = useState<string | null>(null);
+
+  // Add Python connection status state
+  const [pythonStatus, setPythonStatus] = useState<"connected" | "disconnected" | "unknown">("unknown");
 
   // Data state
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
@@ -418,6 +426,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               })
             );
             break;
+
           case "log_message":
             // Add log message to the logs array (limit to most recent 500 logs)
             setLogs(prevLogs => {
@@ -425,6 +434,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               // Keep only the most recent 500 logs to avoid memory issues
               return newLogs.slice(-500);
             });
+            break;
+
+          case "python_status":
+            setPythonStatus(event.data.connected ? "connected" : "disconnected");
             break;
         }
       } catch (e) {
@@ -765,6 +778,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       });
     }
   }, [socket]);
+
   // Function to send audio stream data
   const sendAudioStream = useCallback((audioData: string) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -787,6 +801,24 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  // Function to request Python connection status
+  const requestPythonStatus = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const pythonStatusRequest = {
+        name: "python_status_request",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(pythonStatusRequest));
+      trackWsMessage("sent", pythonStatusRequest);
+    } else {
+      // If not connected to WebSocket, Python connection is definitely not available
+      setPythonStatus("disconnected");
+    }
+  }, [socket]);
 
   // Combine all values and functions for the context
   const contextValue: WebSocketContextValue = {
@@ -799,6 +831,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     setCustomWsUrl,
     customCameraUrl,
     setCustomCameraUrl,
+    pythonStatus,
+    requestPythonStatus,
 
     // Data state
     batteryLevel,

@@ -111,9 +111,6 @@ PUR PYTHON:
 - Refactor de l'implémentation des Etats du robot (avec différents modes et différents états pour mieux gérer la détection de connection)
 - Implémenter l'intégration avec chatGPT
 
-- Refactoriser du module caméra pour mieux gérer les erreurs et les redémarrages (changement de wifi, affichage de l'etat sur le client)
-- Refactoriser les scripts bash pour les commandes systèmes pour ne pas qu'ils quittens les sessions screen mais juste stoppent les programmes à l'intérieur
-
 CLIENT + PYTHON:
 - Ajouter un bouton pour changer de branche
 - Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
@@ -123,6 +120,7 @@ PUR CLIENT:
 - Ajouter un DarkMode pour l'interface utilisateur
 - Lifting de l'interface utilisateur
 
+AUTRES:
 - Ajout d'un micro avec transmission audio (https://www.sunfounder.com/products/mini-usb-microphone?_pos=1&_sid=f7cb6af2f&_ss=r)
 
 

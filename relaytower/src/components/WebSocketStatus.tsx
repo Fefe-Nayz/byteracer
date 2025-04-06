@@ -11,25 +11,29 @@ export default function WebSocketStatus() {
     pingTime, 
     connect, 
     batteryLevel, 
-    requestBatteryLevel 
+    requestBatteryLevel,
+    pythonStatus,
+    requestPythonStatus
   } = useWebSocket();
 
-  // Request battery level periodically
+  // Request battery level and Python connection status periodically
   useEffect(() => {
-    // Initial battery request
+    // Initial requests
     if (status === "connected") {
       requestBatteryLevel();
+      requestPythonStatus();
     }
 
-    // Set up periodic battery level checks
+    // Set up periodic checks
     const interval = setInterval(() => {
       if (status === "connected") {
         requestBatteryLevel();
+        requestPythonStatus();
       }
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(interval);
-  }, [status, requestBatteryLevel]);
+  }, [status, requestBatteryLevel, requestPythonStatus]);
 
   // Get battery color based on level
   const getBatteryColor = () => {
@@ -87,6 +91,15 @@ export default function WebSocketStatus() {
               ></div>
             </div>
             <span className="ml-2 text-xs font-medium">{batteryLevel}%</span>
+          </div>
+        )}
+
+        {pythonStatus !== null && (
+          <div className="flex items-center mt-3 pt-2 border-t border-gray-200">
+            <span className="text-sm font-medium">Python Status:</span>
+            <span className={`ml-2 text-xs font-medium ${pythonStatus === "connected" ? "text-green-500" : "text-red-500"}`}>
+              {pythonStatus === "connected" ? "Connected" : "Disconnected"}
+            </span>
           </div>
         )}
       </div>

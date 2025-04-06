@@ -54,6 +54,7 @@ type WebSocketEventName =
   | "network_list"        // For receiving network list
   | "network_update"      // For updating network settings
   | "audio_stream"        // For streaming audio data to the robot
+  | "python_status_request" // For requesting Python connection status
   | "log_message";
 
 type WebSocketEvent = {
@@ -334,6 +335,25 @@ const wsHandlers = {
           }
           break;
 
+        // Python status request
+        case "python_status_request":
+          console.log("Python connection status requested");
+          
+          // Check if there are any car clients connected
+          const carsConnected = cars.size > 0;
+          
+          // Respond immediately with the current connection status
+          ws.send(JSON.stringify({
+            name: "python_status",
+            data: {
+              connected: carsConnected,
+              timestamp: Date.now()
+            },
+            createdAt: Date.now()
+          }));
+          
+          console.log(`Python connection status: ${carsConnected ? "Connected" : "Disconnected"}`);
+          break;
 
         case "log_message":
           // Forward log messages to all controllers and viewers

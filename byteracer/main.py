@@ -925,9 +925,9 @@ class ByteRacer:
                 self.config_manager.set("camera.web_display", camera["web_display"])
                 restart_needed |= self.camera_manager.update_settings(web=camera["web_display"])
 
-            if "resolution" in camera:
-                self.config_manager.set("camera.resolution", camera["resolution"])
-                restart_needed |= self.camera_manager.update_settings(camera_size=camera["resolution"])
+            if "camera_size" in camera:
+                self.config_manager.set("camera.camera_size", camera["camera_size"])
+                restart_needed |= self.camera_manager.update_settings(camera_size=camera["camera_size"])
             
             if restart_needed:
                 await self.camera_manager.restart()
@@ -1067,10 +1067,13 @@ class ByteRacer:
                 result["success"] = True
                 result["message"] = "Python service will restart"
                 
-                # Exit Python script - systemd or screen will restart it
-                # threading.Timer(1.0, lambda: os._exit(0)).start()
-                python = sys.executable
-                os.execv(python, [python] + sys.argv)
+                # Run restart_python.sh in a new session so it stays alive
+                subprocess.Popen(
+                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/restart_python.sh"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
                 
             elif command == "restart_camera_feed":
                 # Restart camera feed
