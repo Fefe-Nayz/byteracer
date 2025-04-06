@@ -6,7 +6,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { 
-  RefreshCw, Power, Megaphone, Play, MessageSquare,
+  RefreshCw, Power, Megaphone, Play,
   RotateCw, Radio, WifiOff, Download, Camera
 } from "lucide-react";
 
@@ -21,16 +21,14 @@ interface RobotControlsProps {
 }
 
 export default function RobotControls({ showAllControls = false }: RobotControlsProps) {
-  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, sendGptCommand, settings, requestSettings } = useWebSocket();
+  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, settings, requestSettings } = useWebSocket();
   const [textToSpeak, setTextToSpeak] = useState("");
   const [language, setLanguage] = useState("");
-  const [gptPrompt, setGptPrompt] = useState("");
   const [selectedSound, setSelectedSound] = useState("klaxon");
   const [actionStatus, setActionStatus] = useState<ActionStatusState>({
     command: "",
     status: "idle"
   });
-  const [useCameraForGpt, setUseCameraForGpt] = useState(true);
 
   useEffect(() => {
     requestSettings();
@@ -113,15 +111,6 @@ export default function RobotControls({ showAllControls = false }: RobotControls
     
     speakText(textToSpeak, language);
     setTextToSpeak("");
-  };
-  
-  // Handle GPT command submission
-  const handleGptSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!gptPrompt.trim() || status !== "connected") return;
-    
-    sendGptCommand(gptPrompt, useCameraForGpt);
-    setGptPrompt("");
   };
   
   // Handle sound playback
@@ -346,110 +335,6 @@ export default function RobotControls({ showAllControls = false }: RobotControls
             </Button>
           </div>
         </div>
-      </div>
-      
-      {/* Text-to-Speech section */}
-      <div className="border-t pt-4 pb-2">
-        <h4 className="text-sm font-semibold mb-2">Text-to-Speech</h4>
-        <form onSubmit={handleTtsSubmit} className="space-y-2">
-          <div className="flex space-x-2">
-            <Input
-              placeholder="Text to speak..."
-              value={textToSpeak}
-              onChange={(e) => setTextToSpeak(e.target.value)}
-              disabled={status !== "connected"}
-            />
-            <Button 
-              type="submit" 
-              size="sm"
-              disabled={status !== "connected" || !textToSpeak.trim()}
-            >
-              <Megaphone className="h-4 w-4" />
-            </Button>
-          </div>
-          <Select
-            value={language}
-            onValueChange={(value) => setLanguage(value)}
-            disabled={status !== "connected"}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select language" />
-            </SelectTrigger>
-            <SelectContent>
-              {languages.map((lang) => (
-                <SelectItem key={lang.value} value={lang.value}>
-                  {lang.label}
-                  {lang.value === settings?.sound.tts_language && " (Default)"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </form>
-      </div>
-      
-      {/* Sound player section */}
-      <div className="border-t pt-4 pb-2">
-        <h4 className="text-sm font-semibold mb-2">Play Sound</h4>
-        <div className="flex space-x-2">
-          <Select 
-            value={selectedSound} 
-            onValueChange={setSelectedSound}
-            disabled={status !== "connected"}
-          >
-            <SelectTrigger className="flex-grow">
-              <SelectValue placeholder="Select a sound" />
-            </SelectTrigger>
-            <SelectContent>
-              {availableSounds.map(sound => (
-                <SelectItem key={sound.id} value={sound.id}>
-                  {sound.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button 
-            size="sm" 
-            onClick={handlePlaySound}
-            disabled={status !== "connected"}
-          >
-            <Play className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-      
-      {/* GPT Commands section */}
-      <div className="border-t pt-4">
-        <h4 className="text-sm font-semibold mb-2">GPT Commands</h4>
-        <form onSubmit={handleGptSubmit}>
-          <div className="mb-2">
-            <Input
-              placeholder="Ask GPT to control the robot..."
-              value={gptPrompt}
-              onChange={(e) => setGptPrompt(e.target.value)}
-              disabled={status !== "connected"}
-            />
-          </div>
-          <div className="flex justify-between items-center">
-            <div className="flex items-center">
-              <input
-                type="checkbox"
-                id="use-camera"
-                checked={useCameraForGpt}
-                onChange={() => setUseCameraForGpt(!useCameraForGpt)}
-                className="mr-2"
-              />
-              <label htmlFor="use-camera" className="text-xs">Use camera feed</label>
-            </div>
-            <Button 
-              type="submit" 
-              size="sm"
-              disabled={status !== "connected" || !gptPrompt.trim()}
-            >
-              <MessageSquare className="h-4 w-4 mr-1" />
-              Send
-            </Button>
-          </div>
-        </form>
       </div>
     </Card>
   );

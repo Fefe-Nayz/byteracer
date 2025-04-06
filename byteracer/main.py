@@ -360,7 +360,7 @@ class ByteRacer:
                     self.last_activity_time = time.time()
                     
                     # Update sensor manager about client connection
-                    self.sensor_manager.update_client_status(True, True)
+                    self.sensor_manager.update_client_status(False, True)
                     
                     # Now that a controller is connected, clear IP announcements
                     self.tts_manager.clear_queue(min_priority=1)

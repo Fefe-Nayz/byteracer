@@ -17,7 +17,7 @@ import NetworkSettings from "@/components/NetworkSettings";
 import GamepadInputHandler from "@/components/GamepadInputHandler";
 import LogViewer from "@/components/LogViewer";
 import RobotModeIndicator from "@/components/RobotModeIndicator";
-import { ThemeToggle } from "@/components/ThemeToggle"; 
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import dynamic from "next/dynamic";
 
@@ -41,11 +41,10 @@ function GamepadPage() {
       <Tabs defaultValue="control" className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="control">Control</TabsTrigger>
+          <TabsTrigger value="gamepad">Gamepad</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
-          <TabsTrigger value="features">Features</TabsTrigger>
-          <TabsTrigger value="debug">Debug</TabsTrigger>
-          <TabsTrigger value="logs">Logs</TabsTrigger>
+          <TabsTrigger value="devtools">Dev Tools</TabsTrigger>
         </TabsList>
 
         <TabsContent value="control">
@@ -68,11 +67,14 @@ function GamepadPage() {
               <RobotModeIndicator />
             </div>
           </div>
+        </TabsContent>
 
-          {/* Only show preview if a gamepad is selected */}
-          {selectedGamepadId && (
-            <div className="mt-6">
-              <GamepadPreview />
+        <TabsContent value="gamepad">
+          {selectedGamepadId ? (
+            <GamepadPreview />
+          ) : (
+            <div className="text-center text-gray-500">
+              Select a gamepad to see its inputs
             </div>
           )}
         </TabsContent>
@@ -93,25 +95,10 @@ function GamepadPage() {
             </div>
           </div>
         </TabsContent>
-        
-        <TabsContent value="features">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-6">
-              <TextToSpeech />
-              <SoundEffects />
-            </div>
-            <div>
-              <GptIntegration />
-            </div>
-          </div>
-        </TabsContent>
 
-        <TabsContent value="debug">
-          <DebugState />
-        </TabsContent>
-
-        <TabsContent value="logs">
+        <TabsContent value="devtools">
           <LogViewer maxHeight="600px" />
+          <DebugState />
         </TabsContent>
       </Tabs>
     </div>

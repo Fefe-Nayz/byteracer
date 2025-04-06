@@ -724,7 +724,7 @@ export default function DebugState() {
 
           <TabsContent value="settings">
             <div className="space-y-4">
-              <div className="font-medium flex items-center">
+              {/* <div className="font-medium flex items-center">
                 <Wrench size={16} className="mr-2" /> Robot Management
               </div>
               <div className="text-muted-foreground text-xs mb-2">
@@ -837,7 +837,7 @@ export default function DebugState() {
                     {batteryLevel === null ? "Unknown" : `${batteryLevel}%`}
                   </span>
                 </div>
-              </div>
+              </div> */}
 
               <div className="font-medium flex items-center mt-4">
                 <Settings size={16} className="mr-2" /> Connection Settings

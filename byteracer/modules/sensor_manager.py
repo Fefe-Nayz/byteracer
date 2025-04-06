@@ -445,6 +445,7 @@ class SensorManager:
             connected (bool): Whether the client is currently connected
             ever_connected (bool): Whether any client has ever connected
         """
+
         if connected:
             self.robot_state = RobotState.CONTROLLED_BY_CLIENT
             self.last_client_seen = time.time()
