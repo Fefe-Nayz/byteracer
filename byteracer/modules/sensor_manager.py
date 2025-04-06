@@ -18,8 +18,8 @@ class EmergencyState(Enum):
 
 class RobotState(Enum):
     """Enum representing different robot states"""
-    WAITING_FOR_CLIENT = auto() # The robot just started and is waiting for a client to connect to the website. The ony thing it can do is tell it's IP address.
-    WAITING_FOR_INPUT = auto() # The client has reached the website, it can control some aspects of the robot (like settings, sounds, tts and gpt etc.) but it has not still connected a controller to the client device or it is still not used so it is sending no input data.
+    WAITING_FOR_CLIENT = auto() # The robot just started and is waiting for a client to connect to the website. The ony thing it can do is tell it's IP address. This is the first state of the robot.
+    WAITING_FOR_INPUT = auto() # The client has reached the website, it can control some aspects of the robot (like settings, sounds, tts and gpt etc.) but it has not still connected a controller to the client device or it is still not used so it is sending no input data. This state indicates that the robot is ready for input but not yet receiving any.
     CONTROLLED_BY_CLIENT = auto() # The client has connected a controller to the client device and is sending input data to the robot at 20hz. The robot is controlled by the client. If the input stream stops or if the client disconnects either it's controller or completely closes the website and if the robot was moving then we should trigger the emergency stop to prevent the robot from crashing into something. In this state the client can control all aspects of the robot (like settings, sounds, tts and gpt etc.) and it is controlling the robot.
     EMERGENCY_CONTROL = auto() # The robot is in an emergency state. The robot is taking over some part of the control over the client to avoid crash but depending on the emergency the client can still control some movements of the robot and it can still control all the other aspects that are not related to the robot movement. 
     GPT_CONTROLLED = auto() # This state is used when the client is triggering a chatGPT prompt. During the ai awnser and execution of the AI response nothing can alter it (excpet a force stop of the sequence by the client). When the robot is controlled by AI, no emergency can be triggered, the client controls inputs are ignored but the client can still control all other aspects of the robot (like settings, sounds, tts and gpt etc.).
@@ -43,6 +43,9 @@ class SensorManager:
         self._last_emergency_time = 0
         self._emergency_cooldown = 0.1  # Seconds
         
+        # Robot state
+        self.robot_state = RobotState.WAITING_FOR_CLIENT  # Start with waiting for client
+        
         # Sensor readings
         self.ultrasonic_distance = float('inf')  # In cm
         self.line_sensors = [0, 0, 0]  # Left, center, right
@@ -64,13 +67,7 @@ class SensorManager:
         self.collision_avoidance_enabled = True
         self.edge_detection_enabled = True
         self.auto_stop_enabled = True
-        self.tracking_enabled = False
-        self.circuit_mode_enabled = False
         
-        # Client state
-        self.client_ever_connected = False
-        self.client_currently_connected = False
-
         # Edge recovery state
         self.edge_recovery_start_time = 0
         self.edge_recovery_min_time = 0.5  # Minimum backup time after edge is no longer detected
@@ -124,11 +121,14 @@ class SensorManager:
                 await self._update_sensor_readings()
                 
                 # Check for emergencies - only if client has connected at least once
-                if self.client_ever_connected:
+                if self.robot_state != RobotState.WAITING_FOR_CLIENT:
                     emergency = self._check_emergency_conditions()
                     
                     # Handle any detected emergency
                     if emergency != EmergencyState.NONE and emergency != self.current_emergency:
+
+                        self.robot_state = RobotState.EMERGENCY_CONTROL
+
                         # Call emergency callback immediately
                         if self.emergency_callback:
                             # Create a new task for the callback so it runs in parallel
@@ -188,9 +188,9 @@ class SensorManager:
             return EmergencyState.NONE
         
         # Only check emergencies if client is currently connected
-        if not self.client_currently_connected and self.auto_stop_enabled:
+        if self.robot_state != RobotState.CONTROLLED_BY_CLIENT and self.auto_stop_enabled:
             # Exception: check for client disconnection only if client was previously connected
-            if self.client_ever_connected and now - self.last_client_seen > self.client_timeout:
+            if self.robot_state != RobotState.WAITING_FOR_CLIENT and now - self.last_client_seen > self.client_timeout:
                 return EmergencyState.CLIENT_DISCONNECTED
             return EmergencyState.NONE
         
@@ -209,7 +209,7 @@ class SensorManager:
                 return EmergencyState.EDGE_DETECTED
         
         # Check for client disconnection if auto-stop is enabled
-        if self.auto_stop_enabled and self.client_ever_connected:
+        if self.auto_stop_enabled and self.robot_state != RobotState.WAITING_FOR_CLIENT:
             if now - self.last_client_seen > self.client_timeout:
                 return EmergencyState.CLIENT_DISCONNECTED
         
@@ -270,6 +270,7 @@ class SensorManager:
                 if self.current_emergency == EmergencyState.COLLISION_FRONT:
                     self.emergency_active = False
                     self.current_emergency = EmergencyState.NONE
+                    self.robot_state = RobotState.CONTROLLED_BY_CLIENT
                 
             elif emergency == EmergencyState.EDGE_DETECTED:
                 # Record when we start backing up
@@ -314,6 +315,7 @@ class SensorManager:
                 if self.current_emergency == EmergencyState.EDGE_DETECTED:
                     self.emergency_active = False
                     self.current_emergency = EmergencyState.NONE
+                    self.robot_state = RobotState.CONTROLLED_BY_CLIENT
                 
             elif emergency == EmergencyState.CLIENT_DISCONNECTED:
                 # Just stop all motion
@@ -330,6 +332,7 @@ class SensorManager:
                 await asyncio.sleep(self.low_battery_warning_interval)
                 self.emergency_active = False
                 self.current_emergency = EmergencyState.NONE
+                self.robot_state = RobotState.CONTROLLED_BY_CLIENT
             
             elif emergency == EmergencyState.MANUAL_STOP:
                 # Manual stop just stops motion and waits for explicit clear
@@ -344,6 +347,7 @@ class SensorManager:
                     logger.warning("Auto-clearing manual stop after 2 seconds")
                     self.emergency_active = False
                     self.current_emergency = EmergencyState.NONE
+                    self.robot_state = RobotState.CONTROLLED_BY_CLIENT
         
         except asyncio.CancelledError:
             logger.info(f"Emergency handling for {emergency.name} was cancelled")
@@ -372,6 +376,8 @@ class SensorManager:
                 logger.info(f"Emergency cleared: {self.current_emergency}")
                 self.emergency_active = False
                 self.current_emergency = EmergencyState.NONE
+                self.robot_state = RobotState.CONTROLLED_BY_CLIENT
+                
         
         elif self.current_emergency == EmergencyState.EDGE_DETECTED:
             # Already handled in _handle_emergency
@@ -383,6 +389,7 @@ class SensorManager:
                 logger.info(f"Emergency cleared: {self.current_emergency}")
                 self.emergency_active = False
                 self.current_emergency = EmergencyState.NONE
+                self.robot_state = RobotState.CONTROLLED_BY_CLIENT
         
         elif self.current_emergency == EmergencyState.LOW_BATTERY:
             # Already handled in _handle_emergency
@@ -431,16 +438,25 @@ class SensorManager:
         return speed, turn_angle, self.emergency_active
     
     def update_client_status(self, connected, ever_connected):
-        """Update the client connection status"""
-        self.client_currently_connected = connected
-        if ever_connected:
-            self.client_ever_connected = True
+        """
+        Update the client connection status.
+        
+        Args:
+            connected (bool): Whether the client is currently connected
+            ever_connected (bool): Whether any client has ever connected
+        """
+        if connected:
+            self.robot_state = RobotState.CONTROLLED_BY_CLIENT
+            self.last_client_seen = time.time()
+        elif ever_connected:
+            self.robot_state = RobotState.WAITING_FOR_INPUT
+        else:
+            self.robot_state = RobotState.WAITING_FOR_CLIENT
     
     def register_client_connection(self):
         """Register that a client connected"""
         self.last_client_seen = time.time()
-        self.client_ever_connected = True
-        self.client_currently_connected = True
+        self.robot_state = RobotState.WAITING_FOR_INPUT
         logger.info("Client connection registered")
     
     def register_client_input(self):
@@ -449,9 +465,8 @@ class SensorManager:
     
     def client_disconnect(self):
         """Handle client disconnection"""
-        self.client_currently_connected = False
-        if self.client_ever_connected:
-            self.trigger_emergency(EmergencyState.CLIENT_DISCONNECTED)
+        self.robot_state = RobotState.WAITING_FOR_INPUT
+        self.trigger_emergency(EmergencyState.CLIENT_DISCONNECTED)
     
     def manual_emergency_stop(self):
         """Trigger manual emergency stop"""
@@ -504,8 +519,11 @@ class SensorManager:
                 "collision_avoidance": self.collision_avoidance_enabled,
                 "edge_detection": self.edge_detection_enabled,
                 "auto_stop": self.auto_stop_enabled,
-                "tracking": self.tracking_enabled,
-                "circuit_mode": self.circuit_mode_enabled
+                "tracking": self.robot_state == RobotState.TRACKING_MODE,
+                "demo_mode": self.robot_state == RobotState.DEMO_MODE,
+                "circuit_mode": self.robot_state == RobotState.CIRCUIT_MODE,
+                "normal_mode": self.robot_state == RobotState.CONTROLLED_BY_CLIENT,
+                "gpt_mode": self.robot_state == RobotState.GPT_CONTROLLED,
             }
         }
     
@@ -533,19 +551,33 @@ class SensorManager:
     
     def set_tracking(self, enabled):
         """Enable or disable object tracking"""
-        self.tracking_enabled = enabled
-        logger.info(f"Object tracking {'enabled' if enabled else 'disabled'}")
+        # self.tracking_enabled = enabled
+        # logger.info(f"Object tracking {'enabled' if enabled else 'disabled'}")
+        if enabled:
+            self.robot_state = RobotState.TRACKING_MODE
+            logger.info("Object tracking enabled")
     
     def set_circuit_mode(self, enabled):
         """Enable or disable circuit mode"""
-        self.circuit_mode_enabled = enabled
-        logger.info(f"Circuit mode {'enabled' if enabled else 'disabled'}")
+        # self.circuit_mode_enabled = enabled
+        # logger.info(f"Circuit mode {'enabled' if enabled else 'disabled'}")
+        if enabled:
+            self.robot_state = RobotState.CIRCUIT_MODE
+            logger.info("Circuit mode enabled")
 
     def set_normal_mode(self, enabled):
         """Enable or disable normal mode"""
-        logger.info(f"Normal mode {'enabled' if enabled else 'disabled'}")
+        # self.circuit_mode_enabled = not enabled
+        # logger.info(f"Normal mode {'enabled' if enabled else 'disabled'}")
+        if enabled:
+            self.robot_state = RobotState.CONTROLLED_BY_CLIENT
+            logger.info("Normal mode enabled")
     
     def set_demo_mode(self, enabled):
         """Enable or disable demo mode"""
         # Implementation depends on what demo mode does
-        logger.info(f"Demo mode {'enabled' if enabled else 'disabled'}")
+        # self.demo_mode_enabled = enabled
+        # logger.info(f"Demo mode {'enabled' if enabled else 'disabled'}")
+        if enabled:
+            self.robot_state = RobotState.DEMO_MODE
+            logger.info("Demo mode enabled")

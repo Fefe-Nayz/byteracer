@@ -84,6 +84,9 @@ export interface SensorData {
   isAutoStopActive: boolean;
   isTrackingActive: boolean;
   isCircuitModeActive: boolean;
+  isDemoModeActive: boolean;
+  isNormalModeActive: boolean;
+  isGptModeActive: boolean;
   clientConnected: boolean;
   lastClientActivity: number;
   speed: number;

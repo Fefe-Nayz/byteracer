@@ -16,6 +16,7 @@ import GptIntegration from "@/components/GptIntegration";
 import NetworkSettings from "@/components/NetworkSettings";
 import GamepadInputHandler from "@/components/GamepadInputHandler";
 import LogViewer from "@/components/LogViewer";
+import RobotModeIndicator from "@/components/RobotModeIndicator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import dynamic from "next/dynamic";
 
@@ -60,6 +61,7 @@ function GamepadPage() {
               <RobotControls />
               <GptIntegration />
               <PushToTalk />
+              <RobotModeIndicator />
             </div>
           </div>
 

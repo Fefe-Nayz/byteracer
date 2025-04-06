@@ -108,10 +108,7 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 
 # TODO:
 PUR PYTHON:
-- Refactor de l'implémentation des Etats du robot (avec différents modes et différents états pour mieux gérer la détection de connection)
 - Implémenter l'intégration avec chatGPT
-
-CLIENT + PYTHON:
 - Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
 
 PUR CLIENT:

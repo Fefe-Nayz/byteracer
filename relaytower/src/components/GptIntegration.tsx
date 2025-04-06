@@ -110,7 +110,7 @@ export default function GptIntegration() {
         >
           {isProcessing ? (
             <span className="flex items-center">
-              <span className="animate-spin mr-2">
+              <span className="animate-pulse mr-2">
                 <Sparkles className="h-4 w-4" />
               </span>
               Processing...

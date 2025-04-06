@@ -49,15 +49,26 @@ export default function WebSocketStatus() {
         <div className="flex items-center justify-between mb-2">
           <h3 className="font-bold">Server Connection</h3>
           <div className="flex items-center">
-            <div
-              className={`w-3 h-3 rounded-full mr-2 ${
+            <div className="relative flex items-center mr-2">
+              <span
+              className={`absolute inline-flex h-3 w-3 rounded-full opacity-75 animate-ping ${
                 status === "connected"
-                  ? "bg-green-500"
-                  : status === "connecting"
-                  ? "bg-yellow-500"
-                  : "bg-red-500"
+                ? "bg-green-400"
+                : status === "connecting"
+                ? "bg-yellow-400"
+                : "bg-red-400"
               }`}
-            ></div>
+              ></span>
+              <span
+              className={`relative inline-flex h-3 w-3 rounded-full ${
+                status === "connected"
+                ? "bg-green-500"
+                : status === "connecting"
+                ? "bg-yellow-500"
+                : "bg-red-500"
+              }`}
+              ></span>
+            </div>
             <span className="text-sm">
               {status === "connected"
                 ? "Connected"
