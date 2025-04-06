@@ -28,7 +28,8 @@ export type ActionKey =
   | "turnCameraLeft"
   | "turnCameraUp"
   | "turnCameraDown"
-  | "use";
+  | "use"
+  | "pushToTalk";
 
 export interface ActionInfo {
   key: ActionKey;
@@ -197,6 +198,12 @@ export const ACTIONS: ActionInfo[] = [
     label: "Utiliser",
     type: "button",
     defaultMapping: { type: "button", index: 2 },
+  },
+  {
+    key: "pushToTalk",
+    label: "Push to talk",
+    type: "button",
+    defaultMapping: { type: "button", index: 0 },
   },
 ];
 

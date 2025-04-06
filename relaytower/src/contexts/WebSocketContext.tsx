@@ -788,7 +788,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       };
       socket.send(JSON.stringify(message));
       trackWsMessage("sent", message);
-      console.log("Audio stream chunk sent");
     } else {
       logError("Cannot send audio stream", {
         reason: "Socket not connected",

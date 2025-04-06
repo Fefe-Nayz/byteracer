@@ -4,6 +4,10 @@ import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Mic2, Mic, Circle } from "lucide-react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
+import { Switch } from "./ui/switch";
+import { Label } from "./ui/label";
+import { useGamepadContext } from "@/contexts/GamepadContext";
+import { useLocalStorage } from "@/hooks/useLocalStorage";
 
 // Import the extendable MediaRecorder and the WAV encoder
 import { MediaRecorder as ExtendableMediaRecorder, register } from "extendable-media-recorder";
@@ -13,9 +17,17 @@ export default function PushToTalk() {
   const [isRecording, setIsRecording] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<string>("idle");
-
+  const [toggleMode, setToggleMode] = useLocalStorage<boolean>("pushToTalk-toggleMode", false);
+  
   // Access your WebSocket context – we'll call sendAudioStream() with each chunk
   const { status, sendAudioStream } = useWebSocket();
+  
+  // Access gamepad context for push-to-talk functionality
+  const { isActionActive } = useGamepadContext();
+  
+  // Track the previous state of the pushToTalk button
+  const prevPushToTalkState = useRef<boolean>(false);
+  // const pushToTalkStartedRef = useRef<boolean>(false);
 
   // Refs to hold the MediaRecorder and MediaStream
   type ExtendableMediaRecorderInstance = InstanceType<typeof ExtendableMediaRecorder>;
@@ -244,14 +256,66 @@ export default function PushToTalk() {
   const stopRecording = () => {
     cleanupRecording();
   };
+  
+  // Toggle recording based on pushToTalk action from gamepad
+  useEffect(() => {
+    if (status !== "connected") return;
+  
+    const pushToTalkActive = isActionActive("pushToTalk");
 
+    if (pushToTalkActive == prevPushToTalkState.current) {
+      return;
+    }
+
+    console.log(`PushToTalk active: ${pushToTalkActive}, Previous state: ${prevPushToTalkState.current}`);
+  
+    if (toggleMode) {
+      // Toggle on a rising edge (button press)
+      if (pushToTalkActive && !prevPushToTalkState.current) {
+        if (isRecording) {
+          stopRecording();
+          console.log("Stopped recording (toggle mode).");
+        } else {
+          startRecording();
+          console.log("Started recording (toggle mode).");
+        }
+      }
+    } else {
+      // HOLD MODE: start on press, stop on release
+      if (pushToTalkActive && !isRecording) {
+        startRecording();
+        console.log("Started recording (hold mode).");
+      } else if (!pushToTalkActive && isRecording) {
+        stopRecording();
+        console.log("Stopped recording (hold mode).");
+      }
+    }
+  
+    prevPushToTalkState.current = pushToTalkActive;
+  }, [
+    status,
+    isActionActive
+  ]);
+  
   return (
     <Card className="p-4">
       <div className="flex flex-col justify-between gap-3">
         <div className="flex items-center space-x-2">
           <Mic2 className="h-5 w-5" />
-          <h3 className="font-bold">Push To Talk (WAV - Complete Chunks)</h3>
+          <h3 className="font-bold">Push To Talk</h3>
         </div>
+        
+        <div className="flex items-center space-x-2 mt-2">
+          <Switch 
+            id="toggle-mode" 
+            checked={toggleMode} 
+            onCheckedChange={setToggleMode} 
+          />
+          <Label htmlFor="toggle-mode">
+            {toggleMode ? "Toggle mode (press once to start/stop)" : "Hold to speak mode"}
+          </Label>
+        </div>
+        
         <div className="flex flex-col justify-center items-center space-y-2 min-h-[200px]">
           {connectionStatus !== "idle" && connectionStatus !== "recording" && (
             <div className="text-sm text-gray-500 mb-2">
@@ -279,6 +343,10 @@ export default function PushToTalk() {
               Connection error. Please try again.
             </div>
           )}
+          
+          <div className="text-sm text-gray-500 mt-3">
+            <p>Press the gamepad button mapped to &quot;Push to talk&quot; to {toggleMode ? "toggle microphone on/off" : "speak while holding"}.</p>
+          </div>
         </div>
       </div>
     </Card>
