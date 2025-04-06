@@ -2,6 +2,7 @@ import asyncio
 import time
 import logging
 import threading
+import importlib
 from enum import Enum, auto
 from vilib import Vilib
 
@@ -71,11 +72,39 @@ class CameraManager:
             
             try:
                 # Start the camera with vilib
-                Vilib.camera_start(vflip=self.vflip, hflip=self.hflip)
-                Vilib.display(local=self.local, web=self.web)
+                try:
+                    # First attempt to set any required static variables
+                    # This is to help avoid the NoneType error
+                    if not hasattr(Vilib, 'camera_size') or Vilib.camera_size is None:
+                        Vilib.camera_size = (640, 480)
+                        
+                    Vilib.camera_start(vflip=self.vflip, hflip=self.hflip)
+                    Vilib.display(local=self.local, web=self.web)
+                except AttributeError as e:
+                    logger.warning(f"Encountered AttributeError during camera start: {e}")
+                    logger.info("Attempting to reinitialize Vilib")
+                    
+                    # Try to reset the Vilib module
+                    try:
+                        # Reload the Vilib module to reset its internal state
+                        importlib.reload(Vilib)
+                        
+                        # Ensure camera_size is set
+                        if not hasattr(Vilib, 'camera_size') or Vilib.camera_size is None:
+                            Vilib.camera_size = (1920, 1080)
+                            
+                        # Wait a bit before retrying
+                        await asyncio.sleep(2)
+                        
+                        # Try starting the camera again
+                        Vilib.camera_start(vflip=self.vflip, hflip=self.hflip)
+                        Vilib.display(local=self.local, web=self.web)
+                    except Exception as inner_e:
+                        logger.error(f"Failed to reinitialize Vilib: {inner_e}")
+                        raise inner_e
                 
                 # Wait a moment for camera to initialize
-                await asyncio.sleep(1)
+                await asyncio.sleep(2)
                 
                 self.state = CameraState.RUNNING
                 logger.info("Camera started successfully")
@@ -113,6 +142,17 @@ class CameraManager:
     def _close_camera(self):
         """Close the camera safely using vilib"""
         try:
+            # First try to clean up with vilib_exit which should do a more thorough cleanup
+            try:
+                if hasattr(Vilib, 'vilib_exit'):
+                    logger.info("Calling Vilib.vilib_exit() for thorough cleanup")
+                    Vilib.vilib_exit()
+                    time.sleep(1)  # Small delay to allow threads to clean up
+                    return True
+            except Exception as e:
+                logger.warning(f"Error calling Vilib.vilib_exit(): {e}")
+            
+            # Fall back to camera_close if vilib_exit failed or doesn't exist
             Vilib.camera_close()
             logger.info("Camera closed via vilib")
             return True
@@ -122,12 +162,12 @@ class CameraManager:
     
     async def restart(self):
         """
-        Simplified restart method: close camera, wait 5 seconds, reopen camera.
+        Improved restart method: properly close and reinitialize camera.
         
         Returns:
             bool: True if restart was successful, False otherwise
         """
-        logger.info("Simple camera restart requested")
+        logger.info("Camera restart requested")
         
         # Update state
         self.state = CameraState.RESTARTING
@@ -145,9 +185,16 @@ class CameraManager:
         # Close the camera
         self._close_camera()
         
-        # Wait 5 seconds
-        logger.info("Waiting 5 seconds before reopening camera...")
-        await asyncio.sleep(5)
+        # Wait longer (10 seconds) to ensure complete shutdown of camera resources
+        logger.info("Waiting 10 seconds before reopening camera...")
+        await asyncio.sleep(10)
+        
+        # Try to reset the Vilib module's state
+        try:
+            importlib.reload(Vilib)
+            logger.info("Reloaded Vilib module")
+        except Exception as e:
+            logger.warning(f"Failed to reload Vilib module: {e}")
         
         # Start the camera again
         logger.info("Reopening camera...")
