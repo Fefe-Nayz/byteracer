@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 
 export default function SensorData() {
-  const { sensorData, status } = useWebSocket();
+  const { sensorData, status, settings } = useWebSocket();
   const [emergencyAlert, setEmergencyAlert] = useState<boolean>(false);
   
   // Flash emergency alert when emergency state changes
@@ -60,10 +60,15 @@ export default function SensorData() {
     );
   }
 
-  // Determine color for ultrasonic distance
+  // Get thresholds from settings or use defaults
+  const lineBlackThreshold = (settings?.safety?.edge_threshold  || 200 ) * 1000
+  const collisionDangerThreshold = settings?.safety?.collision_threshold || 10;
+  const collisionWarningThreshold = (settings?.safety?.collision_threshold || 10 ) + 5;
+
+  // Determine color for ultrasonic distance based on settings
   const getDistanceColor = (distance: number) => {
-    if (distance > 50) return "text-green-500";
-    if (distance > 20) return "text-yellow-500";
+    if (distance > collisionWarningThreshold) return "text-green-500";
+    if (distance > collisionDangerThreshold) return "text-yellow-500";
     return "text-red-500";
   };
 
@@ -150,8 +155,8 @@ export default function SensorData() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {/* Motion data - New section for speed, turn, and acceleration */}
-        <div className="p-3 rounded-md bg-gray-50">
+       {/* Motion data - New section for speed, turn, and acceleration */}
+       <div className="p-3 rounded-md bg-gray-50">
           <div className="flex items-center mb-2">
             <Car className="h-4 w-4 mr-2" />
             <span className="text-sm font-medium">Motion Data:</span>
@@ -159,53 +164,71 @@ export default function SensorData() {
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs">
               <span>Speed:</span>
-              <span className={`font-medium ${Math.abs(sensorData.speed || 0) > 0.1 ? 'text-blue-500' : 'text-gray-500'}`}>
+              <span className={`font-medium ${Math.abs(sensorData.speed || 0) > 0.1 ? 'text-blue-600' : 'text-gray-500'}`}>
                 {((sensorData.speed || 0) * 100).toFixed(0)}%
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div 
-                className={`absolute left-0 top-0 bottom-0 ${(sensorData.speed || 0) > 0 ? 'bg-blue-500' : 'bg-orange-500'}`}
+                className={`absolute top-0 bottom-0 transition-all duration-300 ease-out ${
+                  (sensorData.speed || 0) > 0 
+                    ? 'bg-gradient-to-r from-blue-400 to-blue-600' 
+                    : 'bg-gradient-to-r from-orange-400 to-orange-600'
+                }`}
                 style={{ 
                   width: `${Math.min(100, Math.abs((sensorData.speed || 0) * 100))}%`,
                   left: (sensorData.speed || 0) < 0 ? 'auto' : '0',
                   right: (sensorData.speed || 0) < 0 ? '0' : 'auto'
                 }}
-              ></div>
+              >
+                <div className="absolute right-0 top-0 bottom-0 w-1 bg-white opacity-70"></div>
+              </div>
             </div>
             
             <div className="flex items-center justify-between text-xs mt-3">
               <span>Turn:</span>
-              <span className={`font-medium ${Math.abs(sensorData.turn || 0) > 0.1 ? 'text-green-500' : 'text-gray-500'}`}>
+              <span className={`font-medium ${Math.abs(sensorData.turn || 0) > 0.1 ? 'text-emerald-600' : 'text-gray-500'}`}>
                 {((sensorData.turn || 0) * 100).toFixed(0)}%
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div 
-                className={`absolute left-0 top-0 bottom-0 ${(sensorData.turn || 0) > 0 ? 'bg-green-500' : 'bg-purple-500'}`}
+                className={`absolute top-0 bottom-0 transition-all duration-300 ease-out ${
+                  (sensorData.turn || 0) > 0 
+                    ? 'bg-gradient-to-r from-emerald-400 to-emerald-600' 
+                    : 'bg-gradient-to-r from-purple-400 to-purple-600'
+                }`}
                 style={{ 
                   width: `${Math.min(100, Math.abs((sensorData.turn || 0) * 100))}%`,
                   left: (sensorData.turn || 0) < 0 ? 'auto' : '0',
                   right: (sensorData.turn || 0) < 0 ? '0' : 'auto'
                 }}
-              ></div>
+              >
+                <div className="absolute right-0 top-0 bottom-0 w-1 bg-white opacity-70"></div>
+              </div>
             </div>
             
             <div className="flex items-center justify-between text-xs mt-3">
               <span>Acceleration:</span>
-              <span className={`font-medium ${Math.abs(sensorData.acceleration || 0) > 0.5 ? 'text-amber-500' : 'text-gray-500'}`}>
+              <span className={`font-medium ${Math.abs(sensorData.acceleration || 0) > 0.5 ? 'text-amber-600' : 'text-gray-500'}`}>
                 {((sensorData.acceleration || 0) * 100).toFixed(0)}%
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div className="absolute top-0 bottom-0 left-1/2 w-px h-full bg-gray-400"></div>
               <div 
-                className={`absolute top-0 bottom-0 bg-amber-500`}
+                className={`absolute top-0 bottom-0 transition-all duration-300 ease-out ${
+                  (sensorData.acceleration || 0) >= 0 
+                    ? 'bg-gradient-to-r from-amber-400 to-amber-600' 
+                    : 'bg-gradient-to-r from-red-400 to-red-600'
+                }`}
                 style={{ 
-                  width: `${Math.min(100, Math.abs((sensorData.acceleration || 0) * 50))}%`,
-                  left: '50%',
-                  transform: `translateX(${(sensorData.acceleration || 0) >= 0 ? '0' : '-100%'})`,
+                  width: `${Math.min(50, Math.abs((sensorData.acceleration || 0) * 50))}%`,
+                  left: (sensorData.acceleration || 0) >= 0 ? '50%' : `calc(50% - ${Math.min(50, Math.abs((sensorData.acceleration || 0) * 50))}%)`,
                 }}
-              ></div>
+              >
+                <div className={`absolute ${(sensorData.acceleration || 0) >= 0 ? 'right' : 'left'}-0 top-0 bottom-0 w-1 bg-white opacity-70`}></div>
+              </div>
             </div>
           </div>
         </div>
@@ -268,17 +291,17 @@ export default function SensorData() {
           </div>
           <div className="flex justify-between items-center">
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowLeft < 200 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowLeft < lineBlackThreshold ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowLeft)}</div>
               <div className="text-xs text-gray-500">Left</div>
             </div>
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowMiddle < 200 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowMiddle < lineBlackThreshold ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowMiddle)}</div>
               <div className="text-xs text-gray-500">Middle</div>
             </div>
             <div className="text-center">
-              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowRight < 200 ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
+              <div className={`w-6 h-6 mx-auto rounded-full ${sensorData.lineFollowRight < lineBlackThreshold ? 'bg-black' : 'bg-white border border-gray-300'}`}></div>
               <div className="text-xs mt-1">{formatLineSensor(sensorData.lineFollowRight)}</div>
               <div className="text-xs text-gray-500">Right</div>
             </div>
@@ -305,32 +328,32 @@ export default function SensorData() {
           </div>
         </div>
 
-              {/* System Resource Usage - New Section */}
-      <div className="mb-4">
-        <div className="flex items-center mb-1">
-          <Cpu className="h-5 w-5 text-blue-500" />
-          <span className="text-sm font-medium ml-2">CPU Usage:</span>
-          <span className={`ml-auto font-medium ${getResourceColor(sensorData.cpuUsage || 0)}`}>
-            {sensorData.cpuUsage?.toFixed(1) || 0}%
-          </span>
+        {/* System Resource Usage - New Section */}
+        <div className="mb-4">
+          <div className="flex items-center mb-1">
+            <Cpu className="h-5 w-5" />
+            <span className="text-sm font-medium ml-2">CPU Usage:</span>
+            <span className={`ml-auto font-medium ${getResourceColor(sensorData.cpuUsage || 0)}`}>
+              {sensorData.cpuUsage?.toFixed(1) || 0}%
+            </span>
+          </div>
+          <Progress 
+            value={sensorData.cpuUsage || 0} 
+            className={`h-2 mb-2 ${getResourceProgressColor(sensorData.cpuUsage || 0)}`}
+          />
+          
+          <div className="flex items-center mb-1">
+            <MemoryStick className="h-5 w-5" />
+            <span className="text-sm font-medium ml-2">RAM Usage:</span>
+            <span className={`ml-auto font-medium ${getResourceColor(sensorData.ramUsage || 0)}`}>
+              {sensorData.ramUsage?.toFixed(1) || 0}%
+            </span>
+          </div>
+          <Progress 
+            value={sensorData.ramUsage || 0} 
+            className={`h-2 ${getResourceProgressColor(sensorData.ramUsage || 0)}`}
+          />
         </div>
-        <Progress 
-          value={sensorData.cpuUsage || 0} 
-          className={`h-2 mb-2 ${getResourceProgressColor(sensorData.cpuUsage || 0)}`}
-        />
-        
-        <div className="flex items-center mb-1">
-          <MemoryStick className="h-5 w-5 text-purple-500" />
-          <span className="text-sm font-medium ml-2">RAM Usage:</span>
-          <span className={`ml-auto font-medium ${getResourceColor(sensorData.ramUsage || 0)}`}>
-            {sensorData.ramUsage?.toFixed(1) || 0}%
-          </span>
-        </div>
-        <Progress 
-          value={sensorData.ramUsage || 0} 
-          className={`h-2 ${getResourceProgressColor(sensorData.ramUsage || 0)}`}
-        />
-      </div>
       </div>
     </Card>
   );

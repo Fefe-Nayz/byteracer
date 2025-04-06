@@ -111,10 +111,6 @@ PUR PYTHON:
 - Implémenter l'intégration avec chatGPT
 - Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
 
-PUR CLIENT:
-- Afficher les données des capteurs dans un overlay en plein écran
-- Lifting de l'interface utilisateur
-
 AUTRES:
 - Ajout d'un micro avec transmission audio (https://www.sunfounder.com/products/mini-usb-microphone?_pos=1&_sid=f7cb6af2f&_ss=r)
 

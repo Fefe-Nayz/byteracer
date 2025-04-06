@@ -69,12 +69,6 @@ export default function RobotModeIndicator() {
         icon: <BarChart className="h-5 w-5" />,
         color: "text-purple-500"
       });
-    } else if (!sensorData.clientConnected) {
-      setMode({
-        name: "Waiting",
-        icon: <Loader2 className="h-5 w-5 animate-spin" />,
-        color: "text-yellow-500"
-      });
     } else if (sensorData.isGptModeActive) {
       setMode({
         name: "AI Control",
@@ -91,7 +85,7 @@ export default function RobotModeIndicator() {
         setMode({
             name: "Waiting for Input",
             icon: <Loader2 className="h-5 w-5 animate-spin" />,
-            color: "text-gray-500"
+            color: "text-yellow-500"
         });
         }
   }, [sensorData, status]);
