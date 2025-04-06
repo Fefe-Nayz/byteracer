@@ -1,9 +1,10 @@
 "use client";
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { RefreshCw, Maximize, X, AlertCircle, ChevronRight } from "lucide-react";
+import { RefreshCw, Maximize, X, AlertCircle, ChevronRight, Eye, EyeOff } from "lucide-react";
 import { Button } from "./ui/button";
 import { useWebSocket } from "@/contexts/WebSocketContext";
+import MiniSensorOverlay from "./MiniSensorOverlay";
 
 // Memoized freeze notification component to prevent unnecessary re-renders
 const FreezeNotification = memo(({ 
@@ -114,6 +115,7 @@ export default function CameraFeed() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [aspectRatio, setAspectRatio] = useState("4/3"); // Default aspect ratio
+  const [showSensorOverlay, setShowSensorOverlay] = useState(true); // State to toggle sensor overlay
   
   // Use refs for values that shouldn't trigger re-renders when they change
   const isFrozenRef = useRef(false);
@@ -356,6 +358,25 @@ export default function CameraFeed() {
             <X className="h-5 w-5" />
           </Button>
         </div>
+
+        {/* Sensor overlay toggle button - visible only on mouse movement */}
+        <div
+          className={`absolute top-6 right-20 transition-opacity duration-300 z-50 ${
+            showControls ? "opacity-100" : "opacity-0 pointer-events-none"
+          }`}
+        >
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() => setShowSensorOverlay(!showSensorOverlay)}
+            className="h-10 w-10 rounded-full bg-white/50 hover:bg-white/70 backdrop-blur-sm"
+          >
+            {showSensorOverlay ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+          </Button>
+        </div>
+
+        {/* Mini Sensor Overlay - only visible in fullscreen mode if enabled */}
+        {showSensorOverlay && <MiniSensorOverlay position="bottom-right" />}
       </div>
     );
   }
