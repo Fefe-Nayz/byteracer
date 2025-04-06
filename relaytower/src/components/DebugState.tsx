@@ -20,14 +20,6 @@ import {
   Settings,
   AlertCircle,
   Wrench,
-  Battery,
-  RefreshCw,
-  PowerOff,
-  RotateCw,
-  Wifi,
-  Server,
-  Code,
-  Camera,
   Save,
 } from "lucide-react";
 import { Label } from "./ui/label";
@@ -110,7 +102,6 @@ export default function DebugState() {
   const [isClient, setIsClient] = useState(false);
   const [wsUrl, setWsUrl] = useState<string>("");
   const [cameraUrl, setCameraUrl] = useState<string>("");
-  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Check if we're in the browser environment
@@ -194,51 +185,6 @@ export default function DebugState() {
     setTimeout(() => setIsSaving(false), 1000);
   };
 
-  // Function to send WebSocket commands
-  const sendRobotCommand = (command: string) => {
-    window.dispatchEvent(
-      new CustomEvent("debug:send-robot-command", {
-        detail: { command },
-      })
-    );
-  };
-
-  // Listen for battery updates
-  useEffect(() => {
-    if (!isClient) return;
-
-    const handleBatteryUpdate = (e: CustomEvent) => {
-      setBatteryLevel(e.detail.level);
-    };
-
-    window.addEventListener(
-      "debug:battery-update",
-      handleBatteryUpdate as EventListener
-    );
-
-    // Request battery info when tab is selected
-    const handleTabChange = (e: CustomEvent) => {
-      if (e.detail.tab === "settings") {
-        window.dispatchEvent(new CustomEvent("debug:request-battery"));
-      }
-    };
-
-    window.addEventListener(
-      "debug:tab-change",
-      handleTabChange as EventListener
-    );
-
-    return () => {
-      window.removeEventListener(
-        "debug:battery-update",
-        handleBatteryUpdate as EventListener
-      );
-      window.removeEventListener(
-        "debug:tab-change",
-        handleTabChange as EventListener
-      );
-    };
-  }, [isClient]);
 
   // Add this to the component
   const handleTabChange = (value: string) => {
