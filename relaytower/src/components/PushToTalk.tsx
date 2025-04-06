@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Mic2, Mic, Circle } from "lucide-react";
@@ -9,25 +9,38 @@ export default function PushToTalk() {
   const [isRecording, setIsRecording] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<string>("idle");
   const { status, sendAudioStream } = useWebSocket();
+  const [isBrowser, setIsBrowser] = useState(false);
   
   const localStreamRef = useRef<MediaStream | null>(null);
   const recorderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const isTransmittingRef = useRef(false);
   
+  // Set isBrowser to true when component mounts (client-side only)
+  useEffect(() => {
+    setIsBrowser(true);
+  }, []);
+  
   // Preferred MIME type – try OGG with opus first
-  const mimeType = MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
-    ? 'audio/ogg;codecs=opus'
-    : MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
+  const mimeType = useCallback(() => {
+    if (!isBrowser) return 'audio/webm';
+    
+    return typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')
+      ? 'audio/ogg;codecs=opus'
+      : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+        ? 'audio/webm;codecs=opus'
+        : 'audio/webm';
+  }, [isBrowser]);
   
   const startRecordingCycle = useCallback(async () => {
+    if (!isBrowser) return;
+    
     try {
       if (!localStreamRef.current) {
         localStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       }
-      const recorder = new MediaRecorder(localStreamRef.current, { mimeType });
+      
+      const recorder = new MediaRecorder(localStreamRef.current, { mimeType: mimeType() });
       mediaRecorderRef.current = recorder;
       
       recorder.ondataavailable = (event) => {
@@ -69,9 +82,11 @@ export default function PushToTalk() {
       console.error("Error in recording cycle:", error);
       setConnectionStatus("error");
     }
-  }, [sendAudioStream, mimeType]);
+  }, [sendAudioStream, mimeType, isBrowser]);
   
   const stopRecordingCycle = useCallback(() => {
+    if (!isBrowser) return;
+    
     isTransmittingRef.current = false;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
       mediaRecorderRef.current.stop();
@@ -86,10 +101,10 @@ export default function PushToTalk() {
     }
     setIsRecording(false);
     setConnectionStatus("idle");
-  }, []);
+  }, [isBrowser]);
   
   const startTransmit = async () => {
-    if (status !== "connected") return;
+    if (status !== "connected" || !isBrowser) return;
     isTransmittingRef.current = true;
     setConnectionStatus("connecting");
     await startRecordingCycle();
