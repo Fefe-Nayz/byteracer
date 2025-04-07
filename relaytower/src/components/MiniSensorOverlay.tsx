@@ -18,7 +18,7 @@ import {
 // Eye,
 
 export default function MiniSensorOverlay({ position = "bottom-right" }: { position?: string }) {
-  const { sensorData, status } = useWebSocket();
+  const { sensorData, status, settings } = useWebSocket();
   const [expanded, setExpanded] = useState<boolean>(false);
   const [emergencyAlert, setEmergencyAlert] = useState<boolean>(false);
   
@@ -40,6 +40,10 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
     return null;
   }
 
+  // Get thresholds from settings or use defaults for distance sensor
+  const collisionDangerThreshold = settings?.safety?.collision_threshold || 10;
+  const collisionWarningThreshold = (settings?.safety?.collision_threshold || 10) + 5;
+
   // Get battery icon based on level
   const getBatteryIcon = (level: number) => {
     if (level <= 20) return <BatteryWarning className="h-4 w-4 text-red-500" />;
@@ -54,11 +58,50 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
     return "text-green-500";
   };
   
-  // Determine color for ultrasonic distance
+  // Determine color for ultrasonic distance based on settings
   const getDistanceColor = (distance: number) => {
-    if (distance > 50) return "text-green-500";
-    if (distance > 20) return "text-yellow-500";
+    if (distance > collisionWarningThreshold) return "text-green-500";
+    if (distance > collisionDangerThreshold) return "text-yellow-500";
     return "text-red-500";
+  };
+  
+  // Get distance progress color (matching text color)
+  const getDistanceProgressColor = (distance: number) => {
+    if (distance > collisionWarningThreshold) return "bg-green-500";
+    if (distance > collisionDangerThreshold) return "bg-yellow-500";
+    return "bg-red-500";
+  };
+
+  // Speed color classes
+  const getSpeedColorClass = (speed: number) => {
+    if (Math.abs(speed) <= 0.1) return "text-gray-400";
+    return speed > 0 ? "text-blue-500" : "text-orange-500";
+  };
+  
+  // Turn color classes
+  const getTurnColorClass = (turn: number) => {
+    if (Math.abs(turn) <= 0.1) return "text-gray-400";
+    return turn > 0 ? "text-green-500" : "text-purple-500";
+  };
+  
+  // Acceleration color classes
+  const getAccelerationColorClass = (accel: number) => {
+    if (Math.abs(accel) <= 0.5) return "text-gray-400";
+    return accel >= 0 ? "text-amber-500" : "text-red-500";
+  };
+  
+  // Get resource usage color
+  const getResourceColor = (usage: number) => {
+    if (usage >= 80) return "text-red-400";
+    if (usage >= 60) return "text-yellow-400";
+    return "text-green-400";
+  };
+  
+  // Get resource progress color
+  const getResourceProgressColor = (usage: number) => {
+    if (usage >= 80) return "bg-red-400";
+    if (usage >= 60) return "bg-yellow-400";
+    return "bg-green-400";
   };
   
   // Check if safety system is active
@@ -82,7 +125,7 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
 
   return (
     <div 
-      className={`absolute ${positionClasses} z-40 bg-black/50 backdrop-blur-sm rounded-md shadow-lg transition-all duration-200 overflow-hidden`}
+      className={`absolute ${positionClasses} z-40 bg-black/50 backdrop-blur-sm rounded-md shadow-lg overflow-hidden`}
       style={{ maxWidth: expanded ? "280px" : "180px" }}
     >
       {/* Header with battery and toggle */}
@@ -129,9 +172,7 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
               <div>
                 <div className="flex justify-between">
                   <span>Speed</span>
-                  <span 
-                    className={Math.abs(sensorData.speed || 0) > 0.1 ? 'text-blue-300' : 'text-gray-400'}
-                  >
+                  <span className={getSpeedColorClass(sensorData.speed || 0)}>
                     {((sensorData.speed || 0) * 100).toFixed(0)}%
                   </span>
                 </div>
@@ -150,9 +191,7 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
               <div>
                 <div className="flex justify-between">
                   <span>Turn</span>
-                  <span 
-                    className={Math.abs(sensorData.turn || 0) > 0.1 ? 'text-green-300' : 'text-gray-400'}
-                  >
+                  <span className={getTurnColorClass(sensorData.turn || 0)}>
                     {((sensorData.turn || 0) * 100).toFixed(0)}%
                   </span>
                 </div>
@@ -171,15 +210,13 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
               <div>
                 <div className="flex justify-between">
                   <span>Accel</span>
-                  <span 
-                    className={Math.abs(sensorData.acceleration || 0) > 0.5 ? 'text-amber-300' : 'text-gray-400'}
-                  >
+                  <span className={getAccelerationColorClass(sensorData.acceleration || 0)}>
                     {((sensorData.acceleration || 0) * 100).toFixed(0)}%
                   </span>
                 </div>
                 <div className="relative w-full h-1 bg-gray-800 rounded-full overflow-hidden">
                   <div 
-                    className="absolute top-0 bottom-0 bg-amber-500"
+                    className={`absolute top-0 bottom-0 ${(sensorData.acceleration || 0) >= 0 ? 'bg-amber-500' : 'bg-red-500'}`}
                     style={{ 
                       width: `${Math.min(100, Math.abs((sensorData.acceleration || 0) * 50))}%`,
                       left: '50%',
@@ -204,7 +241,7 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
             </div>
             <div className="relative w-full h-1 bg-gray-800 rounded-full overflow-hidden">
               <div 
-                className={`absolute left-0 top-0 bottom-0 ${getDistanceColor(sensorData.ultrasonicDistance).replace('text-', 'bg-')}`}
+                className={`absolute left-0 top-0 bottom-0 ${getDistanceProgressColor(sensorData.ultrasonicDistance)}`}
                 style={{ width: `${Math.min(100, Math.max(0, (sensorData.ultrasonicDistance / 100) * 100))}%` }}
               ></div>
             </div>
@@ -237,25 +274,25 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
             <div>
               <div className="flex justify-between">
                 <span>CPU</span>
-                <span className={sensorData.cpuUsage > 80 ? 'text-red-400' : sensorData.cpuUsage > 60 ? 'text-yellow-400' : 'text-green-400'}>
+                <span className={getResourceColor(sensorData.cpuUsage || 0)}>
                   {(sensorData.cpuUsage || 0).toFixed(0)}%
                 </span>
               </div>
               <Progress 
                 value={sensorData.cpuUsage || 0} 
-                className="h-1 bg-gray-800"
+                className={`h-1 bg-gray-800 ${getResourceProgressColor(sensorData.cpuUsage || 0)}`}
               />
             </div>
             <div>
               <div className="flex justify-between">
                 <span>RAM</span>
-                <span className={sensorData.ramUsage > 80 ? 'text-red-400' : sensorData.ramUsage > 60 ? 'text-yellow-400' : 'text-green-400'}>
+                <span className={getResourceColor(sensorData.ramUsage || 0)}>
                   {(sensorData.ramUsage || 0).toFixed(0)}%
                 </span>
               </div>
               <Progress 
                 value={sensorData.ramUsage || 0} 
-                className="h-1 bg-gray-800"
+                className={`h-1 bg-gray-800 ${getResourceProgressColor(sensorData.ramUsage || 0)}`}
               />
             </div>
           </div>

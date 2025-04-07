@@ -196,7 +196,7 @@ class SoundManager:
         abs_turn = abs(turn_value)
         
         # Acceleration sound
-        if abs_speed > 0.1 and acceleration > 0.05:
+        if speed > 0.1:
             if not self.is_accelerating:
                 self.play_sound("acceleration", loop=True)
                 self.is_accelerating = True

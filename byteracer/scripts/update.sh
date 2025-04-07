@@ -46,14 +46,14 @@ get_config() {
     local key=$1
     local default=$2
     
-    # If the config file doesn't exist, log (to stderr) and output default
+    # Check if the config file exists
     if [ ! -f "$CONFIG_FILE" ]; then
         log "Config file not found: $CONFIG_FILE, using default: $default" >&2
         echo "$default"
         return
     fi
     
-    # If jq is not available, log (to stderr) and output default
+    # Check if jq is installed
     if ! command -v jq &> /dev/null; then
         log "jq command not found, using default: $default" >&2
         echo "$default"
@@ -64,7 +64,7 @@ get_config() {
     value=$(jq -r "$key" "$CONFIG_FILE" 2>/dev/null)
     result=$?
     
-    # If the key wasn't found or the value is null, log (to stderr) and output default
+    # Return the default value if the key doesn't exist or value is null
     if [ $result -ne 0 ] || [ "$value" = "null" ]; then
         log "Key $key not found in config or is null, using default: $default" >&2
         echo "$default"
@@ -97,8 +97,13 @@ log "Checking for updates from GitHub branch: $BRANCH..."
 speak "Checking for updates from GitHub branch $BRANCH."
 
 run_cmd "git fetch origin"
-LOCAL=$(run_cmd "git rev-parse HEAD" | tail -1)
-REMOTE=$(run_cmd "git rev-parse origin/$BRANCH" | tail -1)
+
+# Capture commit hashes directly without extra logging text
+LOCAL=$(git rev-parse HEAD)
+REMOTE=$(git rev-parse origin/$BRANCH)
+
+log "Local commit hash: $LOCAL"
+log "Remote commit hash: $REMOTE"
 
 if [ "$LOCAL" = "$REMOTE" ]; then
     log "Already up to date. No update needed."
@@ -179,11 +184,9 @@ if [ -d "byteracer" ]; then
         
         # Process each dependency in requirements.txt
         while IFS= read -r line || [ -n "$line" ]; do
-            # Skip comments and empty lines
             if [[ -z "$line" ]] || [[ "$line" =~ ^# ]]; then
                 continue
             fi
-            # Remove any version specifiers
             pkg=$(echo "$line" | cut -d'=' -f1)
             log "Installing python3-$pkg"
             run_cmd "sudo apt-get install -y python3-$pkg"
@@ -217,7 +220,6 @@ fi
 log "Update completed. Restarting services..."
 speak "Update completed. Restarting all services to apply the changes."
 
-# Restart all services
 log "Calling restart_services.sh"
 run_cmd "sudo bash \"${BYTERACER_PATH}/byteracer/scripts/restart_services.sh\""
 RESTART_STATUS=$?
@@ -228,7 +230,6 @@ else
     log "Services restarted successfully"
 fi
 
-# Verify running processes after restart
 log "Verifying running processes after restart:"
 run_cmd "ps aux | grep -E 'python3 main.py|bun run .* eaglecontrol|bun run .* relaytower' | grep -v grep"
 
