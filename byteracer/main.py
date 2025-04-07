@@ -181,6 +181,10 @@ class ByteRacer:
         # Apply TTS volume settings
         self.tts_manager.set_volume(settings["sound"]["tts_volume"])
         
+        # Apply TTS audio gain if available
+        if "tts_audio_gain" in settings["sound"]:
+            self.tts_manager.set_tts_audio_gain(settings["sound"]["tts_audio_gain"])
+        
         if "user_tts_volume" in settings["sound"]:
             self.tts_manager.set_user_tts_volume(settings["sound"]["user_tts_volume"])
         
@@ -905,6 +909,10 @@ class ByteRacer:
             if "user_tts_volume" in sound:
                 self.config_manager.set("sound.user_tts_volume", sound["user_tts_volume"])
                 self.tts_manager.set_user_tts_volume(sound["user_tts_volume"])
+
+            if "tts_audio_gain" in sound:
+                self.config_manager.set("sound.tts_audio_gain", sound["tts_audio_gain"])
+                self.tts_manager.set_tts_audio_gain(sound["tts_audio_gain"])
             
             if "system_tts_volume" in sound:
                 self.config_manager.set("sound.system_tts_volume", sound["system_tts_volume"])

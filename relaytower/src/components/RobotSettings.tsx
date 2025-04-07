@@ -312,6 +312,26 @@ export default function RobotSettings() {
                   }
                 />
               </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>TTS Audio Gain (dB)</span>
+                  <span>{localSettings.sound.tts_audio_gain !== undefined ? localSettings.sound.tts_audio_gain : 6}</span>
+                </div>
+                <Slider 
+                  value={[localSettings.sound.tts_audio_gain !== undefined ? localSettings.sound.tts_audio_gain : 6]}
+                  min={0}
+                  max={15}
+                  step={1}
+                  disabled={!localSettings.sound.tts_enabled}
+                  onValueChange={(value) => 
+                    updateSetting("sound", "tts_audio_gain", value[0])
+                  }
+                />
+                <div className="text-xs text-muted-foreground mt-1">
+                  Increase gain to boost TTS volume beyond normal levels
+                </div>
+              </div>
             </div>
             
             <div>

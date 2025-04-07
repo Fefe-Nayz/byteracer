@@ -22,6 +22,7 @@ class TTSManager:
         self.user_tts_volume = 80  # Volume for user-triggered TTS
         self.system_tts_volume = 90  # Volume for system/emergency TTS
         self.emergency_tts_volume = 95  # Volume for emergency TTS
+        self.audio_gain = 6  # Default gain in dB to make TTS louder (will be overridden by settings)
         self.sound_manager = sound_manager
         self._queue = asyncio.Queue()
         self._speaking = False
@@ -218,14 +219,14 @@ class TTSManager:
                 
             effective_volume = (self.volume / 100.0) * (priority_volume / 100.0)
             
-            if effective_volume != 1.0:
+            if effective_volume != 1.0 or self.audio_gain != 0:
                 volume_file = f"/tmp/tts_vol_{uuid.uuid4().hex}.wav"
                 
-                # Use sox to adjust volume
+                # Use sox to adjust volume and apply gain
                 vol_multiplier = max(0.0, min(1.0, effective_volume))
-                vol_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier}'
+                gain_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier} gain {self.audio_gain}'
                 
-                self._current_process = subprocess.Popen(vol_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self._current_process = subprocess.Popen(gain_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 result = self._current_process.wait()
                 self._current_process = None
                 
@@ -501,3 +502,13 @@ class TTSManager:
     def get_system_tts_volume(self):
         """Get the current system TTS volume level"""
         return self.system_tts_volume
+    
+    def set_tts_audio_gain(self, gain):
+        """
+        Set the audio gain for TTS playback.
+        
+        Args:
+            gain (int): Gain in dB (positive values increase volume)
+        """
+        self.audio_gain = gain
+        logger.info(f"TTS audio gain set to {self.audio_gain} dB")

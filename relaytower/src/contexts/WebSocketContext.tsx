@@ -125,6 +125,7 @@ export interface RobotSettings {
     voice_volume: number;
     tts_volume: number;
     user_tts_volume: number;
+    tts_audio_gain: number;
     system_tts_volume: number;
     emergency_tts_volume: number;
   };

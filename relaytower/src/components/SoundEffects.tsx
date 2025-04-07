@@ -68,6 +68,14 @@ export default function SoundEffects() {
     { id: "fave", name: "Favéé", icon: "🎤" },
     { id: "pipe", name: "Pipe", icon: "🔩" },
     { id: "tuile", name: "Une Tuile", icon: "🧱" },
+    { id: "india", name: "India", icon: "🇮🇳" },
+    { id: "vine-boom", name: "Vine Boom", icon: "💥" },
+    { id: "tralalelo-tralala", name: "Tralalelo", icon: "🦈" },
+    { id: "get-out", name: "Get Out", icon: "🚪" },
+    { id:"scream", name: "Scream", icon: "😱" },
+    { id:"wtf", name: "WTF", icon: "🤯" },
+    { id:"rat-dance", name: "Rat Dance", icon: "🐀" },
+    { id:"ph", name: "PH", icon: "🤨"}
   ];
   
   const soundEnabled = settings?.sound.enabled || false;
@@ -97,31 +105,33 @@ export default function SoundEffects() {
         </div>
       </div>
       
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        {soundEffects.map(sound => (
-          <Button
-            key={sound.id}
-            variant="outline"
-            onClick={() => handlePlaySound(sound.id)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              handleSelectSound(sound.id);
-              return false;
-            }}
-            disabled={status !== "connected" || !soundEnabled }
-            className={`h-auto py-3 relative ${selectedSound === sound.id ? 'border-2 border-primary' : ''}`}
-          >
-            <div className="flex flex-col items-center">
-              <span className="text-xl mb-1">{sound.icon}</span>
-              <span className="text-xs">{sound.name}</span>
-              {selectedSound === sound.id && (
-                <span className="absolute top-0 right-0 p-1">
-                  <Gamepad className="h-3 w-3 text-primary" />
-                </span>
-              )}
-            </div>
-          </Button>
-        ))}
+      <div className="h-[245px] overflow-y-auto pr-2">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {soundEffects.map(sound => (
+        <Button
+          key={sound.id}
+          variant="outline"
+          onClick={() => handlePlaySound(sound.id)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            handleSelectSound(sound.id);
+            return false;
+          }}
+          disabled={status !== "connected" || !soundEnabled }
+          className={`h-auto py-3 relative ${selectedSound === sound.id ? 'border-2 border-primary' : ''}`}
+        >
+          <div className="flex flex-col items-center">
+            <span className="text-xl mb-1">{sound.icon}</span>
+            <span className="text-xs">{sound.name}</span>
+            {selectedSound === sound.id && (
+          <span className="absolute top-0 right-0 p-1">
+            <Gamepad className="h-3 w-3 text-primary" />
+          </span>
+            )}
+          </div>
+        </Button>
+          ))}
+        </div>
       </div>
       
       <div className="mt-3 text-xs text-muted-foreground">
