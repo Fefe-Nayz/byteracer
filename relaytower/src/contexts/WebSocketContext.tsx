@@ -162,6 +162,9 @@ export interface RobotSettings {
     repo_url: string;
     auto_update: boolean;
   };
+  api: {
+    openai_api_key: string;
+  }
 }
 
 // Define command response interface

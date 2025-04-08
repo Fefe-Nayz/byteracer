@@ -108,6 +108,7 @@ Les points de mise à jour et d’amélioration identifiés incluent notamment :
 
 # TODO:
 PUR PYTHON:
+- Implémenter l'intégration avec chatGPT https://platform.openai.com/docs/models/gpt-4o https://docs.sunfounder.com/projects/pidog/en/latest/openai.html
 - Implémenter l'intégration avec chatGPT https://docs.sunfounder.com/projects/picar-x-v20/fr/latest/openai.html#modification-des-parametres-facultatif
 - Pouvoir afficher une session "SSH" via websocket sur l'interface utilisateur (taper des commandes directement sur l'interface utilisateur)
 

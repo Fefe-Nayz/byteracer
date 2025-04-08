@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { 
   Volume2, Megaphone, Camera, AlertTriangle,
   PersonStanding, TrafficCone, BarChart, Gamepad2,
-  Repeat, GitBranch
+  Repeat, GitBranch, BrainCircuit
 } from "lucide-react";
 
 export default function RobotSettings() {
@@ -689,17 +689,16 @@ export default function RobotSettings() {
       
       {/* GitHub & System Settings - NEW CARD */}
       <Card className="p-4 md:col-span-2">
-        <h3 className="font-bold mb-4">System Settings</h3>
-        
-        <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* GitHub settings */}
           <div className="space-y-4">
+            <h3 className="font-bold mb-4">System Settings</h3>
             <div className="flex items-center space-x-2 mb-2">
               <GitBranch className="h-4 w-4" />
               <span className="text-sm font-medium">GitHub Repository Settings</span>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <div className="mb-1 text-xs">Repository URL</div>
                 <Input 
@@ -730,6 +729,30 @@ export default function RobotSettings() {
                   updateSetting("github", "auto_update", checked)
                 }
               />
+            </div>
+          </div>
+          
+          {/* API Settings */}
+          <div className="space-y-4">
+            <h3 className="font-bold mb-4">API Settings</h3>
+            <div className="flex items-center space-x-2 mb-2">
+              <BrainCircuit className="h-4 w-4" />
+              <span className="text-sm font-medium">OpenAI Integration</span>
+            </div>
+            
+            <div className="grid grid-cols-1 gap-4">
+              <div>
+                <div className="mb-1 text-xs">API Key</div>
+                <Input 
+                  type="password"
+                  value={localSettings.api?.openai_api_key || ""}
+                  onChange={(e) => updateSetting("api", "openai_api_key", e.target.value)}
+                  placeholder="sk-..."
+                />
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Required for GPT voice commands and vision features
+                </div>
+              </div>
             </div>
           </div>
         </div>

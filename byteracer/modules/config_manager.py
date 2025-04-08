@@ -90,6 +90,11 @@ class ConfigManager:
                 "repo_url": "https://github.com/nayzflux/byteracer.git",
                 "auto_update": True
             },
+
+            # API settings
+            "api": {
+                "openai_api_key": ""
+            },
         }
         
         # Lock for thread safety
@@ -390,6 +395,11 @@ class ConfigManager:
                 "branch": "working-2",
                 "repo_url": "https://github.com/nayzflux/byteracer.git",
                 "auto_update": True
+            },
+
+            # API settings
+            "api": {
+                "openai_api_key": ""
             },
         }
         

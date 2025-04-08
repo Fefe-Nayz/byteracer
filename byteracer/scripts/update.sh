@@ -1,5 +1,5 @@
 #!/bin/bash
-# Update script for ByteRacer with TTS feedback
+# Update script for ByteRacer with TTS feedback (hard reset)
 
 # Project paths
 BYTERACER_PATH="/home/pi/ByteRacer"
@@ -12,7 +12,7 @@ LOG_FILE="${SCRIPTS_DIR}/update.log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== UPDATE STARTED =========="
 
-# Function to log with timestamp (logs to stdout)
+# Function to log with timestamp
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
@@ -24,9 +24,9 @@ run_cmd() {
     output=$(eval "$cmd" 2>&1)
     exit_code=$?
     if [ -n "$output" ]; then
-        echo "$output" | while IFS= read -r line; do
-            log "  > $line"
-        done
+       echo "$output" | while IFS= read -r line; do
+           log "  > $line"
+       done
     fi
     log "Command exit code: $exit_code"
     return $exit_code
@@ -41,30 +41,26 @@ speak() {
     fi
 }
 
-# Function to get a value from the config file
+# Function to get a configuration value from the JSON config file
 get_config() {
     local key=$1
     local default=$2
     
-    # Check if the config file exists
     if [ ! -f "$CONFIG_FILE" ]; then
         log "Config file not found: $CONFIG_FILE, using default: $default" >&2
         echo "$default"
         return
     fi
     
-    # Check if jq is installed
     if ! command -v jq &> /dev/null; then
         log "jq command not found, using default: $default" >&2
         echo "$default"
         return
     fi
     
-    # Get the value from the config file
     value=$(jq -r "$key" "$CONFIG_FILE" 2>/dev/null)
     result=$?
     
-    # Return the default value if the key doesn't exist or value is null
     if [ $result -ne 0 ] || [ "$value" = "null" ]; then
         log "Key $key not found in config or is null, using default: $default" >&2
         echo "$default"
@@ -80,7 +76,6 @@ speak "Starting update process for ByteRacer."
 
 run_cmd "cd \"${BYTERACER_PATH}\""
 
-# Get the branch and repository URL from configuration.
 BRANCH=$(get_config ".github.branch" "working-2")
 REPO_URL=$(get_config ".github.repo_url" "https://github.com/nayzflux/byteracer.git")
 
@@ -88,17 +83,15 @@ log "Using GitHub Repository: $REPO_URL"
 log "Using branch: $BRANCH"
 speak "Using branch: $BRANCH for update."
 
-# Configure Git to handle directory ownership issues
 log "Configuring Git safe directory..."
 run_cmd "git config --global --add safe.directory \"${BYTERACER_PATH}\""
 
-# Check for git updates
 log "Checking for updates from GitHub branch: $BRANCH..."
 speak "Checking for updates from GitHub branch $BRANCH."
 
 run_cmd "git fetch origin"
 
-# Capture commit hashes directly without extra logging text
+# Capture commit hashes directly
 LOCAL=$(git rev-parse HEAD)
 REMOTE=$(git rev-parse origin/$BRANCH)
 
@@ -112,25 +105,15 @@ if [ "$LOCAL" = "$REMOTE" ]; then
     exit 0
 fi
 
-# Updates found, pull changes
-log "Updates found on branch $BRANCH. Pulling latest code..."
+log "Updates found on branch $BRANCH. Performing hard reset..."
 speak "Updates found on branch $BRANCH. Downloading latest version."
 
-# Switch to the specified branch and pull changes
-run_cmd "git checkout $BRANCH"
+# Perform a forced hard reset to update local branch to remote HEAD.
+run_cmd "git reset --hard origin/$BRANCH"
 GIT_STATUS=$?
 if [ $GIT_STATUS -ne 0 ]; then
-    log "Error: Failed to checkout branch $BRANCH (exit code $GIT_STATUS)"
-    speak "Error checking out branch $BRANCH. Update failed."
-    log "========== UPDATE FAILED =========="
-    exit 1
-fi
-
-run_cmd "git pull origin $BRANCH"
-GIT_STATUS=$?
-if [ $GIT_STATUS -ne 0 ]; then
-    log "Error: Failed to pull from branch $BRANCH (exit code $GIT_STATUS)"
-    speak "Error pulling updates from branch $BRANCH. Update failed."
+    log "Error: Failed to perform hard reset on branch $BRANCH (exit code $GIT_STATUS)"
+    speak "Error updating branch $BRANCH. Update failed."
     log "========== UPDATE FAILED =========="
     exit 1
 fi
@@ -182,7 +165,6 @@ if [ -d "byteracer" ]; then
         speak "Updating Python dependencies."
         run_cmd "cd byteracer && cat requirements.txt"
         
-        # Process each dependency in requirements.txt
         while IFS= read -r line || [ -n "$line" ]; do
             if [[ -z "$line" ]] || [[ "$line" =~ ^# ]]; then
                 continue

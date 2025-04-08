@@ -43,13 +43,21 @@ class GPTManager:
         self.tts_manager = tts_manager
         self.sound_manager = sound_manager
         
-        # OpenAI API settings
-        self.api_key = os.environ.get("OPENAI_API_KEY")
-        if not self.api_key:
-            logger.warning("OPENAI_API_KEY not found in environment variables")
+        # Get config manager
+        import importlib
+        config_module = importlib.import_module("modules.config_manager")
+        self.config_manager = config_module.ConfigManager()
         
-        # Configure API parameters
-        self.model = "gpt-4-vision-preview"  # Use vision model for image processing
+        # Load API key from config
+        api_settings = self.config_manager.get("api")
+        
+        # OpenAI API settings
+        self.api_key = os.environ.get("OPENAI_API_KEY") or api_settings.get("openai_api_key", "")
+        if not self.api_key:
+            logger.warning("OPENAI_API_KEY not found in environment variables or settings")
+        
+        # Default API parameters
+        self.model = "gpt-4-vision-preview"
         self.max_tokens = 2000
         self.temperature = 0.7
         

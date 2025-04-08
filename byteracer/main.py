@@ -1017,6 +1017,16 @@ class ByteRacer:
                 self.config_manager.set("github.repo_url", settings["github"]["repo_url"])
             if "auto_update" in settings["github"]:
                 self.config_manager.set("github.auto_update", settings["github"]["auto_update"])
+                
+        if "api" in settings:
+            api = settings["api"]
+            
+            if "openai_api_key" in api:
+                self.config_manager.set("api.openai_api_key", api["openai_api_key"])
+                # Update GPT manager with new API key if it exists
+                if hasattr(self, 'gpt_manager'):
+                    self.gpt_manager.api_key = api["openai_api_key"]
+                    logging.info("Updated GPT manager with new API key")
         
         # Save settings
         await self.save_config_settings()

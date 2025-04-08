@@ -7,17 +7,17 @@ import { useWebSocket } from "@/contexts/WebSocketContext";
 import MiniSensorOverlay from "./MiniSensorOverlay";
 
 // Memoized freeze notification component to prevent unnecessary re-renders
-const FreezeNotification = memo(({ 
-  isFullscreen, 
-  onRestart, 
-  onDismiss 
-}: { 
-  isFullscreen: boolean; 
-  onRestart: () => void; 
-  onDismiss: (e?: React.MouseEvent) => void; 
+const FreezeNotification = memo(({
+  isFullscreen,
+  onRestart,
+  onDismiss
+}: {
+  isFullscreen: boolean;
+  onRestart: () => void;
+  onDismiss: (e?: React.MouseEvent) => void;
 }) => {
   const [isHovered, setIsHovered] = useState(false);
-  
+
   // For non-fullscreen mode, just show a button in the header
   if (!isFullscreen) {
     return (
@@ -42,7 +42,7 @@ const FreezeNotification = memo(({
 
   // For fullscreen mode, show a notification that expands on hover
   const baseClasses = "absolute top-6 left-6 z-50 rounded-md shadow-lg transition-all duration-300";
-  
+
   if (isHovered) {
     // Expanded notification
     return (
@@ -116,15 +116,15 @@ export default function CameraFeed() {
   const [showControls, setShowControls] = useState(false);
   const [aspectRatio, setAspectRatio] = useState("4/3"); // Default aspect ratio
   const [showSensorOverlay, setShowSensorOverlay] = useState(true); // State to toggle sensor overlay
-  
+
   // Use refs for values that shouldn't trigger re-renders when they change
   const isFrozenRef = useRef(false);
   const userDismissedRef = useRef(false);
   const prevFrozenStateRef = useRef(false);
-  
+
   // State to force notification rendering - will only change when truly needed
   const [notificationKey, setNotificationKey] = useState(0);
-  
+
   const { cameraStatus, restartCameraFeed } = useWebSocket();
 
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -153,7 +153,7 @@ export default function CameraFeed() {
     if (isCameraCurrentlyFrozen !== wasFrozenBefore) {
       prevFrozenStateRef.current = isCameraCurrentlyFrozen;
       isFrozenRef.current = isCameraCurrentlyFrozen;
-      
+
       if (isCameraCurrentlyFrozen) {
         // Camera just became frozen
         userDismissedRef.current = false;
@@ -335,7 +335,7 @@ export default function CameraFeed() {
 
         {/* Freeze notification - only rendered when needed, with a stable key to prevent flickering */}
         {shouldShowNotification && (
-          <FreezeNotification 
+          <FreezeNotification
             key={`fullscreen-notification-${notificationKey}`}
             isFullscreen={true}
             onRestart={restartCamera}
@@ -345,9 +345,8 @@ export default function CameraFeed() {
 
         {/* Exit fullscreen button - visible only on mouse movement */}
         <div
-          className={`absolute top-6 right-6 transition-opacity duration-300 z-50 ${
-            showControls ? "opacity-100" : "opacity-0 pointer-events-none"
-          }`}
+          className={`absolute top-6 right-6 transition-opacity duration-300 z-50 ${showControls ? "opacity-100" : "opacity-0 pointer-events-none"
+            }`}
         >
           <Button
             variant="secondary"
@@ -361,9 +360,8 @@ export default function CameraFeed() {
 
         {/* Sensor overlay toggle button - visible only on mouse movement */}
         <div
-          className={`absolute top-6 right-20 transition-opacity duration-300 z-50 ${
-            showControls ? "opacity-100" : "opacity-0 pointer-events-none"
-          }`}
+          className={`absolute top-6 right-20 transition-opacity duration-300 z-50 ${showControls ? "opacity-100" : "opacity-0 pointer-events-none"
+            }`}
         >
           <Button
             variant="secondary"
@@ -389,7 +387,7 @@ export default function CameraFeed() {
           <div className="flex gap-2">
             {/* Freeze notification for card view - only rendered when needed */}
             {shouldShowNotification && (
-              <FreezeNotification 
+              <FreezeNotification
                 key={`card-notification-${notificationKey}`}
                 isFullscreen={false}
                 onRestart={restartCamera}
@@ -418,13 +416,14 @@ export default function CameraFeed() {
         </div>
       </CardHeader>
       <CardContent className="relative">
-        {isLoading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background z-20">
-            <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"></div>
-          </div>
-        )}
+
 
         <div className="relative rounded-md overflow-hidden aspect-[16/9]">
+          {isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background z-20">
+              <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full"></div>
+            </div>
+          )}
           {/* Error state - positioned over entire feed */}
           {error && (
             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 z-30 rounded-md bg-background">
