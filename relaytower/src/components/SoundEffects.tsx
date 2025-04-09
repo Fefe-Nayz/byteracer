@@ -75,7 +75,8 @@ export default function SoundEffects() {
     { id:"scream", name: "Scream", icon: "😱" },
     { id:"wtf", name: "WTF", icon: "🤯" },
     { id:"rat-dance", name: "Rat Dance", icon: "🐀" },
-    { id:"ph", name: "PH", icon: "🤨"}
+    { id:"ph", name: "PH", icon: "🤨"},
+    { id:"aurores", name: "Dragorores", icon: "🐉" },
   ];
   
   const soundEnabled = settings?.sound.enabled || false;
