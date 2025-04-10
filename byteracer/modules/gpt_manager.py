@@ -262,10 +262,14 @@ class GPTManager:
           ],
           "additionalProperties": False
         }
-      },
-      "text": {
+      },      "text": {
         "type": "string",
         "description": "A textual message for TTS output and on-screen feedback."
+      },
+      "language": {
+        "type": "string",
+        "enum": ["en-us", "en-uk", "fr", "de", "es", "it"],
+        "description": "The language for text-to-speech output. Default is English (US)."
       }
     },
     "required": [
@@ -655,11 +659,12 @@ Tone: Cheerful, optimistic, humorous, and playful.
         if not all(key in response for key in required_keys):
             await self.tts_manager.say("Received incomplete command instructions.", priority=1)
             return False
-        
-        # Always output TTS feedback.
+          # Always output TTS feedback.
         text_output = response.get("text", "")
+        language = response.get("language", None)  # Get the language if specified
+        
         if text_output:
-            await self.tts_manager.say(text_output, priority=1)
+            await self.tts_manager.say(text_output, priority=1, lang=language)
         
         action_type = response.get("action_type")
         if action_type == "python_script":

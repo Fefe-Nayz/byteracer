@@ -1123,12 +1123,29 @@ class ByteRacer:
                 self.sensor_manager.manual_emergency_stop()
                 result["success"] = True
                 result["message"] = "Emergency stop activated"
-                
-            elif command == "clear_emergency":
+
+
+
+                  elif command == "clear_emergency":
                 # Clear emergency stop
                 self.sensor_manager.clear_manual_stop()
                 result["success"] = True
                 result["message"] = "Emergency stop cleared"
+                
+            elif command == "new_conversation":
+                # Create a new GPT conversation (reset thread)
+                success = await self.gpt_manager.create_new_conversation(self.websocket)
+                if success:
+                    result = {
+                        "success": True,
+                        "message": "Created new GPT conversation"
+                    }
+                    await self.tts_manager.say("Starting a new conversation.", priority=1)
+                else:
+                    result = {
+                        "success": False,
+                        "message": "Failed to create new GPT conversation"
+                    }
                 
             else:
                 result["message"] = f"Unknown command: {command}"
