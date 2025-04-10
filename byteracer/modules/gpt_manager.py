@@ -97,7 +97,7 @@ class GPTManager:
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", f"Failed to create new conversation: {str(e)}")
             return False
-    async def process_gpt_command(self, prompt: str, use_camera: bool = False, websocket = None, new_conversation=False) -> bool:
+    async def process_gpt_command(self, prompt: str, use_camera: bool = False, websocket = None, new_conversation=False, robot_state=None) -> bool:
         """
         Process a GPT command with optional camera feed inclusion.
         
@@ -125,7 +125,7 @@ class GPTManager:
                     await self._send_gpt_status_update(websocket, "error", "API key missing")
                 return False
 
-            old_state = self.sensor_manager.robot_state
+            old_state = robot_state if robot_state is not None else self.robot_state_enum.WAITING_FOR_INPUT
             self.sensor_manager.robot_state = self.robot_state_enum.GPT_CONTROLLED
 
             if websocket:

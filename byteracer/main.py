@@ -1292,10 +1292,10 @@ class ByteRacer:
         while True:
             try:
                 # Always update sensor manager with current client status
-                self.sensor_manager.update_client_status(
-                    self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT,
-                    self.sensor_manager.robot_state != RobotState.WAITING_FOR_INPUT
-                )
+                # self.sensor_manager.update_client_status(
+                #     self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT,
+                #     self.sensor_manager.robot_state != RobotState.WAITING_FOR_INPUT
+                # )
                 
                 # Send sensor data every second if client is connected
                 if self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
