@@ -268,7 +268,7 @@ class GPTManager:
       },
       "language": {
         "type": "string",
-        "enum": ["en-us", "en-uk", "fr", "de", "es", "it"],
+        "enum": ["en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"],
         "description": "The language for text-to-speech output. Default is English (US)."
       }
     },
@@ -447,12 +447,18 @@ Tone: Cheerful, optimistic, humorous, and playful.
             await self.tts_manager.say(f"I encountered an error: {str(e)}", priority=1)
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", f"Error: {str(e)}")
-            return False
+            return False        
         finally:
             # Reset the processing flag and restore the previous robot state
             self.is_processing = False
-            self.sensor_manager.robot_state = self.robot_state_enum.CONTROLLED_BY_CLIENT
-            logger.info(f"Robot state restored from {old_state} to {self.robot_state_enum.CONTROLLED_BY_CLIENT}")
+            if old_state != self.robot_state_enum.WAITING_FOR_INPUT:
+                # Only restore to previous state if it wasn't the waiting state
+                self.sensor_manager.robot_state = old_state
+            else:
+                # If previous state was waiting, set to client controlled
+                self.sensor_manager.robot_state = self.robot_state_enum.CONTROLLED_BY_CLIENT
+            
+            logger.info(f"Robot state restored from {self.robot_state_enum.GPT_CONTROLLED} to {self.sensor_manager.robot_state}")
                     
             # Make sure motors are stopped when command finishes
             self.px.forward(0)  # Stop all motors as a safety measure

@@ -178,17 +178,17 @@ class SensorManager:
             
         except Exception as e:
             logger.error(f"Error updating sensor readings: {e}")
-    
     def _check_emergency_conditions(self):
         """Check all emergency conditions and return the highest priority one"""
         now = time.time()
         
-        # Only check for new emergencies after cooldown period
-        if now - self._last_emergency_time < self._emergency_cooldown:
-            return EmergencyState.NONE
-        
         # Skip all emergency checks when robot is in GPT controlled state
         if self.robot_state == RobotState.GPT_CONTROLLED:
+            logger.info("Skipping emergency checks while in GPT controlled state")
+            return EmergencyState.NONE
+            
+        # Only check for new emergencies after cooldown period
+        if now - self._last_emergency_time < self._emergency_cooldown:
             return EmergencyState.NONE
         
         # Only check emergencies if client is currently connected

@@ -386,7 +386,7 @@ class ByteRacer:
                 self.last_activity_time = time.time()
                 
                 # Ensure client is marked as connected when we receive input
-                if self.sensor_manager.robot_state != RobotState.CONTROLLED_BY_CLIENT:
+                if self.sensor_manager.robot_state != RobotState.CONTROLLED_BY_CLIENT and self.sensor_manager.robot_state != RobotState.GPT_CONTROLLED:
                     logging.info("Received gamepad input from client, marking as connected")
                     self.sensor_manager.robot_state = RobotState.CONTROLLED_BY_CLIENT
                     self.sensor_manager.update_client_status(True, True)
@@ -1183,7 +1183,7 @@ class ByteRacer:
     
     async def send_battery_info(self, level):
         """Send battery information to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT):
+        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
             try:
                 await self.websocket.send(json.dumps({
                     "name": "battery_info",
@@ -1199,7 +1199,7 @@ class ByteRacer:
     
     async def send_sensor_data_to_client(self):
         """Send sensor data to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT):
+        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
             try:
                 # Get raw sensor data
                 sensor_data = self.sensor_manager.get_sensor_data()
@@ -1245,7 +1245,7 @@ class ByteRacer:
     
     async def send_camera_status_to_client(self):
         """Send camera status to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT):
+        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
             try:
                 camera_status = self.camera_manager.get_status()
                 
@@ -1260,7 +1260,7 @@ class ByteRacer:
     
     async def send_command_response(self, result):
         """Send command response to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT):
+        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
             try:
                 await self.websocket.send(json.dumps({
                     "name": "command_response",
@@ -1273,7 +1273,7 @@ class ByteRacer:
     
     async def send_settings_to_client(self):
         """Send current settings to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT):
+        if self.websocket and (self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
             try:
                 settings = self.config_manager.get()
                 
@@ -1298,7 +1298,7 @@ class ByteRacer:
                 )
                 
                 # Send sensor data every second if client is connected
-                if self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT:
+                if self.sensor_manager.robot_state == RobotState.CONTROLLED_BY_CLIENT or self.sensor_manager.robot_state == RobotState.WAITING_FOR_INPUT or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
                     try:
                         await self.send_sensor_data_to_client()
                         logging.debug("Periodic sensor data sent")
