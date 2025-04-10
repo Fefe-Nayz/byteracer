@@ -121,7 +121,7 @@ class SensorManager:
                 await self._update_sensor_readings()
                 
                 # Check for emergencies - only if client has connected at least once
-                if self.robot_state != RobotState.WAITING_FOR_CLIENT:
+                if self.robot_state != RobotState.WAITING_FOR_CLIENT or self.robot_state != RobotState.GPT_CONTROLLED:
                     emergency = self._check_emergency_conditions()
                     
                     # Handle any detected emergency

@@ -661,7 +661,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
             return None
     
     async def _process_actions(self, response: Dict[str, Any]) -> bool:
-        required_keys = ["action_type", "python_script", "predefined_functions", "motor_sequence", "text"]
+        required_keys = ["action_type", "python_script", "predefined_functions", "motor_sequence", "text", "language"]
         if not all(key in response for key in required_keys):
             await self.tts_manager.say("Received incomplete command instructions.", priority=1)
             return False
