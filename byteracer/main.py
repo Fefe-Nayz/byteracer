@@ -376,8 +376,12 @@ class ByteRacer:
                     await self.send_camera_status_to_client()
                 else:
                     logging.info(f"Received client register message, type: {data['data'].get('type', 'unknown')}")
-            
             elif data["name"] == "gamepad_input":
+                # Check if robot is in GPT controlled state - completely ignore input if it is
+                if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
+                    logging.info("Completely ignoring gamepad input while in GPT controlled state")
+                    return
+                    
                 # Handle gamepad input
                 await self.handle_gamepad_input(data["data"])
                 
@@ -386,7 +390,7 @@ class ByteRacer:
                 self.last_activity_time = time.time()
                 
                 # Ensure client is marked as connected when we receive input
-                if self.sensor_manager.robot_state != RobotState.CONTROLLED_BY_CLIENT and self.sensor_manager.robot_state != RobotState.GPT_CONTROLLED:
+                if self.sensor_manager.robot_state != RobotState.CONTROLLED_BY_CLIENT:
                     logging.info("Received gamepad input from client, marking as connected")
                     self.sensor_manager.robot_state = RobotState.CONTROLLED_BY_CLIENT
                     self.sensor_manager.update_client_status(True, True)
@@ -460,7 +464,6 @@ class ByteRacer:
                     "success": success,
                     "message": "TTS speech stopped"
                 })
-                
             elif data["name"] == "gpt_command":
                 # Handle GPT command
                 if "prompt" in data["data"]:
@@ -468,10 +471,16 @@ class ByteRacer:
                     use_camera = data["data"].get("useCamera", False)
                     logging.info(f"Received GPT command: {prompt}, useCamera: {use_camera}")
 
+                    old_state = self.sensor_manager.robot_state
+
                     # Set robot state to GPT controlled
                     self.sensor_manager.robot_state = RobotState.GPT_CONTROLLED
                     
-                    success = await self.gpt_manager.process_gpt_command(prompt, use_camera, websocket=self.websocket)
+                    # Send sensor data update immediately to update client UI with GPT_CONTROLLED state
+                    await self.send_sensor_data_to_client()
+                    
+                    # Process GPT command in a separate task to avoid blocking the WebSocket message handler
+                    asyncio.create_task(self._handle_gpt_command(prompt, use_camera, old_state))
                     
                     await self.send_command_response({  
                         "success": success,
@@ -1317,6 +1326,33 @@ class ByteRacer:
             except Exception as e:
                 logging.error(f"Error in periodic tasks: {e}", exc_info=True)
                 await asyncio.sleep(2)  # Shorter sleep on error
+
+    async def _handle_gpt_command(self, prompt, use_camera, old_state):
+        """
+        Handle GPT command processing in a separate task so it doesn't block the WebSocket message handler.
+        This allows the robot to properly ignore input during GPT mode instead of queuing them.
+        
+        Args:
+            prompt: The user's prompt text
+            use_camera: Whether to use the camera
+            old_state: The previous robot state to restore after processing
+        """
+        try:
+            # Process the GPT command
+            success = await self.gpt_manager.process_gpt_command(prompt, use_camera, 
+                                                                websocket=self.websocket,
+                                                                robot_state=old_state)
+            
+            logging.info(f"GPT command processing completed with status: {success}")
+            
+            # Send updated sensor data to client to reflect state changes
+            await self.send_sensor_data_to_client()
+            
+        except Exception as e:
+            logging.error(f"Error processing GPT command: {e}")
+            # Make sure to restore robot state on error
+            self.sensor_manager.robot_state = old_state
+            await self.send_sensor_data_to_client()
 
 async def main():
     """Main entry point for ByteRacer"""

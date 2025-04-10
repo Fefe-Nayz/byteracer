@@ -334,6 +334,57 @@ If you want to manipulate motors or camera, call methods on `px` such as:
 - `px.set_dir_servo_angle(angle)`
 - `px.set_cam_pan_angle(angle)`
 
+You can also read the sensor values using `px` methods like:
+- `px.get_distance()` for ultrasonic sensor (returns distance in cm).
+- `px.get_line_sensor_value()` for line following sensors (returns a list of values).
+
+Your python script will be put inside a predefined header/footer. like this:
+```python
+import os
+import sys
+import time
+import asyncio
+import logging
+from picarx import Picarx
+import cv2
+import numpy as np
+import requests
+from io import BytesIO
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+px = Picarx()
+
+def get_camera_frame():
+    try:
+        response = requests.get("http://127.0.0.1:9000/mjpg.jpg", timeout=1)
+        if response.status_code == 200:
+            image_bytes = response.content
+            nparr = np.frombuffer(image_bytes, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            return frame
+        else:
+            logger.error(f"Failed to get camera image, status code: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"Error getting camera image: {e}")
+        return None
+
+try:
+
+YOUR CODE WILL BE PUT HERE LIKE THIS: "\n".join(f"    {line}" for line in script_code.split("\n"))
+
+except KeyboardInterrupt:
+    logger.info("Script interrupted by user")
+except Exception as e:
+    logger.error(f"Script error: {e}")
+finally:
+    px.set_motor_speed("rear_left", 0)
+    px.set_motor_speed("rear_right", 0)
+    px.set_dir_servo_angle(0)
+    logger.info("Script ended, motors stopped")
+```
+
 2. **Call predefined functions** (action_type: "predefined_function").  
    Available functions include:
       - move(motor_id: string, speed: number): Moves the specified motor at a given speed (0 to 100%).
