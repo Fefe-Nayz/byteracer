@@ -730,11 +730,11 @@ Tone: Cheerful, optimistic, humorous, and playful.
         value = act.get("value", 0)
         if command == "set_speed":
             # For DC motors (rear_left, rear_right), value in range -100 to 100.
-            if motor_id == "motor_1":  # Left motor
+            if motor_id == "rear_left":  # Left motor
                 self.px.set_motor_speed(1, value)
                 logger.debug(f"Set motor 1 (left) speed to {value}")
-            elif motor_id == "motor_2":  # Right motor
-                self.px.set_motor_speed(2, value)
+            elif motor_id == "rear_right":  # Right motor
+                self.px.set_motor_speed(2, -value)
                 logger.debug(f"Set motor 2 (right) speed to {value}")
             else:
                 logger.warning(f"set_speed command received for unknown motor id: {motor_id}")
