@@ -205,7 +205,7 @@ class GPTManager:
               "type": "string",
               "description": "The name of the function to be called."
             },
-            "parameters": {
+"parameters": {
               "type": "object",
               "description": "A JSON object containing the parameters for the function.",
               "additionalProperties": True
@@ -287,12 +287,12 @@ class GPTManager:
                 request_params = {
                     "model": self.model,
                     "input": [{"role": "user", "content": input_content}],
-                    "text": {
+"text": {
                         "format": {
                             "type": "json_schema",
                             "schema": schema,
                             "name": "robot_action",
-                            "strict": True
+                            "strict": False
                         }
                     },
                     "instructions": """
