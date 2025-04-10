@@ -283,7 +283,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
     
     async def _get_camera_image(self) -> Optional[str]:
         try:
-            response = requests.get("http://127.0.0.1:9000/frame.jpg", timeout=2)
+            response = requests.get("http://127.0.0.1:9000/mjpg", timeout=2)
             if response.status_code == 200:
                 image_bytes = response.content
                 image = Image.open(io.BytesIO(image_bytes))
@@ -386,7 +386,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
                     "additionalProperties": False
                 }
             }
-            url = "https://api.openai.com/v1/chat/completions"
+            url = "https://api.openai.com/v1/responses"
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}"
