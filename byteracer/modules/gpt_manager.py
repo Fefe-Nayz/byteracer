@@ -105,6 +105,7 @@ class GPTManager:
                         await self._send_gpt_status_update(websocket, "warning", "Camera feed not available, proceeding without image")
             
             messages = self._create_messages(system_prompt, prompt, image_data)
+            logger.info(f"GPT messages: {messages}")
             if websocket:
                 await self._send_gpt_status_update(websocket, "progress", "Querying ChatGPT for response...")
             
@@ -114,6 +115,7 @@ class GPTManager:
                     await self._send_gpt_status_update(websocket, "cancelled", "Command cancelled by user")
                 return False
             response = await self._call_openai_api(messages)
+            logger.info(f"GPT response: {response}")
             if not response:
                 await self.tts_manager.say("I couldn't process your request. Please try again.", priority=1)
                 if websocket:
