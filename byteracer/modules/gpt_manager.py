@@ -277,7 +277,8 @@ class GPTManager:
       "python_script",
       "predefined_functions",
       "motor_sequence",
-      "text"
+      "text",
+      "language"
     ],
     "additionalProperties": False
   }
