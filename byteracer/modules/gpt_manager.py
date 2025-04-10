@@ -12,6 +12,7 @@ import requests
 from pathlib import Path
 from PIL import Image
 from typing import Dict, List, Any, Optional
+from modules.sensor_manager import RobotState
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -47,7 +48,7 @@ class GPTManager:
         self.sensor_manager = sensor_manager
         self.config_manager = config_manager
 
-        self.robot_state_enum = self.sensor_manager.RobotState
+        self.robot_state_enum = RobotState
         
         api_settings = self.config_manager.get("api")
         self.api_key = os.environ.get("OPENAI_API_KEY") or api_settings.get("openai_api_key", "")
