@@ -273,14 +273,14 @@ Tone: Cheerful, optimistic, humorous, and playful.
                 "role": "user",
                 "content": [
                     {"type": "text", "text": user_prompt},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
+                    {"type": "input_image", "image_url": f"data:image/jpeg;base64,{image_data}"}
                 ]
             }
         else:
             user_message = {"role": "user", "content": user_prompt}
         messages.append(user_message)
         return messages
-    
+       
     async def _get_camera_image(self) -> Optional[str]:
         try:
             response = requests.get("http://127.0.0.1:9000/mjpg.jpg", timeout=2)
