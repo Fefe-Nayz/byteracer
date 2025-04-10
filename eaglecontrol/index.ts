@@ -52,6 +52,7 @@ type WebSocketEventName =
   | "gpt_response"        // For receiving GPT responses
   | "gpt_status_update"   // For receiving GPT status updates
   | "cancel_gpt"          // For cancelling a GPT command
+  | "create_thread"       // For creating a new GPT conversation thread
   | "network_scan"        // For requesting network scan
   | "network_list"        // For receiving network list
   | "network_update"      // For updating network settings
@@ -310,11 +311,16 @@ const wsHandlers = {
           // Forward to all controllers and viewers
           broadcastToType(message, "controller", ws);
           broadcastToType(message, "viewer", ws);
-          break;
-
-        // Cancel GPT command
+          break;        // Cancel GPT command
         case "cancel_gpt":
           console.log("GPT command cancellation request received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+          
+        // Create new thread
+        case "create_thread":
+          console.log("New GPT thread request received");
           // Forward to all cars
           broadcastToType(message, "car", ws);
           break;

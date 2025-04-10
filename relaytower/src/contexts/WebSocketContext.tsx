@@ -195,6 +195,7 @@ interface WebSocketContextValue {
   setCustomCameraUrl: (url: string | null) => void;
   pythonStatus: "connected" | "disconnected" | "unknown";
   requestPythonStatus: () => void;
+  createNewThread: () => void;
 
   // Data state
   batteryLevel: number | null;
@@ -837,6 +838,29 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  // Function to create a new thread
+  const createNewThread = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const createThreadData = {
+        name: "create_thread",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(createThreadData));
+      trackWsMessage("sent", createThreadData);
+      console.log("Create new thread request sent");
+      
+    } else {
+      logError("Cannot create new thread", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
   // Function to send audio stream data
   const sendAudioStream = useCallback((audioData: string) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -890,6 +914,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     setCustomCameraUrl,
     pythonStatus,
     requestPythonStatus,
+    createNewThread,
 
     // Data state
     gptStatus,

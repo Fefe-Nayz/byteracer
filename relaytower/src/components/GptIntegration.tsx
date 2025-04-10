@@ -4,7 +4,7 @@ import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
-import { BrainCircuit, Camera, Sparkles, X, AlertTriangle, Loader2, CheckCircle2 } from "lucide-react";
+import { BrainCircuit, Camera, Sparkles, X, AlertTriangle, Loader2, CheckCircle2, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
@@ -14,7 +14,7 @@ export default function GptIntegration() {
   const [useCamera, setUseCamera] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
-  const { status, sendGptCommand, cancelGptCommand, gptStatus } = useWebSocket();
+  const { status, sendGptCommand, cancelGptCommand, gptStatus, createNewThread } = useWebSocket();
   const { toast } = useToast();
   
   // Listen for GPT responses
@@ -79,8 +79,7 @@ export default function GptIntegration() {
       }
     }
   }, [gptStatus, toast]);
-  
-  const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!prompt.trim()) {
@@ -94,6 +93,21 @@ export default function GptIntegration() {
     toast({
       title: "Prompt sent to GPT",
       description: prompt,
+      variant: "default",
+    });
+  };
+  
+  const handleNewThread = () => {
+    if (isProcessing) {
+      return;
+    }
+    
+    createNewThread();
+    setResponse(null);
+    
+    toast({
+      title: "New conversation started",
+      description: "Created a new thread for GPT conversation",
       variant: "default",
     });
   };
@@ -120,10 +134,22 @@ export default function GptIntegration() {
     setPrompt(example);
   };  
   return (
-    <Card className="p-4">
-      <div className="flex items-center space-x-2 mb-4">
-        <BrainCircuit className="h-5 w-5" />
-        <h3 className="font-bold">GPT Integration</h3>
+    <Card className="p-4">      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center space-x-2">
+          <BrainCircuit className="h-5 w-5" />
+          <h3 className="font-bold">GPT Integration</h3>
+        </div>
+        
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleNewThread}
+          disabled={status !== "connected" || isProcessing}
+          className="h-8"
+        >
+          <Plus className="h-3.5 w-3.5 mr-1" />
+          New Thread
+        </Button>
       </div>
       
       <form onSubmit={handleSubmit} className="space-y-4">
