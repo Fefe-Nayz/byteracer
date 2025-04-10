@@ -403,7 +403,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
           case "sensor_data":
             setSensorData(event.data);
-            break;          case "camera_status":
+            break;
+          
+          case "camera_status":
             setCameraStatus(event.data);
             break;
 

@@ -187,6 +187,10 @@ class SensorManager:
         if now - self._last_emergency_time < self._emergency_cooldown:
             return EmergencyState.NONE
         
+        # Skip all emergency checks when robot is in GPT controlled state
+        if self.robot_state == RobotState.GPT_CONTROLLED:
+            return EmergencyState.NONE
+        
         # Only check emergencies if client is currently connected
         if self.robot_state != RobotState.CONTROLLED_BY_CLIENT and self.auto_stop_enabled:
             # Exception: check for client disconnection only if client was previously connected

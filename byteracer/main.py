@@ -705,6 +705,11 @@ class ByteRacer:
     
     async def handle_gamepad_input(self, data):
         """Handle gamepad input data"""
+        # Check if robot is in GPT controlled state - ignore input if it is
+        if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
+            logging.info("Ignoring gamepad input while in GPT controlled state")
+            return
+            
         # Extract values from gamepad data
         turn_value = float(data.get("turn", 0))
         speed_value = float(data.get("speed", 0))
@@ -1126,7 +1131,7 @@ class ByteRacer:
 
 
 
-                  elif command == "clear_emergency":
+            elif command == "clear_emergency":
                 # Clear emergency stop
                 self.sensor_manager.clear_manual_stop()
                 result["success"] = True
