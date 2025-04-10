@@ -95,15 +95,26 @@ class GPTManager:
 
             system_prompt = self._get_system_prompt()
             image_data = None
-            if use_camera and self.camera_manager.is_active():
+            
+            # Get camera image if requested and available
+            if use_camera and self.camera_manager:
                 if websocket:
                     await self._send_gpt_status_update(websocket, "progress", "Capturing camera image...")
-                image_data = await self._get_camera_image()
-                if not image_data:
-                    await self.tts_manager.say("Unable to access the camera feed. Processing without image.", priority=1)
+                
+                # Check if camera is in RUNNING state
+                camera_status = self.camera_manager.get_status()
+                if camera_status["state"] == "RUNNING":
+                    image_data = await self._get_camera_image()
+                    if not image_data:
+                        await self.tts_manager.say("Unable to access the camera feed. Processing without image.", priority=1)
+                        if websocket:
+                            await self._send_gpt_status_update(websocket, "warning", "Camera feed not available, proceeding without image")
+                else:
+                    await self.tts_manager.say("Camera is not active. Processing without image.", priority=1)
                     if websocket:
-                        await self._send_gpt_status_update(websocket, "warning", "Camera feed not available, proceeding without image")
-            
+                        await self._send_gpt_status_update(websocket, "warning", "Camera not active, proceeding without image")
+                    image_data = None
+
             messages = self._create_messages(system_prompt, prompt, image_data)
             logger.info(f"GPT messages: {messages}")
             if websocket:
