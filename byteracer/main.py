@@ -64,7 +64,7 @@ class ByteRacer:
         )
         
         self.network_manager = NetworkManager()
-        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager)
+        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager)
         
         # WebSocket state
         self.websocket = None
@@ -471,7 +471,7 @@ class ByteRacer:
                     # Set robot state to GPT controlled
                     self.sensor_manager.robot_state = RobotState.GPT_CONTROLLED
                     
-                    success = await self.gpt_manager.process_gpt_command(prompt, use_camera)
+                    success = await self.gpt_manager.process_gpt_command(prompt, use_camera, websocket=self.websocket)
                     
                     await self.send_command_response({  
                         "success": success,

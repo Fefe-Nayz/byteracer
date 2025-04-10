@@ -50,6 +50,8 @@ type WebSocketEventName =
   | "stop_tts"            // For stopping currently playing speech
   | "gpt_command"         // For sending GPT commands
   | "gpt_response"        // For receiving GPT responses
+  | "gpt_status_update"   // For receiving GPT status updates
+  | "cancel_gpt"          // For cancelling a GPT command
   | "network_scan"        // For requesting network scan
   | "network_list"        // For receiving network list
   | "network_update"      // For updating network settings
@@ -294,14 +296,27 @@ const wsHandlers = {
           console.log(`GPT command: ${event.data.prompt}`);
           // Forward to all cars
           broadcastToType(message, "car", ws);
-          break;
-
-        // GPT responses
+          break;        // GPT responses
         case "gpt_response":
           console.log("GPT response received");
           // Forward to all controllers and viewers
           broadcastToType(message, "controller", ws);
           broadcastToType(message, "viewer", ws);
+          break;
+
+        // GPT status updates
+        case "gpt_status_update":
+          console.log(`GPT status update: ${event.data.status} - ${event.data.message}`);
+          // Forward to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Cancel GPT command
+        case "cancel_gpt":
+          console.log("GPT command cancellation request received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
           break;
 
         // Network scan request

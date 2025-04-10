@@ -4,15 +4,17 @@ import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
-import { BrainCircuit, Camera, Sparkles } from "lucide-react";
+import { BrainCircuit, Camera, Sparkles, X, AlertTriangle, Loader2, CheckCircle2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Badge } from "./ui/badge";
+import { Progress } from "./ui/progress";
 
 export default function GptIntegration() {
   const [prompt, setPrompt] = useState("");
   const [useCamera, setUseCamera] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
-  const { status, sendGptCommand } = useWebSocket();
+  const { status, sendGptCommand, cancelGptCommand, gptStatus } = useWebSocket();
   const { toast } = useToast();
   
   // Listen for GPT responses
@@ -45,6 +47,39 @@ export default function GptIntegration() {
     };
   }, []);
   
+  // Update processing state based on GPT status updates
+  useEffect(() => {
+    if (gptStatus) {
+      // Set processing state based on the status
+      if (gptStatus.status === "completed" || gptStatus.status === "error" || gptStatus.status === "cancelled") {
+        setIsProcessing(false);
+      } else {
+        setIsProcessing(true);
+      }
+      
+      // Show toast for important status updates
+      if (gptStatus.status === "error") {
+        toast({
+          title: "GPT Error",
+          description: gptStatus.message,
+          variant: "destructive",
+        });
+      } else if (gptStatus.status === "cancelled") {
+        toast({
+          title: "GPT Command Cancelled",
+          description: gptStatus.message,
+          variant: "default",
+        });
+      } else if (gptStatus.status === "completed") {
+        toast({
+          title: "GPT Command Completed",
+          description: gptStatus.message,
+          variant: "default",
+        });
+      }
+    }
+  }, [gptStatus, toast]);
+  
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -63,6 +98,16 @@ export default function GptIntegration() {
     });
   };
   
+  const handleCancelRequest = () => {
+    cancelGptCommand();
+    
+    toast({
+      title: "Cancelling GPT Command",
+      description: "Requesting to cancel the current GPT command",
+      variant: "default",
+    });
+  };
+  
   const examples = [
     "Make the robot dance",
     "Tell me what you see",
@@ -73,8 +118,7 @@ export default function GptIntegration() {
   
   const handleUseExample = (example: string) => {
     setPrompt(example);
-  };
-  
+  };  
   return (
     <Card className="p-4">
       <div className="flex items-center space-x-2 mb-4">
@@ -103,6 +147,63 @@ export default function GptIntegration() {
           className="w-full"
         />
         
+        {/* Status display area */}
+        {isProcessing && gptStatus && (
+          <div className="my-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                {gptStatus.status === "starting" || gptStatus.status === "progress" ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                ) : gptStatus.status === "warning" ? (
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                ) : gptStatus.status === "error" ? (
+                  <AlertTriangle className="h-4 w-4 text-red-500" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                )}
+                <Badge variant={
+                  gptStatus.status === "starting" || gptStatus.status === "progress" 
+                    ? "default" 
+                    : gptStatus.status === "error" 
+                      ? "destructive" 
+                      : gptStatus.status === "warning" || gptStatus.status === "cancelled"
+                        ? "outline"
+                        : "secondary"
+                }>
+                  {gptStatus.status}
+                </Badge>
+              </div>
+              
+              {/* Cancel button */}
+              {(gptStatus.status === "starting" || gptStatus.status === "progress") && (
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  onClick={handleCancelRequest}
+                  className="h-7 px-2"
+                >
+                  <X className="h-3.5 w-3.5 mr-1" />
+                  Cancel
+                </Button>
+              )}
+            </div>
+            
+            <Progress value={
+              gptStatus.status === "starting" 
+                ? 10 
+                : gptStatus.status === "progress" 
+                  ? 50 
+                  : gptStatus.status === "completed" 
+                    ? 100 
+                    : 0
+            } className="h-1.5" />
+            
+            <p className="text-xs text-muted-foreground">
+              {gptStatus.message}
+            </p>
+          </div>
+        )}
+        
         <Button 
           type="submit" 
           className="w-full"
@@ -124,7 +225,7 @@ export default function GptIntegration() {
         </Button>
       </form>
       
-      {response && (
+      {response && !isProcessing && (
         <div className="mt-4 p-3 bg-muted rounded-md text-sm">
           <div className="font-semibold mb-1">Response:</div>
           <div>{response}</div>

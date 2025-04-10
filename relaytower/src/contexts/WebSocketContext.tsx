@@ -23,6 +23,8 @@ export type WebSocketMessageType =
   | "stop_tts"
   | "gpt_command"
   | "gpt_response"
+  | "gpt_status_update"
+  | "cancel_gpt"
   | "network_scan"
   | "network_list"
   | "network_update"
@@ -173,6 +175,13 @@ export interface CommandResponse {
   message: string;
 }
 
+// Define GPT status update interface
+export interface GptStatusUpdate {
+  status: "starting" | "progress" | "completed" | "error" | "warning" | "cancelled";
+  message: string;
+  timestamp: number;
+}
+
 // Define WebSocket context value interface
 interface WebSocketContextValue {
   // Connection
@@ -195,6 +204,7 @@ interface WebSocketContextValue {
   commandResponse: CommandResponse | null;
   logs: LogMessage[];
   clearLogs: () => void;
+  gptStatus: GptStatusUpdate | null;
 
   // Commands
   sendGamepadState: (gamepadState: Record<string, boolean | string | number>) => void;
@@ -211,6 +221,7 @@ interface WebSocketContextValue {
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
   sendGptCommand: (prompt: string, useCamera: boolean) => void;
+  cancelGptCommand: () => void;
   sendAudioStream: (audioData: string) => void;
 }
 
@@ -226,7 +237,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [pingTime, setPingTime] = useState<number | null>(null);
   const [customWsUrl, setCustomWsUrl] = useState<string | null>(null);
   const [customCameraUrl, setCustomCameraUrl] = useState<string | null>(null);
-
   // Add Python connection status state
   const [pythonStatus, setPythonStatus] = useState<"connected" | "disconnected" | "unknown">("unknown");
 
@@ -237,6 +247,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<RobotSettings | null>(null);
   const [commandResponse, setCommandResponse] = useState<CommandResponse | null>(null);
   const [logs, setLogs] = useState<LogMessage[]>([]);
+  // Add GPT status state
+  const [gptStatus, setGptStatus] = useState<GptStatusUpdate | null>(null);
 
   // Function to clear logs
   const clearLogs = useCallback(() => {
@@ -390,9 +402,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
           case "sensor_data":
             setSensorData(event.data);
-            break;
-
-          case "camera_status":
+            break;          case "camera_status":
             setCameraStatus(event.data);
             break;
 
@@ -407,6 +417,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             // Dispatch event for other components
             window.dispatchEvent(
               new CustomEvent("debug:command-response", {
+                detail: event.data,
+              })
+            );
+            break;
+
+          case "gpt_status_update":
+            // Handle GPT status updates
+            setGptStatus(event.data);
+            // Dispatch event for other components that might need it
+            window.dispatchEvent(
+              new CustomEvent("debug:gpt-status", {
                 detail: event.data,
               })
             );
@@ -756,9 +777,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         readyState: socket?.readyState,
       });
     }
-  }, [socket]);
-
-  // Function to send GPT command
+  }, [socket]);  // Function to send GPT command
   const sendGptCommand = useCallback((prompt: string, useCamera: boolean) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const gptData = {
@@ -774,8 +793,44 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.send(JSON.stringify(gptData));
       trackWsMessage("sent", gptData);
       console.log(`GPT command sent: ${prompt}`);
+      
+      // Update local GPT status immediately to show it's starting
+      setGptStatus({
+        status: "starting",
+        message: "Starting GPT command processing...",
+        timestamp: Date.now()
+      });
     } else {
       logError("Cannot send GPT command", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  // Function to cancel GPT command
+  const cancelGptCommand = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const cancelData = {
+        name: "cancel_gpt",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(cancelData));
+      trackWsMessage("sent", cancelData);
+      console.log("GPT command cancellation request sent");
+      
+      // Update local GPT status to show cancellation in progress
+      setGptStatus({
+        status: "warning",
+        message: "Canceling GPT command...",
+        timestamp: Date.now()
+      });
+    } else {
+      logError("Cannot send GPT cancel request", {
         reason: "Socket not connected",
         readyState: socket?.readyState,
       });
@@ -837,6 +892,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     requestPythonStatus,
 
     // Data state
+    gptStatus,
     batteryLevel,
     sensorData,
     cameraStatus,
@@ -860,6 +916,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     scanNetworks,
     updateNetwork,
     sendGptCommand,
+    cancelGptCommand,
     sendAudioStream,
   };
 
