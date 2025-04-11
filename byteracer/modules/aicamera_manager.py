@@ -16,5 +16,5 @@ class AICameraCameraManager:
     def __init__(self):
         # init logic
         logger.info("AI CAMERA INITIALIZED")
-        return True
+        return None
     #def ...
