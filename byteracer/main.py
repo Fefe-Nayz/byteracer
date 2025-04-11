@@ -893,9 +893,7 @@ class ByteRacer:
         
         # Send status to client
         await self.send_camera_status_to_client()
-    
 
-    
     async def update_settings(self, settings):
         """Update settings based on client request"""
         if "sound" in settings:
@@ -1072,14 +1070,14 @@ class ByteRacer:
         try:
             if command == "restart_robot":
                 # Restart the entire system
-                await self.tts_manager.say("Restarting system. Please wait.", priority=2, blocking=True)
+                await self.tts_manager.say("Restarting system. Please wait.", priority=1, blocking=True)
                 result = {"success": True, "message": "Rebooting system..."}
                 # Schedule system reboot after response is sent
                 threading.Timer(2.0, lambda: subprocess.run("sudo reboot", shell=True)).start()
                 
             elif command == "stop_robot":
                 # Shutdown the system
-                await self.tts_manager.say("Shutting down system. Goodbye!", priority=2, blocking=True)
+                await self.tts_manager.say("Shutting down system. Goodbye!", priority=1, blocking=True)
                 result = {"success": True, "message": "Shutting down system..."}
                 threading.Timer(2.0, lambda: subprocess.run("sudo shutdown -h now", shell=True)).start()
                 

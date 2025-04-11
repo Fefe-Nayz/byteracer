@@ -18,6 +18,10 @@ from modules.sensor_manager import RobotState
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class ScriptCancelledException(Exception):
+    """Raised when a custom script is cancelled."""
+    pass
+
 class GPTManager:
     """
     Manages interactions with GPT models to control the robot based on natural language commands.
@@ -89,7 +93,7 @@ class GPTManager:
             logger.info("Created new conversation (reset response ID)")
             
             if websocket:
-                await self._send_gpt_status_update(websocket, "info", "Created new conversation thread.")
+                await self._send_gpt_status_update(websocket, "completed", "Created new conversation thread.")
             
             return True
         except Exception as e:
@@ -329,12 +333,16 @@ When generating a Python script (`action_type: "python_script"`), keep in mind:
 If you want to manipulate motors or camera, call methods on `px` such as:
 - `px.set_motor_speed(1, speed)` # for rear_left motor
 - `px.set_motor_speed(2, -speed)` # for rear_right motor (the speed should be reversed because the motor is placed in reverse, THIS IS ALSO TTHE CASE IN THE MOTOR SEQUENCE)
+VERY IMPORTANT FOR SCRIPT EXECUTION: WHEN USING SET MOTOR SPEED, IF YOU WANT TO GO FORWARD WE SHOULD HAVE A POSITIVE VALUE FOR THE REAR_LEFT MOTOR AND A NEGATIVE VALUE FOR THE REAR_RIGHT MOTOR. AND IF WE WANT TO TURN THE VALUES SHOULD BE REVERSED BECAUSE OF THE MOTOR PLACEMENT.
+
 - `px.set_dir_servo_angle(angle)`
 - `px.set_cam_pan_angle(angle)`
 
 You can also read the sensor values using `px` methods like:
 - `px.get_distance()` for ultrasonic sensor (returns distance in cm).
 - `px.get_line_sensor_value()` for line following sensors (returns a list of values).
+
+If you want wait in the code use time.sleep(seconds)
 
 2. **Call predefined functions** (action_type: "predefined_function").  
    Available functions include:
@@ -697,10 +705,14 @@ Tone: Cheerful, optimistic, humorous, and playful.
             await websocket.send(json.dumps(status_update))
             logger.debug(f"Sent GPT status update: {status_type} - {message}")
         except Exception as e:
-            logger.error(f"Error sending GPT status update: {e}")
-    async def cancel_gpt_command(self):
+            logger.error(f"Error sending GPT status update: {e}")    
+    
+    async def cancel_gpt_command(self, websocket=None):
         """
         Cancel the currently running GPT command and stop any running scripts or motor sequences.
+        
+        Args:
+            websocket: Optional websocket to send status updates through.
         
         Returns:
             bool: True if a command was cancelled, False if no command was running.
@@ -708,6 +720,9 @@ Tone: Cheerful, optimistic, humorous, and playful.
         if self.is_processing:
             logger.info("Cancelling GPT command")
             self.gpt_command_cancelled = True
+
+            if websocket:
+                await self._send_gpt_status_update(websocket, "cancelling", "Cancelling current command...")
 
             # Stop all active scripts
             for script_name in list(self.active_processes.keys()):
@@ -723,7 +738,22 @@ Tone: Cheerful, optimistic, humorous, and playful.
             except Exception as e:
                 logger.error(f"Error stopping motors during cancellation: {e}")
             
+            # Restore the robot state to CONTROLLED_BY_CLIENT explicitly
+            old_state = self.sensor_manager.robot_state
+            self.sensor_manager.robot_state = self.robot_state_enum.CONTROLLED_BY_CLIENT
+            logger.info(f"Robot state forcibly restored from {old_state} to {self.sensor_manager.robot_state}")
+            
+            # Reset the processing flag explicitly
+            self.is_processing = False
+            
+            if websocket:
+                await self._send_gpt_status_update(websocket, "cancelled", "Command cancelled successfully")
+            
             return True
+        
+        if websocket:
+            await self._send_gpt_status_update(websocket, "info", "No active command to cancel")
+        
         return False
        
     async def _get_camera_image(self) -> Optional[str]:
@@ -774,7 +804,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
         else:
             # For other action types, speak the text but don't need to fully block
             if text_output:
-                await self.tts_manager.say(text_output, priority=1, blocking=False, lang=language)
+                await self.tts_manager.say(text_output, priority=1, blocking=True, lang=language)
         
         if action_type == "predefined_function":
             functions = response.get("predefined_functions", [])
@@ -817,7 +847,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
                     elif function_name == "play_sound":
                         sound_name = parameters.get("sound_name", "")
                         if sound_name and self.sound_manager:
-                            self.sound_manager.play_sound(sound_name)
+                            self.sound_manager.play_sound("custom", name=sound_name)
                         else:
                             logger.warning(f"Sound '{sound_name}' not found or sound manager not available")
                     elif function_name == "say":
@@ -861,9 +891,6 @@ Tone: Cheerful, optimistic, humorous, and playful.
                     elif function_name == "depressed":
                         from modules.gpt.preset_actions import depressed
                         depressed(self.px)
-                    # Add sensor state functions                    elif function_name == "get_sensor_data":
-                        sensor_data = self.sensor_manager.get_sensor_data()
-                        logger.info(f"Sensor data: {sensor_data}")
                     
                     # Sound settings
                     elif function_name == "set_sound_enabled":
@@ -1250,12 +1277,16 @@ Tone: Cheerful, optimistic, humorous, and playful.
             else:
                 logger.warning(f"set_angle command received for unknown servo motor id: {motor_id}")
         else:
-            logger.warning(f"Unknown motor command: {command}")    
+            logger.warning(f"Unknown motor command: {command}")      
+    
     async def _run_custom_script(self, script_name: str, script_code: str, run_in_background: bool) -> bool:
         """
-        Runs the given user code in *this* process using `exec`, so the same `px` instance is reused.
+        Runs the given user code in *this* process using `exec`, but in a separate thread,
+        so the same `px` instance is reused while not blocking the main event loop.
         This avoids the 'GPIO busy' errors caused by creating a second Picarx() in a separate process.
         """
+        import concurrent.futures
+        import threading
         logger = logging.getLogger(__name__)
 
         # Build an async function that encloses the user code inside our standard try/except/finally.
@@ -1285,7 +1316,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
             "        # Clean up cancellation task\n"
             "        if not cancellation_task.done():\n"
             "            cancellation_task.cancel()\n"
-            "    except KeyboardInterrupt:\n"
+            "    except ScriptCancelledException:\n"
             "        logger.info(\"Script interrupted by user or cancellation\")\n"
             "    except Exception as e:\n"
             "        logger.error(f\"Script error: {e}\")\n"
@@ -1298,37 +1329,81 @@ Tone: Cheerful, optimistic, humorous, and playful.
         full_script = script_header + indented_user_code + script_footer
 
         # Prepare a local namespace where the script will be executed
-        local_env = {}
-
+        local_env = {"ScriptCancelledException": ScriptCancelledException}
+        
+        # Create a threading event for signaling completion
+        script_done_event = threading.Event()
+        script_success = [False]  # Use a list to store the result from the thread
+        
+        # This function will run in a separate thread and execute the user script
+        def run_script_in_thread():
+            try:
+                # Create a new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # "Compile" the script so that user_script(px, ...) is defined in local_env
+                exec(full_script, local_env)
+                
+                # Grab the user_script function we just defined
+                user_script = local_env["user_script"]
+                
+                # Run the coroutine in this thread's event loop
+                loop.run_until_complete(user_script(self.px, self._get_camera_image, logger, 
+                                                   self.tts_manager, self.sound_manager, self))
+                
+                # Set the success flag
+                script_success[0] = True
+                
+            except Exception as e:
+                logger.error(f"Error running custom script in thread: {e}")
+            finally:
+                # Signal that we're done
+                script_done_event.set()
+        
         try:
-            # "Compile" the script so that user_script(px, ...) is defined in local_env
-            exec(full_script, local_env)
-
-            # Grab the user_script function we just defined
-            user_script = local_env["user_script"]
-
-            # Create a task for tracking purposes
-            if run_in_background:
-                # Fire-and-forget in background: the user_script runs concurrently,
-                # but we store the task reference so we can cancel it later
-                task = asyncio.create_task(user_script(self.px, self._get_camera_image, logger, self.tts_manager, self.sound_manager, self))
-                self.active_processes[script_name] = task
-                logger.info(f"Running script '{script_name}' in the background.")
-            else:
-                # Run in the foreground: we await the user's async function here
-                logger.info(f"Running script '{script_name}' in the foreground.")
-                await user_script(self.px, self._get_camera_image, logger, self.tts_manager, self.sound_manager, self)
+            # Create a thread pool and submit the script execution
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                if run_in_background:
+                    # Run the script in a background thread and don't wait for it
+                    future = executor.submit(run_script_in_thread)
+                    
+                    # Store a reference to both the future and the event for cancellation
+                    thread_info = {
+                        'future': future,
+                        'done_event': script_done_event
+                    }
+                    self.active_processes[script_name] = thread_info
+                    logger.info(f"Running script '{script_name}' in a background thread.")
+                    return True
+                else:
+                    # Run in a separate thread but wait for it to complete
+                    logger.info(f"Running script '{script_name}' in a thread and waiting for completion.")
+                    future = executor.submit(run_script_in_thread)
+                    
+                    # Wait for the script to complete or get cancelled
+                    while not script_done_event.is_set() and not self.gpt_command_cancelled:
+                        await asyncio.sleep(0.1)
+                    
+                    # If we were cancelled, make sure the thread gets the message
+                    if self.gpt_command_cancelled and not script_done_event.is_set():
+                        logger.info(f"Script '{script_name}' execution was cancelled.")
+                        # The cancellation will be detected by the script's cancellation checker
+                        # Wait a bit for the thread to finish cleanup
+                        script_done_event.wait(timeout=3.0)
+                    
+                    return script_success[0]
 
             return True
 
         except Exception as e:
             logger.error(f"Error running custom script: {e}")
             await self.tts_manager.say("The script encountered an error.", priority=1)
-            return False
-
+            return False    
+    
     async def _stop_script(self, script_name: str) -> bool:
         """
-        Stop a running script, whether it's a subprocess or an asyncio task.
+        Stop a running script, whether it's a subprocess, asyncio task, or thread.
         
         Args:
             script_name: The name of the script to stop
@@ -1337,19 +1412,34 @@ Tone: Cheerful, optimistic, humorous, and playful.
             bool: Success status
         """
         if script_name in self.active_processes:
-            process_or_task = self.active_processes[script_name]
+            process_info = self.active_processes[script_name]
             try:
+                # Check if it's a thread-based execution (has 'future' and 'done_event')
+                if isinstance(process_info, dict) and 'future' in process_info and 'done_event' in process_info:
+                    # Set the cancellation flag to signal the thread to stop
+                    self.gpt_command_cancelled = True
+                    
+                    # Wait for a short time for the thread to notice the cancellation
+                    logger.info(f"Waiting for thread script {script_name} to acknowledge cancellation...")
+                    
+                    # Give the thread a chance to notice the cancellation and clean up
+                    # Don't wait indefinitely to avoid freezing the main thread
+                    if not process_info['done_event'].wait(timeout=1.0):
+                        logger.warning(f"Thread for {script_name} did not respond to cancellation signal in time")
+                    
+                    logger.info(f"Cancelled thread script: {script_name}")
+                    
                 # Check if it's an asyncio Task
-                if hasattr(process_or_task, 'cancel'):
+                elif hasattr(process_info, 'cancel'):
                     # It's an asyncio Task
-                    process_or_task.cancel()
+                    process_info.cancel()
                     logger.info(f"Cancelled async task: {script_name}")
                 else:
                     # It's a subprocess.Popen
-                    process_or_task.terminate()
-                    process_or_task.wait(timeout=3)
-                    if process_or_task.poll() is None:
-                        process_or_task.kill()
+                    process_info.terminate()
+                    process_info.wait(timeout=3)
+                    if process_info.poll() is None:
+                        process_info.kill()
                     logger.info(f"Terminated subprocess: {script_name}")
                 
                 # Remove from active processes

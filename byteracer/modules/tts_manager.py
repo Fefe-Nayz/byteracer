@@ -73,7 +73,6 @@ class TTSManager:
         # Stop any currently playing TTS
         await self.stop_speech()
         logger.info("TTS processing loop stopped")
-    
     async def say(self, text, priority=0, blocking=False, lang=None):
         """
         Add a phrase to the TTS queue.
@@ -98,8 +97,13 @@ class TTSManager:
         logger.debug(f"Added to TTS queue: '{text}' (priority {priority})")
         
         if blocking:
-            # Wait until this specific message is processed (not recommended)
-            while self._speaking and self._queue.qsize() > 0:
+            # Wait until this specific message is processed AND fully spoken
+            # First wait until the queue processes this item
+            while self._queue.qsize() > 0:
+                await asyncio.sleep(0.1)
+            
+            # Then wait until the audio playback is actually complete
+            while self.is_speaking():
                 await asyncio.sleep(0.1)
     
     async def _process_queue(self):
