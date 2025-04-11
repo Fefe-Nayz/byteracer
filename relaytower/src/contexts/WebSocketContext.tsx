@@ -25,6 +25,7 @@ export type WebSocketMessageType =
   | "gpt_response"
   | "gpt_status_update"
   | "cancel_gpt"
+  | "create_thread"
   | "network_scan"
   | "network_list"
   | "network_update"

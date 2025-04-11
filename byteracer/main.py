@@ -488,6 +488,24 @@ class ByteRacer:
                         "success": success,
                         "message": "GPT command processed successfully"
                     })
+
+            elif data["name"] == "cancel_gpt":
+                # Handle cancel GPT command
+                logging.info("Received cancel GPT command")
+                success = await self.gpt_manager.cancel_gpt_command()
+                await self.send_command_response({
+                    "success": success,
+                    "message": "GPT command cancelled"
+                })
+
+            elif data["name"] == "create_thread":
+                # Handle create thread command
+                logging.info("Received create thread command")
+                success = await self.gpt_manager.create_new_conversation(self.websocket)
+                await self.send_command_response({
+                        "success": success,
+                        "message": "Thread created successfully"
+                })                
                  
             elif data["name"] == "network_scan":
                 # Handle network scan request
@@ -1147,21 +1165,6 @@ class ByteRacer:
                 self.sensor_manager.clear_manual_stop()
                 result["success"] = True
                 result["message"] = "Emergency stop cleared"
-                
-            elif command == "new_conversation":
-                # Create a new GPT conversation (reset thread)
-                success = await self.gpt_manager.create_new_conversation(self.websocket)
-                if success:
-                    result = {
-                        "success": True,
-                        "message": "Created new GPT conversation"
-                    }
-                    await self.tts_manager.say("Starting a new conversation.", priority=1)
-                else:
-                    result = {
-                        "success": False,
-                        "message": "Failed to create new GPT conversation"
-                    }
                 
             else:
                 result["message"] = f"Unknown command: {command}"

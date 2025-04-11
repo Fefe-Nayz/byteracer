@@ -9,14 +9,37 @@ import os
 import uuid
 import subprocess
 import time
+from pathlib import Path
+
+# Add parent directory to path to import modules from the byteracer package
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+try:
+    from modules.config_manager import ConfigManager
+except ImportError:
+    # Fallback if modules can't be imported
+    ConfigManager = None
 
 def main():
+    # Try to get config settings
+    config_volume = None
+    if ConfigManager is not None:
+        try:
+            config = ConfigManager()
+            # Use system_tts_volume by default for system notifications
+            config_volume = config.get("sound.system_tts_volume")
+            is_enabled = config.get("sound.system_tts_enabled")
+            if not is_enabled:
+                config_volume = 0
+        except Exception as e:
+            print(f"Warning: Could not load config settings: {e}", file=sys.stderr)
+    
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Text-to-Speech for ByteRacer')
     parser.add_argument('text', help='Text to speak', nargs='?')
     parser.add_argument('-f', '--file', help='File to read text from')
     parser.add_argument('-l', '--lang', help='Language for TTS (default: en-US)', default='en-US')
-    parser.add_argument('-v', '--volume', help='Volume level 0-100 (default: 100)', type=int, default=100)
+    parser.add_argument('-v', '--volume', help='Volume level 0-100 (default: from config or 100)', 
+                       type=int, default=config_volume if config_volume is not None else 100)
     
     args = parser.parse_args()
     
