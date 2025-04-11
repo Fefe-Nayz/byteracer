@@ -23,6 +23,7 @@ from modules.config_manager import ConfigManager
 from modules.log_manager import LogManager
 from modules.gpt_manager import GPTManager
 from modules.network_manager import NetworkManager
+from modules.aicamera_manager import AICameraCameraManager
 
 # Define project directory
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
@@ -53,6 +54,7 @@ class ByteRacer:
         self.sound_manager = SoundManager()  # Initialize sound manager first
         self.tts_manager = TTSManager(sound_manager=self.sound_manager)  # Pass sound manager to TTS manager
         self.sensor_manager = SensorManager(self.px, self.handle_emergency)
+        self.aicamera_manager = AICameraCameraManager(self)
         
         # Initialize camera with config settings directly
         self.camera_manager = CameraManager(
