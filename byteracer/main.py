@@ -54,7 +54,7 @@ class ByteRacer:
         self.sound_manager = SoundManager()  # Initialize sound manager first
         self.tts_manager = TTSManager(sound_manager=self.sound_manager)  # Pass sound manager to TTS manager
         self.sensor_manager = SensorManager(self.px, self.handle_emergency)
-        self.aicamera_manager = AICameraCameraManager(self)
+        self.aicamera_manager = AICameraCameraManager()
         
         # Initialize camera with config settings directly
         self.camera_manager = CameraManager(
