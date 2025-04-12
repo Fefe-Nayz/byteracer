@@ -567,9 +567,8 @@ Tone: Cheerful, optimistic, humorous, and playful.
             else:
                 # Text-only message
                 content = prompt
-            
-            # Add the message to the thread
-            openai.beta.threads.messages.create(
+              # Add the message to the thread
+            self.client.beta.threads.messages.create(
                 thread_id=thread_id,
                 role="user",
                 content=content
@@ -593,7 +592,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
         """
         try:
             # Run the assistant on the thread
-            run = openai.beta.threads.runs.create(
+            run = self.client.beta.threads.runs.create(
                 thread_id=thread_id,
                 assistant_id=self.assistant_id
             )
@@ -613,7 +612,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
             while run.status in ["queued", "in_progress"]:
                 if self.gpt_command_cancelled:
                     try:
-                        openai.beta.threads.runs.cancel(
+                        self.client.beta.threads.runs.cancel(
                             thread_id=thread_id,
                             run_id=run.id
                         )
@@ -630,7 +629,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
                     )
                 
                 await asyncio.sleep(1)
-                run = openai.beta.threads.runs.retrieve(
+                run = self.client.beta.threads.runs.get(
                     thread_id=thread_id,
                     run_id=run.id
                 )
@@ -646,7 +645,7 @@ Tone: Cheerful, optimistic, humorous, and playful.
                 return None
             
             # Retrieve the latest message from the assistant
-            messages = openai.beta.threads.messages.list(
+            messages = self.client.beta.threads.messages.list(
                 thread_id=thread_id
             )
             

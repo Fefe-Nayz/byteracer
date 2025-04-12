@@ -443,6 +443,34 @@ class CameraManager:
                 "with a valid color or list of colors."
             )
 
+    def switch_pose_detect(self, enable):
+        """
+        Enable or disable pose detection.
+
+        Args:
+            enable (bool): True to enable, False to disable
+        """
+        if enable:
+            Vilib.pose_detect_switch(True)
+            logger.info("Pose detection enabled")
+        else:
+            Vilib.pose_detect_switch(False)
+            logger.info("Pose detection disabled")
+
+    def switch_trafic_sign_detect(self, enable):
+        """
+        Enable or disable traffic sign detection.
+
+        Args:
+            enable (bool): True to enable, False to disable
+        """
+        if enable:
+            Vilib.traffic_sign_detect_switch(True)
+            logger.info("Traffic sign detection enabled")
+        else:
+            Vilib.traffic_sign_detect_switch(False)
+            logger.info("Traffic sign detection disabled")
+
     def detect_obj_parameter(self, obj_type='human'):
         """
         Get the detected object parameters.

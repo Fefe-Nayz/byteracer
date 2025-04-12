@@ -27,7 +27,7 @@ def main():
             config = ConfigManager()
             # Use system_tts_volume by default for system notifications
             config_volume = config.get("sound.system_tts_volume")
-            is_enabled = config.get("sound.system_tts_enabled")
+            is_enabled = config.get("sound.tts_enabled")
             if not is_enabled:
                 config_volume = 0
         except Exception as e:

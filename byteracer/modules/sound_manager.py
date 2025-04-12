@@ -368,15 +368,12 @@ class SoundManager:
                     if 0 <= channel_id < pygame.mixer.get_num_channels() and pygame.mixer.Channel(channel_id).get_busy():
                         sound = pygame.mixer.Channel(channel_id).get_sound()
                         sound.set_volume(effective_volume)
-    
+
     async def shutdown(self):
         """Clean shutdown of sound manager"""
         self._running = False
         self.stop_sound()  # Stop all sound effects
         self.music_stop()  # Stop music
-        
-        # Close the thread pool
-        self.executor.shutdown(wait=False)
         
         pygame.mixer.quit()
         logger.info("Sound Manager shutdown")

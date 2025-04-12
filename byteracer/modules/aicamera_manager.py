@@ -1,19 +1,15 @@
 import time
 import logging
 import threading
-from enum import Enum, auto
+import math
 
 logger = logging.getLogger(__name__)
 
 class AICameraCameraManager:
     """
     Manages higher-level AI camera capabilities, specifically:
-      1) "Traffic light" color detection and speed control (red, green, orange).
-      2) Face detection + following.
-
-    We provide start/stop methods for each feature. 
-    Internally, each runs an infinite loop in a separate thread 
-    until stopped by the user.
+      1) Traffic light color detection and speed control (red, green, orange).
+      2) Face detection + following (including forward/back & turn).
     """
 
     def __init__(self, px, sensor_manager, camera_manager):
@@ -35,25 +31,37 @@ class AICameraCameraManager:
 
         self.color_control_thread = None
         self.color_control_active = False
-        
-        # Face following parameters
-        self.face_min_distance = 10  # Stop if face area is larger than this paercentage of screen
-        self.face_max_distance = 3  # Speed up if face area is smaller than this percentage
-        self.face_optimal_distance = 5  # Ideal face size percentage of screen area
+
+        # ---------------------------------------------------------
+        # Face following parameters (adjust for your system)
+        # ---------------------------------------------------------
+        self.TARGET_FACE_AREA = 10.0    # (in %) Ideal face size in the frame
+        self.FORWARD_FACTOR   = 1500.0  # Speed scaling factor
+        self.MAX_SPEED        = 75      # maximum absolute speed (±75)
+        self.SPEED_DEAD_ZONE  = 10       # movement dead zone around 0 speed
+
+        # Steering constants
+        self.TURN_FACTOR = 35.0         # final multiplier for turning
+
+        # Camera servo ranges:
+        self.PAN_MIN_ANGLE  = -90
+        self.PAN_MAX_ANGLE  =  90
+        self.TILT_MIN_ANGLE = -35
+        self.TILT_MAX_ANGLE =  65
+
+        # Steering servo limit => ±35° (change if physically only ±30°)
+        self.STEER_MIN_ANGLE = -35
+        self.STEER_MAX_ANGLE =  35
 
     def clamp_number(self, num, lower_bound, upper_bound):
         """Clamp 'num' between 'lower_bound' and 'upper_bound'."""
-        return max(min(num, max(lower_bound, upper_bound)), 
+        return max(min(num, max(lower_bound, upper_bound)),
                    min(lower_bound, upper_bound))
 
     # ------------------------------------------------------------------
     # Face Following
     # ------------------------------------------------------------------
     def start_face_following(self):
-        """
-        Spawns a background thread to continuously detect & follow a face,
-        until stop_face_following() is called.
-        """
         if self.face_follow_active:
             logger.warning("Face following is already running!")
             return
@@ -76,9 +84,6 @@ class AICameraCameraManager:
         self.face_follow_thread.start()
 
     def stop_face_following(self):
-        """
-        Signals the face-follow loop to stop and waits for thread to end.
-        """
         if not self.face_follow_active:
             logger.warning("Face following is not currently running!")
             return
@@ -86,35 +91,48 @@ class AICameraCameraManager:
         logger.info("Stopping face following ...")
         self.face_follow_active = False
 
-        # Optionally wait for the thread to exit
         if self.face_follow_thread and self.face_follow_thread.is_alive():
             self.face_follow_thread.join(timeout=2.0)
 
         self.face_follow_thread = None
-        # Optionally disable face detection
         self.camera_manager.switch_face_detect(False)
-        # Stop the robot
-        self.px.forward(0)    
-    
+        # Stop robot
+        self.px.forward(0)
+
     def _face_follow_loop(self):
         """
         Loop that continuously retrieves face detection data from camera_manager
-        and steers the robot to follow the face while maintaining optimal distance.
+        and steers the robot to follow the face while allowing both forward & reverse.
+        We also have a speed dead zone to prevent micro-movements when near the target area.
         """
+
         logger.info("Face-follow loop started.")
-        default_speed = 50  # Base speed
-        max_speed = 75      # Maximum speed when face is far away
-        min_speed = 20      # Minimum speed when approaching optimal distance
+
+        def sign(x):
+            return 1 if x > 0 else (-1 if x < 0 else 0)
+
+        def turn_function(x_offset):
+            """
+            Polynomial approach for strong turning if face is off-center.
+            'factor' saturates the steering angle more quickly if large.
+            """
+            factor = 10.0
+            return factor * sign(x_offset) * abs(x_offset**2)
+
+        # Suppose your camera resolution is 640 x 480 (change if needed)
+        camera_width = 640
+        camera_height = 480
 
         while self.face_follow_active:
             detection = self.camera_manager.detect_obj_parameter('human')
-            # detection: {
+            # detection e.g.:
+            # {
             #   'human_detected': bool,
             #   'human_x': int,
             #   'human_y': int,
             #   'human_n': int,
             #   'human_w': int,
-            #   'human_h': int,
+            #   'human_h': int
             # }
 
             if detection.get('human_detected', False):
@@ -123,89 +141,68 @@ class AICameraCameraManager:
                 face_w = detection.get('human_w', 0)
                 face_h = detection.get('human_h', 0)
 
-                # Typically 640x480, or your camera's actual size
-                camera_width = 640
-                camera_height = 480
-                
-                # Calculate face area as percentage of screen area
-                face_area = (face_w * face_h) / (camera_width * camera_height) * 100
-                
-                # Dynamic speed calculation based on face size (distance)
-                speed = 0  # Default to stopped
-                
-                # Calculate the center offset of the face
-                center_x_offset = abs((face_x / camera_width) - 0.5)  # 0 = center, 0.5 = edge
-                
-                if face_area >= self.face_min_distance:
-                    # Face is too close - stop
-                    speed = 0
-                    logger.debug(f"Face too close (area: {face_area:.1f}%) => STOP")
-                elif face_area <= self.face_max_distance:
-                    # Face is far away - move faster
-                    speed = max_speed
-                    logger.debug(f"Face far away (area: {face_area:.1f}%) => FAST")
-                else:
-                    # Face is at medium distance - adjust speed proportionally
-                    # Map face area from [face_max_distance, face_min_distance] to [max_speed, min_speed]
-                    ratio = (face_area - self.face_max_distance) / (self.face_min_distance - self.face_max_distance)
-                    speed = max_speed - ratio * (max_speed - min_speed)
-                    logger.debug(f"Face at medium distance (area: {face_area:.1f}%) => speed {speed:.1f}")
-                
-                # Reduce speed further if face is not centered (for smoother turning)
-                center_factor = 1.0 - min(center_x_offset * 1.5, 0.5)  # Reduce speed by up to 50% when turning
-                speed = speed * center_factor                # Pan camera angle - balanced approach with damping
-                # More responsive near edges but with damping to prevent oscillation
-                center_x_offset = abs((face_x / camera_width) - 0.5)  # 0 = center, 0.5 = edge
-                edge_factor = 1.0 + (center_x_offset * 1.5)  # More modest boost near edges (up to 1.75x)
-                
-                # Match hardware limits mentioned in documentation (-90 to 90)
-                target_x_angle = ((face_x / camera_width) - 0.5) * 70  # Reasonable angle range
-                
-                # Calculate optimal adjustment rate based on distance from target
-                # Larger adjustments when far from target, smaller when close
-                angle_distance = abs(target_x_angle - self.x_angle)
-                adjustment_scale = min(1.0, angle_distance / 10.0)  # Scale from 0.0-1.0 based on distance
-                
-                # Apply moderate base adjustment rate with custom scaling
-                self.x_angle += (target_x_angle - self.x_angle) * 0.25 * edge_factor * adjustment_scale
-                self.x_angle = self.clamp_number(self.x_angle, -35, 35)  # Hardware-appropriate angle limits
+                # ---------------------------------------------
+                # 1) Pan/Tilt the camera
+                # ---------------------------------------------
+                # Horizontal offset => range [-0.5..+0.5]
+                x_offset_ratio = (face_x / camera_width) - 0.5
+                target_x_angle = x_offset_ratio * 180  # scale up to ±90
+
+                dx = target_x_angle - self.x_angle
+                self.x_angle += 0.2 * dx
+                self.x_angle = self.clamp_number(self.x_angle, self.PAN_MIN_ANGLE, self.PAN_MAX_ANGLE)
                 self.px.set_cam_pan_angle(int(self.x_angle))
 
-                # Tilt camera angle - balanced approach with damping
-                center_y_offset = abs((face_y / camera_height) - 0.5)
-                edge_y_factor = 1.0 + (center_y_offset * 1.5)  # More modest boost
-                
-                # Match hardware limits mentioned in documentation (-35 to 65)
-                # Using asymmetric range for tilt as per hardware spec
-                target_y_angle = ((0.5 - (face_y / camera_height)) * 50)  # Moderate angle range
-                
-                # Calculate optimal adjustment rate for tilt
-                angle_y_distance = abs(target_y_angle - self.y_angle)
-                adjustment_y_scale = min(1.0, angle_y_distance / 10.0)
-                
-                # Apply moderate adjustment with damping
-                self.y_angle += (target_y_angle - self.y_angle) * 0.25 * edge_y_factor * adjustment_y_scale
-                self.y_angle = self.clamp_number(self.y_angle, -35, 35)  # Match hardware limitations
+                # Vertical offset => range [ +0.5.. -0.5 ]
+                y_offset_ratio = 0.5 - (face_y / camera_height)
+                target_y_angle = y_offset_ratio * 130
+
+                dy = target_y_angle - self.y_angle
+                self.y_angle += 0.2 * dy
+                self.y_angle = self.clamp_number(self.y_angle, self.TILT_MIN_ANGLE, self.TILT_MAX_ANGLE)
                 self.px.set_cam_tilt_angle(int(self.y_angle))
 
-                # Steering angle - more responsive but still smooth
-                # Make steering more proportional to face position
-                target_dir_angle = self.x_angle * 0.8  # Steering follows camera but not as extreme
-                
-                # Apply smoother steering for more natural movement
-                if abs(self.dir_angle - target_dir_angle) > 5:
-                    # Faster adjustment when far from target
-                    self.dir_angle += (target_dir_angle - self.dir_angle) * 0.3
-                else:
-                    # Slower, smoother adjustment when close to target
-                    self.dir_angle += (target_dir_angle - self.dir_angle) * 0.1
-                
-                self.dir_angle = self.clamp_number(self.dir_angle, -35, 35)
-                self.px.set_dir_servo_angle(self.dir_angle)
+                # ---------------------------------------------
+                # 2) Forward/backward speed with dead zone
+                # ---------------------------------------------
+                face_area_percent = (face_w * face_h) / (camera_width * camera_height) * 100.0
+                # If face_area_percent > TARGET_FACE_AREA => raw_speed < 0 => go backward
+                raw_speed = (self.TARGET_FACE_AREA - face_area_percent) * (self.FORWARD_FACTOR / 100.0)
 
-                # Apply calculated speed
-                self.px.forward(int(speed))
-                logger.debug(f"Face found => steer={self.dir_angle:.1f}, speed={speed:.1f}, area={face_area:.1f}%")
+                # clamp to ±MAX_SPEED
+                if raw_speed > self.MAX_SPEED:
+                    raw_speed = self.MAX_SPEED
+                elif raw_speed < -self.MAX_SPEED:
+                    raw_speed = -self.MAX_SPEED
+
+                # dead zone => no movement if small absolute speed
+                if abs(raw_speed) < self.SPEED_DEAD_ZONE:
+                    raw_speed = 0
+
+                # ---------------------------------------------
+                # 3) Steering => invert if going backward
+                # ---------------------------------------------
+                steer_val = turn_function(x_offset_ratio) * self.TURN_FACTOR
+                # clamp to ±(some servo limit)
+                steer_val = self.clamp_number(steer_val, self.STEER_MIN_ANGLE, self.STEER_MAX_ANGLE)
+
+                if raw_speed > 0:
+                    # FORWARD
+                    self.px.set_dir_servo_angle(steer_val)
+                    self.px.forward(int(raw_speed))
+                elif raw_speed < 0:
+                    # BACKWARD => invert steering
+                    self.px.set_dir_servo_angle(-steer_val)
+                    self.px.backward(int(abs(raw_speed)))
+                else:
+                    # raw_speed == 0 => stop
+                    self.px.forward(0)
+
+                logger.debug(
+                    f"[FACE] area={face_area_percent:.1f}%, offsetX={x_offset_ratio:.2f} => "
+                    f"speed={raw_speed:.1f}, steer={steer_val:.1f}, "
+                    f"pan={self.x_angle:.1f}, tilt={self.y_angle:.1f}"
+                )
             else:
                 # No face => stop
                 self.px.forward(0)
@@ -285,7 +282,6 @@ class AICameraCameraManager:
                     elif cname == 'green':
                         desired_speed = max(desired_speed, 100)
                     elif cname == 'orange':
-                        # only override if we haven't seen green yet
                         if desired_speed < 100:
                             desired_speed = 50
                     # ignoring other colors
