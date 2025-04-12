@@ -54,7 +54,6 @@ class ByteRacer:
         self.sound_manager = SoundManager()  # Initialize sound manager first
         self.tts_manager = TTSManager(sound_manager=self.sound_manager)  # Pass sound manager to TTS manager
         self.sensor_manager = SensorManager(self.px, self.handle_emergency)
-        self.aicamera_manager = AICameraCameraManager()
         
         # Initialize camera with config settings directly
         self.camera_manager = CameraManager(
@@ -64,7 +63,8 @@ class ByteRacer:
             web=web_display, 
             camera_size=camera_size
         )
-        
+
+        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager)
         self.network_manager = NetworkManager()
         self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager)
         
@@ -207,8 +207,17 @@ class ByteRacer:
         # Apply special modes
         self.sensor_manager.set_tracking(settings["modes"]["tracking_enabled"])
         self.sensor_manager.set_circuit_mode(settings["modes"]["circuit_mode_enabled"])
-        self.sensor_manager.set_tracking(settings["modes"]["circuit_mode_enabled"])
         self.sensor_manager.set_normal_mode(settings["modes"]["normal_mode_enabled"])
+
+        if settings["modes"]["tracking_enabled"]:
+            self.aicamera_manager.start_face_following()
+        else:
+            self.aicamera_manager.stop_face_following()
+        
+        if settings["modes"]["circuit_mode_enabled"]:
+            self.aicamera_manager.start_color_control()
+        else:
+            self.aicamera_manager.stop_color_control()
         
         logging.info("Applied settings from configuration")
     
@@ -1012,10 +1021,19 @@ class ByteRacer:
             if "tracking_enabled" in modes:
                 self.config_manager.set("modes.tracking_enabled", modes["tracking_enabled"])
                 self.sensor_manager.set_tracking(modes["tracking_enabled"])
+                if modes["tracking_enabled"]:
+                    self.aicamera_manager.start_face_following()
+                else:   
+                    self.aicamera_manager.stop_face_following()
             
             if "circuit_mode_enabled" in modes:
                 self.config_manager.set("modes.circuit_mode_enabled", modes["circuit_mode_enabled"])
                 self.sensor_manager.set_circuit_mode(modes["circuit_mode_enabled"])
+                
+                if modes["circuit_mode_enabled"]:
+                    self.aicamera_manager.start_color_control()
+                else:   
+                    self.aicamera_manager.stop_color_control()
 
             if "demo_mode_enabled" in modes:
                 self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])

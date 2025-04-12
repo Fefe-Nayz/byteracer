@@ -44,6 +44,8 @@ class CameraManager:
         self._freeze_check_interval = 5  # Check every 5 seconds
         self._freeze_monitor_task = None
         self._is_frozen = False
+
+        self.current_colors = None
         
         logger.info(f"Camera Manager initialized with resolution {self.camera_size}")
     
@@ -367,3 +369,157 @@ class CameraManager:
                 restart_needed = True
         
         return restart_needed
+    def switch_face_detect(self, enable):
+        """
+        Enable or disable face detection.
+
+        Args:
+            enable (bool): True to enable, False to disable
+        """
+        if enable:
+            Vilib.face_detect_switch(True)
+            logger.info("Face detection enabled")
+        else:
+            Vilib.face_detect_switch(False)
+            logger.info("Face detection disabled")
+
+    def color_detect(self, color):
+        """
+        Enable color detection. Accepts either a single color (string)
+        or multiple colors (list of strings). Valid colors:
+            'red', 'green', 'blue', 'yellow', 'orange', 'purple'.
+
+        Args:
+            color (str or list): e.g. "red" or ["red", "blue"]
+        """
+        valid_colors = ['red', 'green', 'blue', 'yellow', 'orange', 'purple']
+
+        # 1) Normalize to list
+        if isinstance(color, str):
+            color = [color]
+
+        # 2) Validate each color
+        color_lower_list = []
+        for c in color:
+            c_lower = c.lower()
+            if c_lower not in valid_colors:
+                logger.warning(
+                    f"Invalid color '{c}'. Valid options: {', '.join(valid_colors)}"
+                )
+                return
+            color_lower_list.append(c_lower)
+
+        # 3) Store them
+        self.current_colors = color_lower_list
+
+        # 4) Call Vilib
+        Vilib.color_detect(self.current_colors)
+
+        # 5) Log
+        if len(self.current_colors) == 1:
+            single_color = self.current_colors[0]
+            logger.info(f"{single_color.capitalize()} color detection enabled")
+        else:
+            logger.info(
+                "Multi‐color detection enabled: "
+                + ", ".join(self.current_colors)
+            )
+
+    def switch_color_detect(self, enable):
+        """
+        Enable or disable color detection.
+
+        Args:
+            enable (bool): True to enable, False to disable
+        """
+        if not enable:
+            # Disable color detection
+            Vilib.close_color_detection()
+            self.current_colors = None
+            logger.info("Color detection disabled")
+        else:
+            logger.info(
+                "To enable color detection, call color_detect(...) "
+                "with a valid color or list of colors."
+            )
+
+    def detect_obj_parameter(self, obj_type='human'):
+        """
+        Get the detected object parameters.
+
+        Args:
+            obj_type (str): Type of object to detect ('human', 'color', etc.)
+
+        Returns:
+            dict: Detected object parameters (coordinates, etc.).
+                  If obj_type='color' and multiple colors are being tracked,
+                  returns a list of bounding boxes—one per color.
+        """
+        if not hasattr(Vilib, 'detect_obj_parameter'):
+            return {f'{obj_type}_detected': False}
+
+        # The result that we'll return
+        result = {}
+
+        # 1) Face detection
+        if obj_type == 'human':
+            # Check if any face was detected
+            if Vilib.detect_obj_parameter.get('human_n', 0) != 0:
+                result['human_detected'] = True
+                result['human_x'] = Vilib.detect_obj_parameter.get('human_x', 0)
+                result['human_y'] = Vilib.detect_obj_parameter.get('human_y', 0)
+                result['human_n'] = Vilib.detect_obj_parameter.get('human_n', 0)
+                # width & height if present
+                if 'human_w' in Vilib.detect_obj_parameter:
+                    result['human_w'] = Vilib.detect_obj_parameter['human_w']
+                if 'human_h' in Vilib.detect_obj_parameter:
+                    result['human_h'] = Vilib.detect_obj_parameter['human_h']
+            else:
+                result['human_detected'] = False
+
+        # 2) Color detection (updated for multi-color)
+        elif obj_type == 'color':
+            # We'll return an array of color objects, plus a flag for whether any color was found
+            colors_detected_list = []
+            any_color_found = False
+
+            if self.current_colors:
+                for color_name in self.current_colors:
+                    # Build the dynamic keys (e.g. "red_n", "red_x")
+                    n_key = f'{color_name}_n'
+                    x_key = f'{color_name}_x'
+                    y_key = f'{color_name}_y'
+                    w_key = f'{color_name}_w'
+                    h_key = f'{color_name}_h'
+
+                    # Retrieve the number of detected contours
+                    c_n = Vilib.detect_obj_parameter.get(n_key, 0)
+                    if c_n > 0:
+                        any_color_found = True
+                        # Collect bounding-box data
+                        color_info = {
+                            'color_name': color_name,
+                            'color_n': c_n,
+                            'color_x': Vilib.detect_obj_parameter.get(x_key, 0),
+                            'color_y': Vilib.detect_obj_parameter.get(y_key, 0),
+                            'color_w': Vilib.detect_obj_parameter.get(w_key, 0),
+                            'color_h': Vilib.detect_obj_parameter.get(h_key, 0),
+                        }
+                        colors_detected_list.append(color_info)
+                    else:
+                        # Even if a color isn't currently found, we can add a record for it,
+                        # or skip it. Here, let's skip to keep the array only for found colors.
+                        pass
+            else:
+                # No colors are enabled
+                any_color_found = False
+
+            # Summarize the result
+            result['colors_detected'] = colors_detected_list
+            result['any_color_found'] = any_color_found
+
+        # 3) Else: some other object type or nothing found
+        else:
+            result[f'{obj_type}_detected'] = False
+
+        return result
