@@ -465,10 +465,10 @@ class CameraManager:
             enable (bool): True to enable, False to disable
         """
         if enable:
-            Vilib.traffic_sign_detect_switch(True)
+            Vilib.traffic_detect_switch(True)
             logger.info("Traffic sign detection enabled")
         else:
-            Vilib.traffic_sign_detect_switch(False)
+            Vilib.traffic_detect_switch(False)
             logger.info("Traffic sign detection disabled")
 
     def detect_obj_parameter(self, obj_type='human'):
@@ -545,6 +545,19 @@ class CameraManager:
             # Summarize the result
             result['colors_detected'] = colors_detected_list
             result['any_color_found'] = any_color_found
+        
+        elif obj_type == 'traffic_sign':
+            # Check if any traffic sign was detected
+            if Vilib.detect_obj_parameter.get('traffic_sign_t') is not 'none':
+                result['traffic_sign_detected'] = True
+                result['x'] = Vilib.detect_obj_parameter.get('traffic_sign_x', 0)
+                result['y'] = Vilib.detect_obj_parameter.get('traffic_sign_y', 0)
+                result['w'] = Vilib.detect_obj_parameter.get('traffic_sign_w', 0)
+                result['h'] = Vilib.detect_obj_parameter.get('traffic_sign_h', 0)
+                result['traffic_sign_type'] = Vilib.detect_obj_parameter.get('traffic_sign_t', 0)
+                result['acc'] = Vilib.detect_obj_parameter.get('traffic_sign_acc', 0)
+            else:
+                result['traffic_sign_detected'] = False
 
         # 3) Else: some other object type or nothing found
         else:

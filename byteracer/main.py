@@ -218,6 +218,8 @@ class ByteRacer:
             self.aicamera_manager.start_color_control()
         else:
             self.aicamera_manager.stop_color_control()
+
+        self.aicamera_manager.start_traffic_sign_detection()
         
         logging.info("Applied settings from configuration")
     

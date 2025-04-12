@@ -9,7 +9,9 @@ class AICameraCameraManager:
     """
     Manages higher-level AI camera capabilities, specifically:
       1) Traffic light color detection and speed control (red, green, orange).
-      2) Face detection + following (including forward/back & turn).
+      2) Face detection + following (forward/back & turn).
+      3) Pose detection.
+      4) Traffic-sign detection.
     """
 
     def __init__(self, px, sensor_manager, camera_manager):
@@ -32,13 +34,21 @@ class AICameraCameraManager:
         self.color_control_thread = None
         self.color_control_active = False
 
+        # Pose detection
+        self.pose_detection_thread = None
+        self.pose_detection_active = False
+
+        # Traffic-sign detection
+        self.traffic_sign_detection_thread = None
+        self.traffic_sign_detection_active = False
+
         # ---------------------------------------------------------
         # Face following parameters (adjust for your system)
         # ---------------------------------------------------------
         self.TARGET_FACE_AREA = 10.0    # (in %) Ideal face size in the frame
         self.FORWARD_FACTOR   = 1500.0  # Speed scaling factor
         self.MAX_SPEED        = 75      # maximum absolute speed (±75)
-        self.SPEED_DEAD_ZONE  = 50       # movement dead zone around 0 speed
+        self.SPEED_DEAD_ZONE  = 50      # movement dead zone around 0 speed
 
         # Steering constants
         self.TURN_FACTOR = 35.0         # final multiplier for turning
@@ -125,7 +135,7 @@ class AICameraCameraManager:
 
         while self.face_follow_active:
             detection = self.camera_manager.detect_obj_parameter('human')
-            # detection e.g.:
+            # detection example:
             # {
             #   'human_detected': bool,
             #   'human_x': int,
@@ -144,7 +154,6 @@ class AICameraCameraManager:
                 # ---------------------------------------------
                 # 1) Pan/Tilt the camera
                 # ---------------------------------------------
-                # Horizontal offset => range [-0.5..+0.5]
                 x_offset_ratio = (face_x / camera_width) - 0.5
                 target_x_angle = x_offset_ratio * 180  # scale up to ±90
 
@@ -153,7 +162,6 @@ class AICameraCameraManager:
                 self.x_angle = self.clamp_number(self.x_angle, self.PAN_MIN_ANGLE, self.PAN_MAX_ANGLE)
                 self.px.set_cam_pan_angle(int(self.x_angle))
 
-                # Vertical offset => range [ +0.5.. -0.5 ]
                 y_offset_ratio = 0.5 - (face_y / camera_height)
                 target_y_angle = y_offset_ratio * 130
 
@@ -166,7 +174,6 @@ class AICameraCameraManager:
                 # 2) Forward/backward speed with dead zone
                 # ---------------------------------------------
                 face_area_percent = (face_w * face_h) / (camera_width * camera_height) * 100.0
-                # If face_area_percent > TARGET_FACE_AREA => raw_speed < 0 => go backward
                 raw_speed = (self.TARGET_FACE_AREA - face_area_percent) * (self.FORWARD_FACTOR / 100.0)
 
                 # clamp to ±MAX_SPEED
@@ -183,7 +190,6 @@ class AICameraCameraManager:
                 # 3) Steering => invert if going backward
                 # ---------------------------------------------
                 steer_val = turn_function(x_offset_ratio) * self.TURN_FACTOR
-                # clamp to ±(some servo limit)
                 steer_val = self.clamp_number(steer_val, self.STEER_MIN_ANGLE, self.STEER_MAX_ANGLE)
 
                 if raw_speed > 0:
@@ -278,7 +284,7 @@ class AICameraCameraManager:
                     cname = color_info['color_name']
                     if cname == 'red':
                         desired_speed = 0
-                        break  # highest priority
+                        break  # highest priority => immediately stop
                     elif cname == 'green':
                         desired_speed = max(desired_speed, 100)
                     elif cname == 'orange':
@@ -296,16 +302,14 @@ class AICameraCameraManager:
 
         logger.info("Color control loop stopped.")
 
-
     # ------------------------------------------------------------------
     # Pose Detection
     # ------------------------------------------------------------------
-
     def start_pose_detection(self):
         """
         Spawns a background thread to do pose detection.
         """
-        if self.pose_detection_active:
+        if hasattr(self, 'pose_detection_active') and self.pose_detection_active:
             logger.warning("Pose detection is already running!")
             return
 
@@ -321,12 +325,12 @@ class AICameraCameraManager:
             daemon=True
         )
         self.pose_detection_thread.start()
-    
+
     def stop_pose_detection(self):
         """
         Signals the pose-detection loop to stop and waits for thread to end.
         """
-        if not self.pose_detection_active:
+        if not hasattr(self, 'pose_detection_active') or not self.pose_detection_active:
             logger.warning("Pose detection not currently running!")
             return
 
@@ -341,10 +345,115 @@ class AICameraCameraManager:
         # Optionally disable pose detection
         self.camera_manager.switch_pose_detect(False)
 
-    
+    def _pose_detection_loop(self):
+        """
+        Continuously checks for pose data from camera_manager.
+        This example simply retrieves the data and logs it.
+        You can customize how to interpret or act on the results.
+        """
+        logger.info("Pose detection loop started.")
+
+        while self.pose_detection_active:
+            # 
+            # The camera_manager might provide pose data if it’s internally
+            # running mediapipe. We'll assume it returns some structure like:
+            # {
+            #   'pose_detected': True/False
+            #   'pose_landmarks': [...]  # or however it’s implemented
+            # }
+            #
+            detection = self.camera_manager.detect_obj_parameter('pose')
+            
+            if detection.get('pose_detected', False):
+                # Possibly includes keypoints, angles, etc.
+                landmarks = detection.get('pose_landmarks', [])
+                logger.debug(f"Pose detected with {len(landmarks)} landmarks")
+                # Do something with them if needed
+            else:
+                logger.debug("No pose detected")
+
+            time.sleep(0.05)
+
+        logger.info("Pose detection loop stopped.")
+
     # ------------------------------------------------------------------
     # Traffic-Sign Detection
     # ------------------------------------------------------------------
-
     def start_traffic_sign_detection(self):
-        
+        """
+        Spawns a background thread to do traffic sign detection.
+        """
+        if hasattr(self, 'traffic_sign_detection_active') and self.traffic_sign_detection_active:
+            logger.warning("Traffic sign detection is already running!")
+            return
+
+        logger.info("Starting traffic sign detection ...")
+        self.traffic_sign_detection_active = True
+
+        # Enable traffic sign detection in camera_manager
+        self.camera_manager.switch_trafic_sign_detect(True)
+
+        # Start thread
+        self.traffic_sign_detection_thread = threading.Thread(
+            target=self._traffic_sign_detection_loop,
+            daemon=True
+        )
+        self.traffic_sign_detection_thread.start()
+
+    def stop_traffic_sign_detection(self):
+        """
+        Signals the traffic-sign-detection loop to stop and waits for thread to end.
+        """
+        if not hasattr(self, 'traffic_sign_detection_active') or not self.traffic_sign_detection_active:
+            logger.warning("Traffic sign detection not currently running!")
+            return
+
+        logger.info("Stopping traffic sign detection ...")
+        self.traffic_sign_detection_active = False
+
+        if self.traffic_sign_detection_thread and self.traffic_sign_detection_thread.is_alive():
+            self.traffic_sign_detection_thread.join(timeout=2.0)
+
+        self.traffic_sign_detection_thread = None
+
+        # Optionally disable traffic sign detection
+        self.camera_manager.switch_trafic_sign_detect(False)
+
+    def _traffic_sign_detection_loop(self):
+        """
+        Continuously checks for traffic sign data from camera_manager.
+        This example simply retrieves the data and logs it.
+        Adjust as needed to act on 'stop', 'left', 'right', etc.
+        """
+        logger.info("Traffic sign detection loop started.")
+
+        while self.traffic_sign_detection_active:
+            # Expecting something like:
+            # {
+            #    'traffic_sign_n': ...,
+            #    'x': ...,
+            #    'y': ...,
+            #    'w': ...,
+            #    'h': ...,
+            #    't': 'stop'/'left'/'right'/'forward'/'none', 
+            #    'acc': ...
+            # }
+            detection = self.camera_manager.detect_obj_parameter('traffic_sign')
+            # Implement how your camera_manager returns these fields
+
+            # For example:
+            if detection.get('traffic_sign_detected', False):
+                sign_type = detection.get('traffic_sign_type', 'none')
+                x = detection.get('x', 0)
+                y = detection.get('y', 0)
+                acc = detection.get('acc', 0)
+                w = detection.get('w', 0)
+                h = detection.get('h', 0)
+                logger.debug(f"Traffic Sign => type={sign_type}, confidence={acc}, center=({x},{y}), size=({w},{h})")
+                
+                # If you want to do something special on "stop", "left", etc.
+                # e.g. if sign_type == 'stop': self.px.forward(0)
+            
+            time.sleep(0.05)
+
+        logger.info("Traffic sign detection loop stopped.")
