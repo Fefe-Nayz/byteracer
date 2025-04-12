@@ -304,7 +304,7 @@ class AICameraCameraManager:
 
     # ------------------------------------------------------------------
     # Traffic-Sign Detection
-    # ------------------------------------------------------------------
+    # ------------------------------------------------------------------    
     def start_traffic_sign_detection(self):
         """
         Spawns a background thread to do traffic sign detection.
@@ -315,6 +315,10 @@ class AICameraCameraManager:
 
         logger.info("Starting traffic sign detection ...")
         self.traffic_sign_detection_active = True
+        
+        # Reset camera angles
+        self.x_angle = 0
+        self.y_angle = 0
 
         # Enable traffic sign detection in camera_manager
         self.camera_manager.switch_trafic_sign_detect(True)
@@ -343,15 +347,18 @@ class AICameraCameraManager:
         self.traffic_sign_detection_thread = None
 
         # Optionally disable traffic sign detection
-        self.camera_manager.switch_trafic_sign_detect(False)
-
+        self.camera_manager.switch_trafic_sign_detect(False)    
     def _traffic_sign_detection_loop(self):
         """
         Continuously checks for traffic sign data from camera_manager.
-        This example simply retrieves the data and logs it.
+        Locks camera onto detected signs by adjusting pan/tilt servos.
         Adjust as needed to act on 'stop', 'left', 'right', etc.
         """
         logger.info("Traffic sign detection loop started.")
+        
+        # Suppose your camera resolution is 640 x 480 (match with face following)
+        camera_width = 640
+        camera_height = 480
 
         while self.traffic_sign_detection_active:
             # Expecting something like:
@@ -367,7 +374,6 @@ class AICameraCameraManager:
             detection = self.camera_manager.detect_obj_parameter('traffic_sign')
             # Implement how your camera_manager returns these fields
 
-            # For example:
             if detection.get('traffic_sign_detected', False):
                 sign_type = detection.get('traffic_sign_type', 'none')
                 x = detection.get('x', 0)
@@ -375,7 +381,28 @@ class AICameraCameraManager:
                 acc = detection.get('acc', 0)
                 w = detection.get('w', 0)
                 h = detection.get('h', 0)
-                logger.debug(f"Traffic Sign => type={sign_type}, confidence={acc}, center=({x},{y}), size=({w},{h})")
+                
+                # ---------------------------------------------
+                # Camera lock-on to center sign in frame
+                # ---------------------------------------------
+                x_offset_ratio = (x / camera_width) - 0.5
+                target_x_angle = x_offset_ratio * 180  # scale up to ±90
+
+                dx = target_x_angle - self.x_angle
+                self.x_angle += 0.2 * dx  # Smooth movement factor
+                self.x_angle = self.clamp_number(self.x_angle, self.PAN_MIN_ANGLE, self.PAN_MAX_ANGLE)
+                self.px.set_cam_pan_angle(int(self.x_angle))
+
+                y_offset_ratio = 0.5 - (y / camera_height)
+                target_y_angle = y_offset_ratio * 130  # Scale to tilt range
+
+                dy = target_y_angle - self.y_angle
+                self.y_angle += 0.2 * dy  # Smooth movement factor
+                self.y_angle = self.clamp_number(self.y_angle, self.TILT_MIN_ANGLE, self.TILT_MAX_ANGLE)
+                self.px.set_cam_tilt_angle(int(self.y_angle))
+                
+                logger.debug(f"Traffic Sign => type={sign_type}, confidence={acc}, center=({x},{y}), size=({w},{h}), " + 
+                             f"camera pan={self.x_angle:.1f}, tilt={self.y_angle:.1f}")
                 
                 # If you want to do something special on "stop", "left", etc.
                 # e.g. if sign_type == 'stop': self.px.forward(0)
