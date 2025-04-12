@@ -38,7 +38,7 @@ class AICameraCameraManager:
         self.TARGET_FACE_AREA = 10.0    # (in %) Ideal face size in the frame
         self.FORWARD_FACTOR   = 1500.0  # Speed scaling factor
         self.MAX_SPEED        = 75      # maximum absolute speed (±75)
-        self.SPEED_DEAD_ZONE  = 10       # movement dead zone around 0 speed
+        self.SPEED_DEAD_ZONE  = 50       # movement dead zone around 0 speed
 
         # Steering constants
         self.TURN_FACTOR = 35.0         # final multiplier for turning
@@ -295,3 +295,56 @@ class AICameraCameraManager:
             time.sleep(0.05)
 
         logger.info("Color control loop stopped.")
+
+
+    # ------------------------------------------------------------------
+    # Pose Detection
+    # ------------------------------------------------------------------
+
+    def start_pose_detection(self):
+        """
+        Spawns a background thread to do pose detection.
+        """
+        if self.pose_detection_active:
+            logger.warning("Pose detection is already running!")
+            return
+
+        logger.info("Starting pose detection ...")
+        self.pose_detection_active = True
+
+        # Enable pose detection in camera_manager
+        self.camera_manager.switch_pose_detect(True)
+
+        # Start thread
+        self.pose_detection_thread = threading.Thread(
+            target=self._pose_detection_loop,
+            daemon=True
+        )
+        self.pose_detection_thread.start()
+    
+    def stop_pose_detection(self):
+        """
+        Signals the pose-detection loop to stop and waits for thread to end.
+        """
+        if not self.pose_detection_active:
+            logger.warning("Pose detection not currently running!")
+            return
+
+        logger.info("Stopping pose detection ...")
+        self.pose_detection_active = False
+
+        if self.pose_detection_thread and self.pose_detection_thread.is_alive():
+            self.pose_detection_thread.join(timeout=2.0)
+
+        self.pose_detection_thread = None
+
+        # Optionally disable pose detection
+        self.camera_manager.switch_pose_detect(False)
+
+    
+    # ------------------------------------------------------------------
+    # Traffic-Sign Detection
+    # ------------------------------------------------------------------
+
+    def start_traffic_sign_detection(self):
+        
