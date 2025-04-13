@@ -60,6 +60,7 @@ export default function GptIntegration() {
   const { status, sendGptCommand, cancelGptCommand, gptStatus, createNewThread } = useWebSocket();
   const { toast } = useToast();
 
+  console.log(actionType)
   
   // Listen for GPT responses
   useEffect(() => {
