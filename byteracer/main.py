@@ -252,7 +252,7 @@ class ByteRacer:
                     should_announce = False
                     
                     # Always announce on first run or when not connected
-                    if first_run or self.sensor_manager.robot_state != RobotState.MANUAL_CONTROL:
+                    if first_run or self.sensor_manager.robot_state == RobotState.INITIALIZING:
                         should_announce = True
                         first_run = False
                     # Announce if network changed while connected

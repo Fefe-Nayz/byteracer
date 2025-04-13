@@ -60,7 +60,13 @@ async def run_script_in_isolated_environment(
     full_script = _build_script_with_environment(script_code)
     
     # Local namespace for script execution
-    local_env = {"ScriptCancelledException": ScriptCancelledException}
+    local_env = {"ScriptCancelledException": ScriptCancelledException,
+    "asyncio": asyncio,
+    "time": time,
+    "json": json,
+    "traceback": traceback,
+    "threading": threading
+    }
     
     # Function to run in separate thread
     def run_script_in_thread():
@@ -190,45 +196,20 @@ def _build_script_with_environment(script_code: str) -> str:
         "import cv2\n"
         "import numpy as np\n\n"
         "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager):\n"
-        "    # Helper functions for safe resource access\n"
-        "    async def process_camera_image():\n"
-        "        \"\"\"Gets camera image and converts to OpenCV format safely\"\"\"\n"
-        "        try:\n"
-        "            # Get raw camera image (base64 encoded)\n"
-        "            image_data = await get_camera_image()\n"
-        "            if not image_data:\n"
-        "                logger.warning('No camera image available')\n"
-        "                return None\n"
-        "                \n"
-        "            # Convert to OpenCV image for processing\n"
-        "            import base64\n"
-        "            import io\n"
-        "            from PIL import Image\n"
-        "            \n"
-        "            image_bytes = base64.b64decode(image_data)\n"
-        "            image = Image.open(io.BytesIO(image_bytes))\n"
-        "            return cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)\n"
-        "        except Exception as e:\n"
-        "            logger.error(f'Error processing camera image: {e}')\n"
-        "            return None\n"
-        "            \n"
         "    # Set up cancellation detection\n"
-        "    cancel_event = threading.Event()\n"
-        "    \n"
+        "    cancel_event = threading.Event()\n\n"
         "    async def check_cancellation():\n"
-        "        \"\"\"Checks if script should be cancelled\"\"\"\n"
+        "        \"\"\"Checks if the script should be cancelled\"\"\"\n"
         "        while not gpt_manager.gpt_command_cancelled:\n"
         "            await asyncio.sleep(0.1)\n"
         "        logger.info('Script cancellation requested')\n"
         "        cancel_event.set()\n"
-        "        raise ScriptCancelledException('Script cancelled by user')\n"
-        "    \n"
-        "    # Start cancellation checker\n"
-        "    cancellation_task = asyncio.create_task(check_cancellation())\n"
-        "    \n"
+        "        raise ScriptCancelledException('Script cancelled by user')\n\n"
+        "    # Start the cancellation checker\n"
+        "    cancellation_task = asyncio.create_task(check_cancellation())\n\n"
         "    try:\n"
     )
-    
+
     # Indent the user's code to fit under try block
     indented_user_code = "\n".join(f"        {line}" for line in script_code.split("\n"))
     

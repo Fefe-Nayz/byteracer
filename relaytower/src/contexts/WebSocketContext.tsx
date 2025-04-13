@@ -461,11 +461,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
           case "gpt_status_update":
             // Handle GPT status updates
-            setGptStatus(event.data);
+            setGptStatus(event);
             // Dispatch event for other components that might need it
             window.dispatchEvent(
               new CustomEvent("debug:gpt-status", {
-                detail: event.data,
+                detail: event,
               })
             );
             break;

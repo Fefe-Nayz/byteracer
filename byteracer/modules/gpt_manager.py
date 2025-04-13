@@ -214,13 +214,6 @@ class GPTManager:
               "type": "object",
               "description": "A JSON object containing the parameters for the function.",
               "properties": {
-                "motor_id": {"type": ["string", "null"], "description": "ID of the motor to control"},
-                "speed": {"type": ["number", "null"], "description": "Speed value (-100 to 100)"},
-                "angle": {"type": ["number", "null"], "description": "Angle value for servos"},
-                "pan": {"type": ["number", "null"], "description": "Camera pan angle (-90 to 90)"},
-                "tilt": {"type": ["number", "null"], "description": "Camera tilt angle (-35 to 65)"},
-                "text": {"type": ["string", "null"], "description": "Text for TTS output"},
-                "language": {"type": ["string", "null"], "description": "Language code for TTS"},
                 "sound_name": {"type": ["string", "null"], "description": "Name of sound to play"},
                 "volume": {"type": ["number", "null"], "description": "Volume level (0-100)"},
                 "enabled": {"type": ["boolean", "null"], "description": "Enable/disable flag"},
@@ -237,7 +230,7 @@ class GPTManager:
                 "local_display": {"type": ["boolean", "null"], "description": "Local display setting"},                
                 "web_display": {"type": ["boolean", "null"], "description": "Web display setting"}
               },
-              "required": ["motor_id", "speed", "angle", "pan", "tilt", "text", "language", "sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display"],
+              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display"],
               "additionalProperties": False
             }
           },
@@ -358,7 +351,7 @@ AVAILABLE ACTIONS:
    
    AVAILABLE PYTHON SCRIPT FUNCTIONS:
    
-   The `px` object provides these methods to control the robot:
+   The `px` object provides these methods to control the robot, none of them are asynchronous:
    • px.set_motor_speed(motor_id, speed): Controls individual motors
      - motor_id: 1=rear_left, 2=rear_right
      - speed: -100 to 100
@@ -375,7 +368,7 @@ AVAILABLE ACTIONS:
    • px.reset(): Reset all servos and motors to default positions
    
    For camera image processing:
-   • get_camera_image(): Returns base64 encoded image data from camera
+   • get_camera_image(): Returns the camera image as raw bytes from camera, it's an async function
    
    For text-to-speech (always use await):
    • await tts.say("Your message", priority=1, lang="en-US"): Speaks message
@@ -390,23 +383,12 @@ AVAILABLE ACTIONS:
    • await asyncio.sleep(seconds): Asynchronous sleep, pauses execution
    • DO NOT use time.sleep() in scripts - it blocks the event loop
 
-2. CALL PREDEFINED FUNCTIONS (action_type: "predefined_function"):
-   Movement Functions:
-   • move(motor_id: string, speed: number): Controls individual motors (-100 to 100%)
-   • move_forward(speed: number): Moves robot forward (0 to 100%)
-   • move_backward(speed: number): Moves robot backward (0 to 100%)
-   • stop(): Immediately stops all motors
-   • turn(angle: number): Sets steering angle (-30 to 30 degrees)
-
-   Camera Functions:
-   • set_camera_angle(pan: number, tilt: number): Sets camera position
-   
+2. CALL PREDEFINED FUNCTIONS (action_type: "predefined_function"): 
    Sensor Functions:
    • get_distance(): Returns ultrasonic sensor measurement with TTS feedback
    • get_sensor_data(): Reads all sensors (distance, line, battery)
    
    Audio Functions:
-   • say(text: string, language: string): Uses TTS to speak
    • play_sound(sound_name: string): Plays a sound effect
    • Available sounds: "alarm", "aurores", "bruh", "cailloux", "fart", "get-out", "india", 
      "klaxon", "klaxon-2", "laugh", "lingango", "nope", "ph", "pipe", "rat-dance", "scream", 
@@ -474,12 +456,66 @@ AVAILABLE ACTIONS:
 4. TEXT RESPONSE (action_type: "none"):
    • Simple text feedback for speech and display
 
+SCRIPT EXECUTION CONTEXT:
+- The execution environment will wrapp your code inside an asynchronous function called user_script(px, get_camera_image, logger, tts, sound, gpt_manager).
+- The execution environment will execute your code in a dedicated asyncio event loop within its own thread (created via asyncio.new_event_loop()) using loop.run_until_complete().
+- The execution environment already imports and provides modules such as asyncio, threading, time, json, and traceback.
+- Never re-import or redefine these modules. In particular, do not assign to or override asyncio (e.g. do not write asyncio = ... or def asyncio()).
+- Do not use blocking functions like time.sleep(); always use asynchronous delays (await asyncio.sleep(seconds)).
+
+WHAT TO DO FOR EXAMPLE:
+```py
+await tts.say("Je vais avancer vers le mur maintenant.", priority=1, lang="fr-FR")
+while True:
+    distance = await px.get_distance()
+    if distance > 10:  # Continue forward until close to the wall
+        px.forward(30)
+    else:
+        px.stop()
+        await asyncio.sleep(1)
+        await tts.say("Je suis près du mur, je vais maintenant reculer.", priority=1, lang="fr-FR")
+        px.backward(20)
+        await asyncio.sleep(2)  # Move back a little
+        px.stop()
+        await tts.say("Mission accomplie!", priority=1, lang="fr-FR")
+        break
+    await asyncio.sleep(0.1)  # Small delay for loop iteration
+```
+
+WHAT NOT TO DO FOR EXAMPLE:
+```py
+import asyncio
+
+async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager):
+    
+    try:
+        await tts.say("Je vais avancer vers le mur maintenant.", priority=1, lang="fr-FR")
+        while True:
+            distance = await px.get_distance()
+            if distance > 10:  # Continue forward until close to the wall
+                px.forward(30)
+            else:
+                px.stop()
+                await asyncio.sleep(1)
+                await tts.say("Je suis près du mur, je vais maintenant reculer.", priority=1, lang="fr-FR")
+                px.backward(20)
+                await asyncio.sleep(2)  # Move back a little
+                px.stop()
+                await tts.say("Mission accomplie!", priority=1, lang="fr-FR")
+                break
+            await asyncio.sleep(0.1)  # Small delay for loop iteration
+    except Exception as e:
+        logger.error(f"An error occurred: {e}")
+```
+
 SCRIPT EXECUTION GUIDELINES:
 - Always validate image data before processing
-- Handle potential None returns from get_camera_image()
+- get_camera_image() is an asynchronous function that returns returns the camera image as raw bytes
+- Do not assign or redefine asyncio, which is a built-in module. Only use it to call asyncio.sleep or similar functions.
 - Use proper async/await patterns with asyncio
 - Use await asyncio.sleep() not time.sleep() for waiting
 - Always include proper error handling
+- Remember: Your code is executed in a sandboxed environment. Do not create infinite loops, blocking calls, or instantiate new hardware controllers.
 
 RESPONSE FORMAT REQUIREMENTS:
 - ALL fields in response JSON must be included, even if empty
@@ -760,7 +796,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         try:
             # Create the base update object
             update = {
-                "type": "gpt_status",
+                "name": "gpt_status_update",
                 "status": status,
                 "message": message,
                 "timestamp": time.time()
@@ -769,8 +805,10 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             # Include additional data if provided
             if additional_data:
                 update["data"] = additional_data
-                
-            await websocket.send_json(update)
+
+            logger.info(f"Sending GPT status update: {update}")    
+            
+            await websocket.send(json.dumps(update))
         except Exception as e:
             logger.error(f"Error sending GPT status update: {str(e)}")    
     
@@ -832,8 +870,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 image = Image.open(io.BytesIO(image_bytes))
                 buffered = io.BytesIO()
                 image.save(buffered, format="JPEG")
-                encoded_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                return encoded_image
+                return buffered.getvalue()
             else:
                 logger.error(f"Failed to get camera image, status code: {response.status_code}")
                 return None
