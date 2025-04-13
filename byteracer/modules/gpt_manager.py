@@ -210,8 +210,7 @@ class GPTManager:
               "type": "string",
               "description": "The name of the function to be called."
             },
-"parameters": {
-              "type": "object",
+"parameters": {              "type": "object",
               "description": "A JSON object containing the parameters for the function.",
               "properties": {
                 "motor_id": {"type": "string", "description": "ID of the motor to control"},
@@ -236,7 +235,8 @@ class GPTManager:
                 "height": {"type": "number", "description": "Height dimension"},
                 "local_display": {"type": "boolean", "description": "Local display setting"},
                 "web_display": {"type": "boolean", "description": "Web display setting"}
-              }
+              },
+              "additionalProperties": False
             }
           },
           "required": [
@@ -320,7 +320,7 @@ class GPTManager:
                 request_params = {
                     "model": self.model,
                     "input": [{"role": "user", "content": input_content}],
-"text": {
+                    "text": {
                         "format": {
                             "type": "json_schema",
                             "schema": schema,
