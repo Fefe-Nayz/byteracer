@@ -181,6 +181,39 @@ export interface GptStatusUpdate {
   status: "starting" | "progress" | "completed" | "error" | "warning" | "cancelled";
   message: string;
   timestamp: number;
+  data?: {
+    token_usage?: {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    };
+    response_content?: {
+      action_type: string;
+      text: string;
+      language: string;
+      python_script?: string;
+      predefined_functions?: Array<{
+        function_name: string;
+        parameters: Record<string, unknown>;
+      }>;
+      motor_sequence?: Array<{
+        motor_id: string;
+        actions: Array<{
+          timestamp: number;
+          command: string;
+          value: number;
+        }>;
+      }>;
+    };
+    full_response?: Record<string, unknown>;
+    execution_details?: {
+      type: string;
+      summary: string;
+    };
+    error_details?: string;
+    current_step?: number;
+    total_steps?: number;
+  };
 }
 
 // Define WebSocket context value interface

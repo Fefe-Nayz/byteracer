@@ -13,6 +13,7 @@ from PIL import Image
 from typing import Dict, List, Any, Optional, Union
 from openai import OpenAI, AsyncOpenAI
 from modules.sensor_manager import RobotState
+from modules.script_runner import run_script_in_isolated_environment, ScriptCancelledException
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -129,7 +130,7 @@ class GPTManager:
                     await self._send_gpt_status_update(websocket, "error", "API key missing")
                 return False
 
-            old_state = robot_state if robot_state is not None else self.robot_state_enum.WAITING_FOR_INPUT
+            old_state = robot_state if robot_state is not None else self.robot_state_enum.STANDBY
             self.sensor_manager.robot_state = self.robot_state_enum.GPT_CONTROLLED
 
             if websocket:
@@ -212,7 +213,30 @@ class GPTManager:
 "parameters": {
               "type": "object",
               "description": "A JSON object containing the parameters for the function.",
-              "additionalProperties": True
+              "properties": {
+                "motor_id": {"type": "string", "description": "ID of the motor to control"},
+                "speed": {"type": "number", "description": "Speed value (-100 to 100)"},
+                "angle": {"type": "number", "description": "Angle value for servos"},
+                "pan": {"type": "number", "description": "Camera pan angle (-90 to 90)"},
+                "tilt": {"type": "number", "description": "Camera tilt angle (-35 to 65)"},
+                "text": {"type": "string", "description": "Text for TTS output"},
+                "language": {"type": "string", "description": "Language code for TTS"},
+                "sound_name": {"type": "string", "description": "Name of sound to play"},
+                "volume": {"type": "number", "description": "Volume level (0-100)"},
+                "enabled": {"type": "boolean", "description": "Enable/disable flag"},
+                "threshold": {"type": "number", "description": "Threshold value for sensors"},
+                "factor": {"type": "number", "description": "Factor value for calculations"},
+                "priority": {"type": "number", "description": "Priority level for operations"},
+                "timeout": {"type": "number", "description": "Timeout value in seconds"},
+                "gain": {"type": "number", "description": "Gain value for audio"},
+                "category": {"type": "string", "description": "Category name"},
+                "vflip": {"type": "boolean", "description": "Vertical flip for camera"},
+                "hflip": {"type": "boolean", "description": "Horizontal flip for camera"},
+                "width": {"type": "number", "description": "Width dimension"},
+                "height": {"type": "number", "description": "Height dimension"},
+                "local_display": {"type": "boolean", "description": "Local display setting"},
+                "web_display": {"type": "boolean", "description": "Web display setting"}
+              }
             }
           },
           "required": [
@@ -301,154 +325,167 @@ class GPTManager:
                             "type": "json_schema",
                             "schema": schema,
                             "name": "robot_action",
-                            "strict": False
+                            "strict": True
                         }
-                    },
-                    "instructions": """
-                    You are ByteRacer, a small remote-controlled robot car with AI capabilities.
-Hardware and Capabilities:
-- **Motors:** The robot has five controllable devices with predictable IDs:
-    • "rear_left": A DC motor (set speed command, valid range -100 to 100).
-    • "rear_right": A DC motor (set speed command, valid range -100 to 100).
-    • "front": A servo motor for steering (set angle command, valid range -30 to 30 degrees).
-    • "cam_pan": A servo motor for camera panning (set angle command, valid range -90 to 90 degrees).
-    • "cam_tilt": A servo motor for camera tilting (set angle command, valid range -35 to 65 degrees).
-- **Camera Feed:** Available in real time for visual analysis.
-- **Additional Sensors:** Ultrasonic sensor (front) and line following sensors (bottom).
+                    },                    "instructions": """
+You are ByteRacer, a small AI-powered robot car with real-world interaction capabilities.
 
-Tasks:
-1. **Generate a Python script** (action_type: "python_script") if complex behaviors are needed.
-When generating a Python script (`action_type: "python_script"`), keep in mind:
+HARDWARE CAPABILITIES:
+- MOTORS (5 controllable devices):
+  • "rear_left": DC motor - speed range -100 to 100
+  • "rear_right": DC motor - speed range -100 to 100
+  • "front": Steering servo - angle range -30 to 30 degrees
+  • "cam_pan": Camera pan servo - angle range -90 to 90 degrees
+  • "cam_tilt": Camera tilt servo - angle range -35 to 65 degrees
+- SENSORS:
+  • Front ultrasonic distance sensor (returns cm)
+  • Bottom line-following sensors (array of values)
+  • Camera for real-time visual analysis
+- AUDIO:
+  • Text-to-speech capability
+  • Sound effect playback
 
-- The script will be executed on a real robot (ByteRacer), using a `Picarx` instance called `px`.
-- The generated script is wrapped inside a predefined header/footer:
-    - The `px` object is already instantiated.
-    - A helper function `get_camera_image()` is available (returns base64-encoded image data).
-    - You can also say custom things in your python code with `await tts.say("Your message", priority=1, lang="The language code of the message")`.
-    - You can play sounds using `sound.play_sound("sound_name")`. (see available sounds below)
-    - A `try/except/finally` block is added around your code to handle interruptions.
-    - In `finally`, all motors are safely stopped.
-- Your code will be inserted with indentation inside the `try:` block.
+AVAILABLE ACTIONS:
+1. GENERATE PYTHON SCRIPT (action_type: "python_script"):
+   • Scripts run in an isolated environment with existing instances
+   • Use predefined objects: px, tts, sound, get_camera_image()
+   • Follow strict asynchronous patterns: "await" all async functions
+   • DO NOT create infinite loops or processes that can't be interrupted
+   • DO NOT make repetitive TTS calls
+   • DO NOT create new instances of hardware controllers
+   
+   AVAILABLE PYTHON SCRIPT FUNCTIONS:
+   
+   The `px` object provides these methods to control the robot:
+   • px.set_motor_speed(motor_id, speed): Controls individual motors
+     - motor_id: 1=rear_left, 2=rear_right
+     - speed: -100 to 100
+     - CRITICAL: For FORWARD motion, use POSITIVE for rear_left and NEGATIVE for rear_right
+   • px.forward(speed): Moves forward at specified speed (0-100)
+   • px.backward(speed): Moves backward at specified speed (0-100)
+   • px.stop(): Stops all motors
+   • px.set_dir_servo_angle(angle): Sets steering angle (-30 to 30 degrees)
+   • px.set_cam_pan_angle(angle): Sets camera pan angle (-90 to 90 degrees)
+   • px.set_cam_tilt_angle(angle): Sets camera tilt angle (-35 to 65 degrees)
+   • px.get_distance(): Gets ultrasonic sensor reading (in cm)
+   • px.get_line_sensor_value(): Gets line follower sensor values
+   • px.get_grayscale_value(): Gets grayscale sensor reading
+   • px.reset(): Reset all servos and motors to default positions
+   
+   For camera image processing:
+   • get_camera_image(): Returns base64 encoded image data from camera
+   
+   For text-to-speech (always use await):
+   • await tts.say("Your message", priority=1, lang="en-US"): Speaks message
+     - priority: 1=high, 2=medium, 3=low
+     - lang: "en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"
+   
+   For sound effects:
+   • sound.play_sound("sound_name"): Plays a specific sound effect
+     - Available sounds: "alarm", "aurores", "bruh", etc. (see full list above)
+   
+   For timing (always use await for sleep):
+   • await asyncio.sleep(seconds): Asynchronous sleep, pauses execution
+   • DO NOT use time.sleep() in scripts - it blocks the event loop
 
-If you want to manipulate motors or camera, call methods on `px` such as:
-- `px.set_motor_speed(1, speed)` # for rear_left motor
-- `px.set_motor_speed(2, -speed)` # for rear_right motor (the speed should be reversed because the motor is placed in reverse, THIS IS ALSO TTHE CASE IN THE MOTOR SEQUENCE)
-VERY IMPORTANT FOR SCRIPT EXECUTION: WHEN USING SET MOTOR SPEED, IF YOU WANT TO GO FORWARD WE SHOULD HAVE A POSITIVE VALUE FOR THE REAR_LEFT MOTOR AND A NEGATIVE VALUE FOR THE REAR_RIGHT MOTOR. AND IF WE WANT TO TURN THE VALUES SHOULD BE REVERSED BECAUSE OF THE MOTOR PLACEMENT.
+2. CALL PREDEFINED FUNCTIONS (action_type: "predefined_function"):
+   Movement Functions:
+   • move(motor_id: string, speed: number): Controls individual motors (-100 to 100%)
+   • move_forward(speed: number): Moves robot forward (0 to 100%)
+   • move_backward(speed: number): Moves robot backward (0 to 100%)
+   • stop(): Immediately stops all motors
+   • turn(angle: number): Sets steering angle (-30 to 30 degrees)
 
-- `px.set_dir_servo_angle(angle)`
-- `px.set_cam_pan_angle(angle)`
+   Camera Functions:
+   • set_camera_angle(pan: number, tilt: number): Sets camera position
+   
+   Sensor Functions:
+   • get_distance(): Returns ultrasonic sensor measurement with TTS feedback
+   • get_sensor_data(): Reads all sensors (distance, line, battery)
+   
+   Audio Functions:
+   • say(text: string, language: string): Uses TTS to speak
+   • play_sound(sound_name: string): Plays a sound effect
+   • Available sounds: "alarm", "aurores", "bruh", "cailloux", "fart", "get-out", "india", 
+     "klaxon", "klaxon-2", "laugh", "lingango", "nope", "ph", "pipe", "rat-dance", "scream", 
+     "tralalelo-tralala", "tuile", "vine-boom", "wow", "wtf"
+     Sound Settings:
+   • set_sound_enabled(enabled: boolean): Master sound toggle
+   • set_sound_volume(volume: number): Sets master volume (0-100)
+   • set_sound_effect_volume(volume: number): Sets effects volume (0-100)
+   • set_tts_enabled(enabled: boolean): TTS toggle
+   • set_tts_volume(volume: number): Sets TTS volume (0-100)
+   • set_tts_language(language: string): Sets TTS language
+   • set_category_volume(category: string, volume: number): Volume by category
+   • set_tts_audio_gain(gain: number): Sets TTS audio gain (1.0-15.0)
+   • set_user_tts_volume(volume: number): Sets user TTS volume (0-100)
+   • set_system_tts_volume(volume: number): Sets system TTS volume (0-100)
+   • set_emergency_tts_volume(volume: number): Sets emergency TTS volume (0-100)
+     Safety Settings:
+   • set_collision_avoidance(enabled: boolean): Collision detection toggle
+   • set_collision_threshold(threshold: number): Distance threshold (10-100cm)
+   • set_edge_detection(enabled: boolean): Edge detection toggle
+   • set_edge_threshold(threshold: number): Edge detection sensitivity (0.1-0.9)
+   • set_auto_stop(enabled: boolean): Automatic safety stop feature
+   • set_client_timeout(timeout: number): Sets client timeout in seconds (1-30)
+     Drive Settings:
+   • set_max_speed(speed: number): Speed limit (0-100%)
+   • set_max_turn_angle(angle: number): Turn limit (0-100%)
+   • set_acceleration_factor(factor: number): Acceleration control (0.1-1.0)
+   • set_enhanced_turning(enabled: boolean): Enhanced turning toggle
+   • set_turn_in_place(enabled: boolean): Enables turning in place
+     Camera Settings:
+   • set_camera_flip(vflip: boolean, hflip: boolean): Camera orientation
+   • set_camera_size(width: number, height: number): Resolution control
+   • set_camera_display(local_display: boolean, web_display: boolean): Display settings
+     System Commands:
+   • restart_robot(): Reboots entire system
+   • shutdown_robot(): Powers down system
+   • restart_camera_feed(): Resets camera subsystem
+   • emergency_stop(): Activates emergency stop
+   • clear_emergency(): Clears emergency state
+   • restart_all_services(): Restarts all system services
+   • restart_websocket(): Restarts websocket service
+   • restart_web_server(): Restarts web server
+   • restart_python_service(): Restarts Python service
+   • check_for_updates(): Checks for system updates
+     Animations:
+   • wave_hands(): Front wheel waving animation
+   • nod(): Camera nodding animation
+   • shake_head(): Camera side-to-side motion
+   • act_cute(): Playful animation sequence
+   • think(): Thinking animation
+   • celebrate(): Victory animation
+   • keep_think(): Makes the robot keep thinking
+   • resist(): Makes the robot perform a resistance animation
+   • twist_body(): Makes the robot twist its body
+   • rub_hands(): Makes the robot rub its front wheels
+   • depressed(): Makes the robot appear depressed
 
-You can also read the sensor values using `px` methods like:
-- `px.get_distance()` for ultrasonic sensor (returns distance in cm).
-- `px.get_line_sensor_value()` for line following sensors (returns a list of values).
+3. MOTOR SEQUENCES (action_type: "motor_sequence"):
+   • Timeline-based motor control (timestamps in seconds)
+   • For DC motors: only "set_speed" command
+   • For servos: only "set_angle" command
+   • IMPORTANT: For FORWARD motion, rear_left should be POSITIVE, rear_right NEGATIVE
+   • For TURNING, these values are REVERSED due to motor placement
 
-If you want wait in the code use time.sleep(seconds)
+4. TEXT RESPONSE (action_type: "none"):
+   • Simple text feedback for speech and display
 
-2. **Call predefined functions** (action_type: "predefined_function").  
-   Available functions include:
-      - move(motor_id: string, speed: number): Moves the specified motor at a given speed (-100 to 100%).
-      - move_forward(speed: number): Moves the robot forward at specified speed (0 to 100%).
-      - move_backward(speed: number): Moves the robot backward at specified speed (0 to 100%).
-      - stop(): Immediately stops all motors.
-      - turn(angle: number): Sets the steering servo angle (-30 to 30 degrees).
-      - set_camera_angle(pan: number, tilt: number): Sets camera pan (-90 to 90) and tilt (-35 to 65) angles.
-      - get_distance(): Returns the ultrasonic sensor distance measurement.
-      - play_sound(sound_name: string): Plays a sound effect by name. 
-          - The available sounds are: "alarm", "aurores", "bruh", "cailloux", "fart", "get-out", "india", "klaxon", "klaxon-2", "laugh", "lingango", "nope", "ph", "pipe", "rat-dance", "scream", "tralalelo-tralala", "tuile", "vine-boom", "wow" and "wtf'
-      - say(text: string, language: string): Uses text-to-speech to make the robot talk.
-      - get_sensor_data(): Gets all sensor readings (ultrasonic, line, battery, etc).
-      
-      Sound settings:
-      - set_sound_enabled(enabled: boolean): Enables or disables all sounds.
-      - set_sound_volume(volume: number): Sets master sound volume (0-100).
-      - set_sound_effect_volume(volume: number): Sets sound effects volume (0-100).
-      - set_tts_enabled(enabled: boolean): Enables or disables text-to-speech.
-      - set_tts_volume(volume: number): Sets TTS master volume (0-100).
-      - set_tts_language(language: string): Sets TTS language (en-US, en-GB, de-DE, es-ES, fr-FR, it-IT).
-      - set_category_volume(category: string, volume: number): Sets volume for specific category (driving, alert, custom, voice).
-      - set_tts_audio_gain(gain: number): Sets TTS audio gain (1.0-15.0).
-      - set_user_tts_volume(volume: number): Sets volume for user TTS messages (0-100).
-      - set_system_tts_volume(volume: number): Sets volume for system TTS messages (0-100).
-      - set_emergency_tts_volume(volume: number): Sets volume for emergency TTS messages (0-100).
-      
-      Safety settings:
-      - set_collision_avoidance(enabled: boolean): Enables or disables collision avoidance.
-      - set_collision_threshold(threshold: number): Sets distance threshold for collision detection (10-100cm).
-      - set_edge_detection(enabled: boolean): Enables or disables edge detection.
-      - set_edge_threshold(threshold: number): Sets threshold for edge detection (0.1-0.9).
-      - set_auto_stop(enabled: boolean): Enables or disables automatic stopping for safety.
-      - set_client_timeout(timeout: number): Sets client timeout in seconds (1-30).
-      
-      Drive settings:
-      - set_max_speed(speed: number): Sets maximum speed percentage (0-100).
-      - set_max_turn_angle(angle: number): Sets maximum turn angle percentage (0-100).
-      - set_acceleration_factor(factor: number): Sets acceleration factor (0.1-1.0).
-      - set_enhanced_turning(enabled: boolean): Enables or disables enhanced turning.
-      - set_turn_in_place(enabled: boolean): Enables or disables turning in place.
-      
-      Camera settings:
-      - set_camera_flip(vflip: boolean, hflip: boolean): Sets vertical and horizontal camera flipping.
-      - set_camera_display(local_display: boolean, web_display: boolean): Sets camera display options.
-      - set_camera_size(width: number, height: number): Sets camera resolution.
-      
-      System commands:
-      - restart_robot(): Restarts the entire robot system.
-      - shutdown_robot(): Shuts down the robot system.
-      - restart_all_services(): Restarts all robot services.
-      - restart_websocket(): Restarts the websocket service.
-      - restart_web_server(): Restarts the web server.
-      - restart_python_service(): Restarts the Python service.
-      - restart_camera_feed(): Restarts the camera feed.
-      - check_for_updates(): Checks for and applies software updates.
-      - emergency_stop(): Activates emergency stop.
-      - clear_emergency(): Clears emergency stop status.
-      
-      Predefined animations:
-      - wave_hands(): Makes the robot wave its front wheels.
-      - nod(): Makes the robot nod its camera.
-      - shake_head(): Makes the robot shake its camera from side to side.
-      - act_cute(): Makes the robot perform a cute animation.
-      - think(): Makes the robot appear to be thinking.
-      - keep_think(): Makes the robot keep thinking.
-      - celebrate(): Makes the robot perform a celebratory animation.
-      - resist(): Makes the robot perform a resistance animation.
-      - twist_body(): Makes the robot twist its body.
-      - rub_hands(): Makes the robot rub its front wheels.
-      - depressed(): Makes the robot appear depressed.
-3. **Produce a motor sequence** (action_type: "motor_sequence") that groups a timeline of commands per motor.
-   - For DC motors ("rear_left", "rear_right"): the only allowed command is **"set_speed"**.
-   - For servo motors ("front", "cam_pan", "cam_tilt"): the only allowed command is **"set_angle"**.
-   Each action includes:
-      - timestamp (seconds from start),
-      - command (either "set_speed" or "set_angle"),
-      - value (numeric value for speed or angle).
-4. **Provide textual feedback** (action_type: "none") for TTS and display.
-5. **Specify the language** for TTS output (e.g., "en-US", "de-DE").
+SCRIPT EXECUTION GUIDELINES:
+- Always validate image data before processing
+- Handle potential None returns from get_camera_image()
+- Use proper async/await patterns with asyncio
+- Use await asyncio.sleep() not time.sleep() for waiting
+- Always include proper error handling
 
-Structured Output Format:
-Return a JSON object with exactly these keys:
-```json
-{
-  "action_type": "string (one of: 'python_script', 'predefined_function', 'motor_sequence', 'none')",
-  "python_script": "string (non-empty only if action_type is 'python_script')",
-  "predefined_functions": [
-      { "function_name": "string", "parameters": { ... } }
-  ],
-  "motor_sequence": [
-      {
-         "motor_id": "string ('rear_left', 'rear_right', 'front', 'cam_pan', 'cam_tilt')",
-         "actions": [
-             { "timestamp": number, "command": "string ('set_speed' or 'set_angle')", "value": number }
-         ]
-      }
-  ],
-  "text": "string (for TTS output and on-screen feedback)",
-  "language": "string (one of: 'en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'it-IT')"
-}
-```
-ALL TTHE FILED MUST ALWAYS BE INCLUDED. FOLLOW THE RESPONSE FORMAT STRICTLY.
-When a field is not applicable, leave it empty.
-Tone: Cheerful, optimistic, humorous, and playful.
+RESPONSE FORMAT REQUIREMENTS:
+- ALL fields in response JSON must be included, even if empty
+- The 'text' field is REQUIRED - provide meaningful content
+- Always specify 'language' for TTS ('en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'it-IT')
+
+
+Maintain a cheerful, optimistic, and playful tone in all responses.
 """,
                 }
                 
@@ -476,19 +513,45 @@ Tone: Cheerful, optimistic, humorous, and playful.
                                         if self.gpt_command_cancelled:
                                             if websocket:
                                                 await self._send_gpt_status_update(websocket, "cancelled", "Command cancelled by user")
-                                            return False
-                                                
-                                        # Send update about executing actions
+                                            return False                                        # Send update about executing actions
                                         if websocket:
-                                            await self._send_gpt_status_update(websocket, "progress", "Executing actions...")
+                                            # Include token usage information in the status update
+                                            token_usage = None
+                                            if hasattr(response, 'usage') and response.usage:
+                                                token_usage = {
+                                                    "prompt_tokens": response.usage.prompt_tokens,
+                                                    "completion_tokens": response.usage.completion_tokens,
+                                                    "total_tokens": response.usage.total_tokens
+                                                }
+                                            
+                                            await self._send_gpt_status_update(
+                                                websocket, 
+                                                "progress", 
+                                                "Executing actions...", 
+                                                {"token_usage": token_usage}
+                                            )
                                         
-                                        success = await self._process_actions(parsed_response)
+                                        success = await self._process_actions(parsed_response, websocket)
                                         
                                         if websocket:
                                             if success:
-                                                await self._send_gpt_status_update(websocket, "completed", "Command completed successfully")
+                                                # Send completion with full response details
+                                                await self._send_gpt_status_update(
+                                                    websocket, 
+                                                    "completed", 
+                                                    "Command completed successfully", 
+                                                    {
+                                                        "full_response": parsed_response,
+                                                        "token_usage": token_usage
+                                                    }
+                                                )
                                             else:
-                                                await self._send_gpt_status_update(websocket, "error", "Command execution failed")
+                                                await self._send_gpt_status_update(
+                                                    websocket, 
+                                                    "error", 
+                                                    "Command execution failed",
+                                                    {"error_details": "Failed to execute the requested actions"}
+                                                )
                                         
                                         return success
                                     except json.JSONDecodeError:
@@ -529,12 +592,12 @@ Tone: Cheerful, optimistic, humorous, and playful.
         finally:
             # Reset the processing flag and restore the previous robot state
             self.is_processing = False
-            if old_state != self.robot_state_enum.WAITING_FOR_INPUT:
+            if old_state != self.robot_state_enum.STANDBY:
                 # Only restore to previous state if it wasn't the waiting state
                 self.sensor_manager.robot_state = old_state
             else:
                 # If previous state was waiting, set to client controlled
-                self.sensor_manager.robot_state = self.robot_state_enum.CONTROLLED_BY_CLIENT
+                self.sensor_manager.robot_state = self.robot_state_enum.MANUAL_CONTROL
             
             logger.info(f"Robot state restored from {self.robot_state_enum.GPT_CONTROLLED} to {self.sensor_manager.robot_state}")
                     
@@ -682,29 +745,32 @@ Tone: Cheerful, optimistic, humorous, and playful.
             logger.error(f"Error running assistant: {e}")
             return None
 
-    async def _send_gpt_status_update(self, websocket, status_type, message):
+    async def _send_gpt_status_update(self, websocket, status, message, additional_data=None):
         """
-        Send status updates about GPT command processing to the client.
+        Send a status update to the connected websocket client with optional additional data.
         
         Args:
-            websocket: WebSocket connection to the client.
-            status_type: Type of status update (starting, progress, completed, error, warning, cancelled).
-            message: Status message details.
+            websocket: The websocket connection to send the update to.
+            status: The status of the GPT processing (started, progress, completed, error).
+            message: A message describing the current status.
+            additional_data: Optional dictionary with additional data to send.
         """
         try:
-            status_update = {
-                "name": "gpt_status_update",
-                "data": {
-                    "status": status_type,
-                    "message": message,
-                    "timestamp": int(time.time() * 1000)
-                },
-                "createdAt": int(time.time() * 1000)
+            # Create the base update object
+            update = {
+                "type": "gpt_status",
+                "status": status,
+                "message": message,
+                "timestamp": time.time()
             }
-            await websocket.send(json.dumps(status_update))
-            logger.debug(f"Sent GPT status update: {status_type} - {message}")
+            
+            # Include additional data if provided
+            if additional_data:
+                update["data"] = additional_data
+                
+            await websocket.send_json(update)
         except Exception as e:
-            logger.error(f"Error sending GPT status update: {e}")    
+            logger.error(f"Error sending GPT status update: {str(e)}")    
     
     async def cancel_gpt_command(self, websocket=None):
         """
@@ -737,9 +803,9 @@ Tone: Cheerful, optimistic, humorous, and playful.
             except Exception as e:
                 logger.error(f"Error stopping motors during cancellation: {e}")
             
-            # Restore the robot state to CONTROLLED_BY_CLIENT explicitly
+            # Restore the robot state to MANUAL_CONTROL explicitly
             old_state = self.sensor_manager.robot_state
-            self.sensor_manager.robot_state = self.robot_state_enum.CONTROLLED_BY_CLIENT
+            self.sensor_manager.robot_state = self.robot_state_enum.MANUAL_CONTROL
             logger.info(f"Robot state forcibly restored from {old_state} to {self.sensor_manager.robot_state}")
             
             # Reset the processing flag explicitly
@@ -771,17 +837,86 @@ Tone: Cheerful, optimistic, humorous, and playful.
                 return None
         except Exception as e:
             logger.error(f"Error getting camera image: {e}")
-            return None
-    async def _process_actions(self, response: Dict[str, Any]) -> bool:
-        required_keys = ["action_type", "python_script", "predefined_functions", "motor_sequence", "text", "language"]
-        if not all(key in response for key in required_keys):
-            await self.tts_manager.say("Received incomplete command instructions.", priority=1)
-            return False
+            return None    
+    async def _process_actions(self, response: Dict[str, Any], websocket=None) -> bool:
+        """
+        Process actions from the GPT response. Handles action execution with robust validation
+        and default values for missing fields.
         
-        # Get text output and language
-        text_output = response.get("text", "")
-        language = response.get("language", None)  # Get the language if specified
+        Args:
+            response: Parsed JSON response from GPT
+            websocket: Optional websocket connection for status updates and error reporting
+            
+        Returns:
+            bool: Success status
+        """        # Define default values for missing fields
+        DEFAULT_LANGUAGE = "en-US"
+        DEFAULT_TEXT = "I'll help you with that."
+        
+        # Ensure all required fields exist by supplying defaults where missing
+        required_keys = ["action_type", "python_script", "predefined_functions", "motor_sequence", "text", "language"]
+        
+        # Check for missing fields and validate structure
+        for key in required_keys:
+            if key not in response:
+                logger.warning(f"Response missing required field: '{key}'. Using default value.")
+                
+                # Set sensible defaults based on field type
+                if key == "action_type":
+                    response[key] = "none"  # Default to text-only response
+                elif key == "python_script":
+                    response[key] = ""  # Empty script
+                elif key == "predefined_functions":
+                    response[key] = []  # Empty function list
+                elif key == "motor_sequence":
+                    response[key] = []  # Empty motor sequence
+                elif key == "text":
+                    response[key] = DEFAULT_TEXT  # Default text response
+                elif key == "language":
+                    response[key] = DEFAULT_LANGUAGE  # Default language
+        
+        # Send initial response details to client for display
+        if websocket:
+            # Create a structured response summary based on action type
+            response_details = {
+                "action_type": response["action_type"],
+                "text": response["text"],
+                "language": response["language"],
+            }
+            
+            # Add specific details based on action type
+            if response["action_type"] == "python_script" and response["python_script"]:
+                response_details["python_script"] = response["python_script"]
+            elif response["action_type"] == "predefined_function" and response["predefined_functions"]:
+                response_details["predefined_functions"] = response["predefined_functions"]
+            elif response["action_type"] == "motor_sequence" and response["motor_sequence"]:
+                response_details["motor_sequence"] = response["motor_sequence"]
+                
+            # Send the response details to the client
+            await self._send_gpt_status_update(
+                websocket, 
+                "progress", 
+                "Processing GPT response...", 
+                {"response_content": response_details}
+            )
+        
+        # Get and validate action type
         action_type = response.get("action_type")
+        if action_type not in ["python_script", "predefined_function", "motor_sequence", "none"]:
+            logger.warning(f"Invalid action_type: {action_type}. Defaulting to 'none'.")
+            action_type = "none"
+            response["action_type"] = action_type
+        
+        # Validate and set defaults for text output and language
+        text_output = response.get("text", DEFAULT_TEXT)
+        if not text_output:
+            text_output = DEFAULT_TEXT
+            response["text"] = text_output
+            
+        language = response.get("language", DEFAULT_LANGUAGE)
+        if not language or language not in ["en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"]:
+            language = DEFAULT_LANGUAGE
+            response["language"] = language
         
         # For python_script action type, ensure TTS completes before script execution
         if action_type == "python_script":
@@ -792,446 +927,107 @@ Tone: Cheerful, optimistic, humorous, and playful.
                 # Double-check speaking is really done
                 while self.tts_manager.is_speaking():
                     await asyncio.sleep(0.1)
-            
-            # Now run the script after TTS is completely done
+              # Now run the script after TTS is completely done
             script_code = response.get("python_script", "")
             if script_code:
-                return await self._run_custom_script(f"script_{int(time.time())}", script_code, run_in_background=False)
+                return await run_script_in_isolated_environment(
+                    script_code,
+                    self.px,
+                    self._get_camera_image,
+                    self.tts_manager,
+                    self.sound_manager,
+                    self,
+                    websocket,
+                    run_in_background=False
+                )
             else:
                 await self.tts_manager.say("No Python script provided.", priority=1)
                 return False
         else:
-            # For other action types, speak the text but don't need to fully block
+            # For other action types, speak the text but don't necessarily need to fully block
             if text_output:
-                await self.tts_manager.say(text_output, priority=1, blocking=True, lang=language)
+                await self.tts_manager.say(text_output, priority=1, blocking=False, lang=language)
         
+        # Process predefined function actions
         if action_type == "predefined_function":
             functions = response.get("predefined_functions", [])
             if functions:
-                for func_call in functions:
-                    function_name = func_call.get("function_name", "")
-                    parameters = func_call.get("parameters", {})                    # Dispatch based on your complete set of predefined commands.
-                    if function_name == "move":
-                        speed = parameters.get("speed", 0)
-                        motor_id = parameters.get("motor_id", "")
-                        if motor_id == "rear_left":
-                            self.px.set_motor_speed(1, speed)
-                        elif motor_id == "rear_right":
-                            self.px.set_motor_speed(2, speed)
-                        else:
-                            logger.warning(f"Unknown motor_id {motor_id}")
-                    elif function_name == "move_forward":
-                        speed = parameters.get("speed", 50)
-                        self.px.forward(speed)
-                    elif function_name == "move_backward":
-                        speed = parameters.get("speed", 50)
-                        self.px.backward(speed)
-                    elif function_name == "stop":
-                        self.px.stop()
-                    elif function_name == "turn":
-                        angle = parameters.get("angle", 0)
-                        self.px.set_dir_servo_angle(angle)
-                    elif function_name == "set_camera_angle":
-                        pan = parameters.get("pan", None)
-                        tilt = parameters.get("tilt", None)
-                        if pan is not None:
-                            self.px.set_cam_pan_angle(pan)
-                        if tilt is not None:
-                            self.px.set_cam_tilt_angle(tilt)
-                    elif function_name == "get_distance":
-                        # Return the distance measurement from ultrasonic sensor
-                        distance = self.px.get_distance()
-                        self.tts_manager.say(f"Distance: {distance} cm", priority=1)
-                        logger.info(f"Ultrasonic distance: {distance} cm")
-                    elif function_name == "play_sound":
-                        sound_name = parameters.get("sound_name", "")
-                        if sound_name and self.sound_manager:
-                            self.sound_manager.play_sound("custom", name=sound_name)
-                        else:
-                            logger.warning(f"Sound '{sound_name}' not found or sound manager not available")
-                    elif function_name == "say":
-                        text = parameters.get("text", "")
-                        language = parameters.get("language", "en-US")
-                        if text and self.tts_manager:
-                            asyncio.create_task(self.tts_manager.say(text, lang=language))
-                        else:
-                            logger.warning("Text not provided or TTS manager not available")
-                    # Predefined animations from preset_actions.py
-                    elif function_name == "wave_hands":
-                        from modules.gpt.preset_actions import wave_hands
-                        wave_hands(self.px)
-                    elif function_name == "nod":
-                        from modules.gpt.preset_actions import nod
-                        nod(self.px)
-                    elif function_name == "shake_head":
-                        from modules.gpt.preset_actions import shake_head
-                        shake_head(self.px)
-                    elif function_name == "act_cute":
-                        from modules.gpt.preset_actions import act_cute
-                        act_cute(self.px)
-                    elif function_name == "think":
-                        from modules.gpt.preset_actions import think
-                        think(self.px)
-                    elif function_name == "keep_think": 
-                        from modules.gpt.preset_actions import keep_think
-                        keep_think(self.px)
-                    elif function_name == "celebrate":
-                        from modules.gpt.preset_actions import celebrate
-                        celebrate(self.px)
-                    elif function_name == "resist":
-                        from modules.gpt.preset_actions import resist
-                        resist(self.px)
-                    elif function_name == "twist_body":
-                        from modules.gpt.preset_actions import twist_body
-                        twist_body(self.px)
-                    elif function_name == "rub_hands":
-                        from modules.gpt.preset_actions import rub_hands
-                        rub_hands(self.px)
-                    elif function_name == "depressed":
-                        from modules.gpt.preset_actions import depressed
-                        depressed(self.px)
-                    
-                    # Sound settings
-                    elif function_name == "set_sound_enabled":
-                        enabled = parameters.get("enabled", True)
-                        self.config_manager.set("sound.enabled", enabled)
-                        self.sound_manager.set_enabled(enabled)
-                        logger.info(f"Sound enabled set to {enabled}")
+                try:
+                    for func_call in functions:
+                        # Validate function call structure
+                        if not isinstance(func_call, dict) or "function_name" not in func_call:
+                            logger.warning("Invalid function call format, missing function_name")
+                            continue
+                            
+                        function_name = func_call.get("function_name", "")
+                        if not function_name:
+                            logger.warning("Empty function name, skipping")
+                            continue
+                            
+                        # Ensure parameters exist, default to empty dict if missing
+                        parameters = func_call.get("parameters", {})
+                        if not isinstance(parameters, dict):
+                            logger.warning(f"Parameters for {function_name} is not a dictionary, using empty dict")
+                            parameters = {}
                         
-                    elif function_name == "set_sound_volume":
-                        volume = parameters.get("volume", 50)
-                        if 0 <= volume <= 100:
-                            self.config_manager.set("sound.volume", volume)
-                            self.sound_manager.set_volume(volume)
-                            logger.info(f"Sound volume set to {volume}")
-                        else:
-                            logger.warning(f"Invalid sound volume: {volume}")
-                    
-                    elif function_name == "set_sound_effect_volume":
-                        volume = parameters.get("volume", 50)
-                        if 0 <= volume <= 100:
-                            self.config_manager.set("sound.sound_volume", volume)
-                            self.sound_manager.set_sound_volume(volume)
-                            logger.info(f"Sound effect volume set to {volume}")
-                        else:
-                            logger.warning(f"Invalid sound effect volume: {volume}")
-                    
-                    # TTS settings
-                    elif function_name == "set_tts_enabled":
-                        enabled = parameters.get("enabled", True)
-                        self.config_manager.set("sound.tts_enabled", enabled)
-                        self.tts_manager.set_enabled(enabled)
-                        logger.info(f"TTS enabled set to {enabled}")
-                    
-                    elif function_name == "set_tts_volume":
-                        volume = parameters.get("volume", 50)
-                        if 0 <= volume <= 100:
-                            self.config_manager.set("sound.tts_volume", volume)
-                            self.tts_manager.set_volume(volume)
-                            logger.info(f"TTS volume set to {volume}")
-                        else:
-                            logger.warning(f"Invalid TTS volume: {volume}")
-                    
-                    elif function_name == "set_tts_language":
-                        language = parameters.get("language", "en-US")
-                        valid_languages = ["en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"]
-                        if language in valid_languages:
-                            self.config_manager.set("sound.tts_language", language)
-                            self.tts_manager.set_language(language)
-                            logger.info(f"TTS language set to {language}")
-                        else:
-                            logger.warning(f"Invalid TTS language: {language}")
-                    
-                    elif function_name == "set_category_volume":
-                        category = parameters.get("category", "")
-                        volume = parameters.get("volume", 50)
-                        valid_categories = ["driving", "alert", "custom", "voice"]
-                        if category in valid_categories and 0 <= volume <= 100:
-                            self.config_manager.set(f"sound.{category}_volume", volume)
-                            self.sound_manager.set_category_volume(category, volume)
-                            logger.info(f"{category} volume set to {volume}")
-                        else:
-                            logger.warning(f"Invalid category or volume: {category}={volume}")
-                    
-                    elif function_name == "set_tts_audio_gain":
-                        gain = parameters.get("gain", 1.0)
-                        if 1 <= gain <= 15.0:
-                            self.config_manager.set("sound.tts_audio_gain", gain)
-                            self.tts_manager.set_tts_audio_gain(gain)
-                            logger.info(f"TTS audio gain set to {gain}")
-                        else:
-                            logger.warning(f"Invalid TTS audio gain: {gain}")
-                    
-                    elif function_name == "set_user_tts_volume":
-                        volume = parameters.get("volume", 50)
-                        if 0 <= volume <= 100:
-                            self.config_manager.set("sound.user_tts_volume", volume)
-                            self.tts_manager.set_user_tts_volume(volume)
-                            logger.info(f"User TTS volume set to {volume}")
-                        else:
-                            logger.warning(f"Invalid user TTS volume: {volume}")
-
-                    elif function_name == "set_system_tts_volume":
-                        volume = parameters.get("volume", 50)
-                        if 0 <= volume <= 100:
-                            self.config_manager.set("sound.system_tts_volume", volume)
-                            self.tts_manager.set_system_tts_volume(volume)
-                            logger.info(f"System TTS volume set to {volume}")
-                        else:
-                            logger.warning(f"Invalid system TTS volume: {volume}")
-                    
-                    elif function_name == "set_emergency_tts_volume":
-                        volume = parameters.get("volume", 50)
-                        if 0 <= volume <= 100:
-                            self.config_manager.set("sound.emergency_tts_volume", volume)
-                            self.tts_manager.set_emergency_tts_volume(volume)
-                            logger.info(f"Emergency TTS volume set to {volume}")
-                        else:
-                            logger.warning(f"Invalid emergency TTS volume: {volume}")
-                    
-                    # Safety settings
-                    elif function_name == "set_collision_avoidance":
-                        enabled = parameters.get("enabled", True)
-                        self.config_manager.set("safety.collision_avoidance", enabled)
-                        self.sensor_manager.set_collision_avoidance(enabled)
-                        logger.info(f"Collision avoidance set to {enabled}")
-                    
-                    elif function_name == "set_collision_threshold":
-                        threshold = parameters.get("threshold", 20)
-                        if 10 <= threshold <= 100:
-                            self.config_manager.set("safety.collision_threshold", threshold)
-                            self.sensor_manager.collision_threshold = threshold
-                            logger.info(f"Collision threshold set to {threshold}")
-                        else:
-                            logger.warning(f"Invalid collision threshold: {threshold}")
-                    
-                    elif function_name == "set_edge_detection":
-                        enabled = parameters.get("enabled", True)
-                        self.config_manager.set("safety.edge_detection", enabled)
-                        self.sensor_manager.set_edge_detection(enabled)
-                        logger.info(f"Edge detection set to {enabled}")
-                    
-                    elif function_name == "set_edge_threshold":
-                        threshold = parameters.get("threshold", 0.1)
-                        if 0.1 <= threshold <= 0.9:
-                            self.config_manager.set("safety.edge_threshold", threshold)
-                            self.sensor_manager.set_edge_detection_threshold(threshold)
-                            logger.info(f"Edge threshold set to {threshold}")
-                        else:
-                            logger.warning(f"Invalid edge threshold: {threshold}")
-                    
-                    elif function_name == "set_auto_stop":
-                        enabled = parameters.get("enabled", True)
-                        self.config_manager.set("safety.auto_stop", enabled)
-                        self.sensor_manager.set_auto_stop(enabled)
-                        logger.info(f"Auto stop set to {enabled}")
-
-                    elif function_name == "set_client_timeout":
-                        timeout = parameters.get("timeout", 10)
-                        if 1 <= timeout <= 30:
-                            self.config_manager.set("safety.client_timeout", timeout)
-                            self.sensor_manager.client_timeout = timeout
-                            logger.info(f"Client timeout set to {timeout} seconds")
-                        else:
-                            logger.warning(f"Invalid client timeout: {timeout}")
-                    
-                    # Drive settings
-                    elif function_name == "set_max_speed":
-                        speed = parameters.get("speed", 50)
-                        if 0 <= speed <= 100:
-                            self.config_manager.set("drive.max_speed", speed)
-                            logger.info(f"Max speed set to {speed}")
-                        else:
-                            logger.warning(f"Invalid max speed: {speed}")
-                    
-                    elif function_name == "set_max_turn_angle":
-                        angle = parameters.get("angle", 50)
-                        if 0 <= angle <= 100:
-                            self.config_manager.set("drive.max_turn_angle", angle)
-                            logger.info(f"Max turn angle set to {angle}")
-                        else:
-                            logger.warning(f"Invalid max turn angle: {angle}")
-                    
-                    elif function_name == "set_acceleration_factor":
-                        factor = parameters.get("factor", 0.5)
-                        if 0.1 <= factor <= 1.0:
-                            self.config_manager.set("drive.acceleration_factor", factor)
-                            logger.info(f"Acceleration factor set to {factor}")
-                        else:
-                            logger.warning(f"Invalid acceleration factor: {factor}")
-                    
-                    elif function_name == "set_enhanced_turning":
-                        enabled = parameters.get("enabled", True)
-                        self.config_manager.set("drive.enhanced_turning", enabled)
-                        logger.info(f"Enhanced turning set to {enabled}")
-                    
-                    elif function_name == "set_turn_in_place":
-                        enabled = parameters.get("enabled", True)
-                        self.config_manager.set("drive.turn_in_place", enabled)
-                        logger.info(f"Turn in place set to {enabled}")
-                    
-                    # Camera settings
-                    elif function_name == "set_camera_flip":
-                        vflip = parameters.get("vflip", False)
-                        hflip = parameters.get("hflip", False)
-                        restart_needed = False
-                        
-                        self.config_manager.set("camera.vflip", vflip)
-                        restart_needed |= self.camera_manager.update_settings(vflip=vflip)
-                        
-                        self.config_manager.set("camera.hflip", hflip)
-                        restart_needed |= self.camera_manager.update_settings(hflip=hflip)
-                        
-                        if restart_needed:
-                            asyncio.create_task(self.camera_manager.restart())
-                        logger.info(f"Camera flip settings updated: vflip={vflip}, hflip={hflip}")
-                    
-                    elif function_name == "set_camera_display":
-                        local = parameters.get("local_display", False)
-                        web = parameters.get("web_display", True)
-                        restart_needed = False
-                        
-                        self.config_manager.set("camera.local_display", local)
-                        restart_needed |= self.camera_manager.update_settings(local=local)
-                        
-                        self.config_manager.set("camera.web_display", web)
-                        restart_needed |= self.camera_manager.update_settings(web=web)
-                        
-                        if restart_needed:
-                            asyncio.create_task(self.camera_manager.restart())
-                        logger.info(f"Camera display settings updated: local={local}, web={web}")
-                    
-                    elif function_name == "set_camera_size":
-                        width = parameters.get("width", 640)
-                        height = parameters.get("height", 480)
-                        camera_size = [width, height]
-                        
-                        self.config_manager.set("camera.camera_size", camera_size)
-                        restart_needed = self.camera_manager.update_settings(camera_size=camera_size)
-                        
-                        if restart_needed:
-                            asyncio.create_task(self.camera_manager.restart())
-                        logger.info(f"Camera size updated to {width}x{height}")
-                    
-                    
-                    # System commands
-                    elif function_name == "restart_robot":
-                        await self.tts_manager.say("Restarting system. Please wait.", priority=2, blocking=True)
-                        logger.info("Restarting robot system")
-                        # Schedule system reboot after response is sent
-                        import threading
-                        threading.Timer(2.0, lambda: subprocess.run("sudo reboot", shell=True)).start()
-                    
-                    elif function_name == "shutdown_robot":
-                        await self.tts_manager.say("Shutting down system. Goodbye!", priority=2, blocking=True)
-                        logger.info("Shutting down robot system")
-                        import threading
-                        threading.Timer(2.0, lambda: subprocess.run("sudo shutdown -h now", shell=True)).start()
-                    
-                    elif function_name == "restart_all_services":
-                        await self.tts_manager.say("Restarting all services.", priority=1)
-                        logger.info("Restarting all services")
-                        import threading, os
-                        project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                        subprocess.Popen(
-                            ["bash", f"{project_dir}/byteracer/scripts/restart_services.sh"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            start_new_session=True
-                        )
-                    
-                    elif function_name == "restart_websocket":
-                        await self.tts_manager.say("Restarting websocket service.", priority=1)
-                        logger.info("Restarting websocket service")
-                        import os
-                        project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                        success = subprocess.run(
-                            f"cd {project_dir} && sudo bash ./byteracer/scripts/restart_websocket.sh",
-                            shell=True,
-                            check=False
-                        ).returncode == 0
-                        if not success:
-                            await self.tts_manager.say("Failed to restart websocket service.", priority=1)
-                            logger.error("Failed to restart websocket service")
-                    
-                    elif function_name == "restart_web_server":
-                        await self.tts_manager.say("Restarting web server.", priority=1)
-                        logger.info("Restarting web server")
-                        import os
-                        project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                        success = subprocess.run(
-                            f"cd {project_dir} && sudo bash ./byteracer/scripts/restart_web_server.sh",
-                            shell=True,
-                            check=False
-                        ).returncode == 0
-                        if not success:
-                            await self.tts_manager.say("Failed to restart web server.", priority=1)
-                            logger.error("Failed to restart web server")
-                    
-                    elif function_name == "restart_python_service":
-                        await self.tts_manager.say("Restarting Python service.", priority=1)
-                        logger.info("Restarting Python service")
-                        import os
-                        project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                        subprocess.Popen(
-                            ["bash", f"{project_dir}/byteracer/scripts/restart_python.sh"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            start_new_session=True
-                        )
-                    
-                    elif function_name == "restart_camera_feed":
-                        await self.tts_manager.say("Restarting camera feed.", priority=1)
-                        logger.info("Restarting camera feed")
-                        success = await self.camera_manager.restart()
-                        if not success:
-                            await self.tts_manager.say("Failed to restart camera feed.", priority=1)
-                            logger.error("Failed to restart camera feed")
-                    
-                    elif function_name == "check_for_updates":
-                        await self.tts_manager.say("Checking for updates.", priority=1)
-                        logger.info("Checking for updates")
-                        import os
-                        project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                        subprocess.Popen(
-                            ["bash", f"{project_dir}/byteracer/scripts/update.sh"],
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            start_new_session=True
-                        )
-                    
-                    elif function_name == "emergency_stop":
-                        await self.tts_manager.say("Emergency stop activated.", priority=2)
-                        logger.info("Emergency stop activated")
-                        self.sensor_manager.manual_emergency_stop()
-                    
-                    elif function_name == "clear_emergency":
-                        await self.tts_manager.say("Emergency stop cleared.", priority=1)
-                        logger.info("Emergency stop cleared")
-                        self.sensor_manager.clear_manual_stop()
-                        
-                    else:
-                        logger.warning(f"Unknown predefined function {function_name}")
-                return True
+                        # Execute the function with proper parameter validation and defaults
+                        await self._execute_predefined_function(function_name, parameters)
+                    return True
+                except Exception as e:
+                    logger.error(f"Error executing predefined functions: {e}")
+                    await self.tts_manager.say("I encountered an error while executing functions.", priority=1)
+                    return False
             else:
                 await self.tts_manager.say("No predefined functions specified.", priority=1)
                 return False
         
+        # Process motor sequence actions
         elif action_type == "motor_sequence":
             motor_sequence = response.get("motor_sequence", [])
             if motor_sequence:
-                motor_tasks = []
-                for motor in motor_sequence:
-                    motor_tasks.append(asyncio.create_task(self._run_motor_sequence(motor)))
-                await asyncio.gather(*motor_tasks)
-                return True
+                try:
+                    # Validate motor sequence structure before executing
+                    valid_motor_sequence = []
+                    for motor in motor_sequence:
+                        if not isinstance(motor, dict) or "motor_id" not in motor or "actions" not in motor:
+                            logger.warning("Invalid motor sequence format, skipping entry")
+                            continue
+                        
+                        motor_id = motor.get("motor_id")
+                        if motor_id not in ["rear_left", "rear_right", "front", "cam_pan", "cam_tilt"]:
+                            logger.warning(f"Invalid motor_id: {motor_id}, skipping")
+                            continue
+                            
+                        actions = motor.get("actions", [])
+                        if not actions or not isinstance(actions, list):
+                            logger.warning(f"No valid actions for {motor_id}, skipping")
+                            continue
+                            
+                        valid_motor_sequence.append(motor)
+                    
+                    # Execute valid motor sequences
+                    if valid_motor_sequence:
+                        motor_tasks = []
+                        for motor in valid_motor_sequence:
+                            motor_tasks.append(asyncio.create_task(self._run_motor_sequence(motor)))
+                        await asyncio.gather(*motor_tasks)
+                        return True
+                    else:
+                        await self.tts_manager.say("No valid motor sequences to execute.", priority=1)
+                        return False
+                except Exception as e:
+                    logger.error(f"Error executing motor sequence: {e}")
+                    await self.tts_manager.say("I encountered an error with the motor sequence.", priority=1)
+                    return False
             else:
                 await self.tts_manager.say("Motor sequence is empty.", priority=1)
                 return False
         
+        # Text-only actions ("none" action type)
         elif action_type == "none":
             return True
         
+        # This should never happen due to validation above, but as a fallback
         else:
             await self.tts_manager.say("Invalid action type specified.", priority=1)
             return False
@@ -1275,134 +1071,12 @@ Tone: Cheerful, optimistic, humorous, and playful.
                 self.px.set_cam_tilt_angle(int(value))
             else:
                 logger.warning(f"set_angle command received for unknown servo motor id: {motor_id}")
-        else:
+        else:            
             logger.warning(f"Unknown motor command: {command}")      
-    
-    async def _run_custom_script(self, script_name: str, script_code: str, run_in_background: bool) -> bool:
-        """
-        Runs the given user code in *this* process using `exec`, but in a separate thread,
-        so the same `px` instance is reused while not blocking the main event loop.
-        This avoids the 'GPIO busy' errors caused by creating a second Picarx() in a separate process.
-        """
-        import concurrent.futures
-        import threading
-        logger = logging.getLogger(__name__)
-
-        # Build an async function that encloses the user code inside our standard try/except/finally.
-        # We indent the user code so it fits under `try:`.
-        script_header = (
-            "import asyncio\n\n"
-            "async def user_script(px, get_camera_image, logger, tts, sound,  gpt_manager):\n"
-            "    try:\n"
-            "        # Check for cancellation before starting\n"
-            "        if gpt_manager.gpt_command_cancelled:\n"
-            "            logger.info(\"Script cancelled before execution\")\n"
-            "            return\n\n"
-            "        # Add regular cancellation checks\n"
-            "        async def check_cancellation():\n"
-            "            while not gpt_manager.gpt_command_cancelled:\n"
-            "                await asyncio.sleep(0.2)\n"
-            "            logger.info(\"Cancellation detected, stopping script\")\n"
-            "            raise KeyboardInterrupt()\n"
-            "        \n"
-            "        # Start cancellation checker task\n"
-            "        cancellation_task = asyncio.create_task(check_cancellation())\n"
-            "        \n"
-        )
-        indented_user_code = "\n".join(f"        {line}" for line in script_code.split("\n"))
-        script_footer = (
-            "\n"
-            "        # Clean up cancellation task\n"
-            "        if not cancellation_task.done():\n"
-            "            cancellation_task.cancel()\n"
-            "    except ScriptCancelledException:\n"
-            "        logger.info(\"Script interrupted by user or cancellation\")\n"
-            "    except Exception as e:\n"
-            "        logger.error(f\"Script error: {e}\")\n"
-            "    finally:\n"
-            "        px.set_motor_speed(1, 0)\n"
-            "        px.set_motor_speed(2, 0)\n"
-            "        px.set_dir_servo_angle(0)\n"
-            "        logger.info(\"Script ended, motors stopped\")\n"
-        )        
-        full_script = script_header + indented_user_code + script_footer
-
-        # Prepare a local namespace where the script will be executed
-        local_env = {"ScriptCancelledException": ScriptCancelledException}
-        
-        # Create a threading event for signaling completion
-        script_done_event = threading.Event()
-        script_success = [False]  # Use a list to store the result from the thread
-        
-        # This function will run in a separate thread and execute the user script
-        def run_script_in_thread():
-            try:
-                # Create a new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                
-                # "Compile" the script so that user_script(px, ...) is defined in local_env
-                exec(full_script, local_env)
-                
-                # Grab the user_script function we just defined
-                user_script = local_env["user_script"]
-                
-                # Run the coroutine in this thread's event loop
-                loop.run_until_complete(user_script(self.px, self._get_camera_image, logger, 
-                                                   self.tts_manager, self.sound_manager, self))
-                
-                # Set the success flag
-                script_success[0] = True
-                
-            except Exception as e:
-                logger.error(f"Error running custom script in thread: {e}")
-            finally:
-                # Signal that we're done
-                script_done_event.set()
-        
-        try:
-            # Create a thread pool and submit the script execution
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                if run_in_background:
-                    # Run the script in a background thread and don't wait for it
-                    future = executor.submit(run_script_in_thread)
-                    
-                    # Store a reference to both the future and the event for cancellation
-                    thread_info = {
-                        'future': future,
-                        'done_event': script_done_event
-                    }
-                    self.active_processes[script_name] = thread_info
-                    logger.info(f"Running script '{script_name}' in a background thread.")
-                    return True
-                else:
-                    # Run in a separate thread but wait for it to complete
-                    logger.info(f"Running script '{script_name}' in a thread and waiting for completion.")
-                    future = executor.submit(run_script_in_thread)
-                    
-                    # Wait for the script to complete or get cancelled
-                    while not script_done_event.is_set() and not self.gpt_command_cancelled:
-                        await asyncio.sleep(0.1)
-                    
-                    # If we were cancelled, make sure the thread gets the message
-                    if self.gpt_command_cancelled and not script_done_event.is_set():
-                        logger.info(f"Script '{script_name}' execution was cancelled.")
-                        # The cancellation will be detected by the script's cancellation checker
-                        # Wait a bit for the thread to finish cleanup
-                        script_done_event.wait(timeout=3.0)
-                    
-                    return script_success[0]
-
-            return True
-
-        except Exception as e:
-            logger.error(f"Error running custom script: {e}")
-            await self.tts_manager.say("The script encountered an error.", priority=1)
-            return False    
-    
     async def _stop_script(self, script_name: str) -> bool:
         """
-        Stop a running script, whether it's a subprocess, asyncio task, or thread.
+        Stop a running script by setting the cancellation flag and waiting for it to terminate.
+        Works with our new script execution environment.
         
         Args:
             script_name: The name of the script to stop
@@ -1413,40 +1087,69 @@ Tone: Cheerful, optimistic, humorous, and playful.
         if script_name in self.active_processes:
             process_info = self.active_processes[script_name]
             try:
-                # Check if it's a thread-based execution (has 'future' and 'done_event')
+                # Set the cancellation flag first - this works with our new script runner
+                self.gpt_command_cancelled = True
+                
+                # For thread-based execution (with 'future' and 'done_event')
                 if isinstance(process_info, dict) and 'future' in process_info and 'done_event' in process_info:
-                    # Set the cancellation flag to signal the thread to stop
-                    self.gpt_command_cancelled = True
-                    
-                    # Wait for a short time for the thread to notice the cancellation
-                    logger.info(f"Waiting for thread script {script_name} to acknowledge cancellation...")
+                    logger.info(f"Waiting for script {script_name} to acknowledge cancellation...")
                     
                     # Give the thread a chance to notice the cancellation and clean up
                     # Don't wait indefinitely to avoid freezing the main thread
-                    if not process_info['done_event'].wait(timeout=1.0):
-                        logger.warning(f"Thread for {script_name} did not respond to cancellation signal in time")
+                    if not process_info['done_event'].wait(timeout=2.0):
+                        logger.warning(f"Script {script_name} did not respond to cancellation signal within timeout")
+                        
+                        # Try to cancel the future if possible
+                        if hasattr(process_info['future'], 'cancel'):
+                            try:
+                                process_info['future'].cancel()
+                                logger.info(f"Forcibly cancelled future for {script_name}")
+                            except Exception as future_err:
+                                logger.error(f"Error cancelling future: {future_err}")
                     
-                    logger.info(f"Cancelled thread script: {script_name}")
+                    logger.info(f"Cancelled script: {script_name}")
                     
-                # Check if it's an asyncio Task
+                # For asyncio Tasks
                 elif hasattr(process_info, 'cancel'):
                     # It's an asyncio Task
                     process_info.cancel()
                     logger.info(f"Cancelled async task: {script_name}")
-                else:
+                    
+                # For subprocesses (legacy support)
+                elif hasattr(process_info, 'terminate'):
                     # It's a subprocess.Popen
                     process_info.terminate()
                     process_info.wait(timeout=3)
                     if process_info.poll() is None:
                         process_info.kill()
                     logger.info(f"Terminated subprocess: {script_name}")
+                    
+                # For any other type, try our best to cancel it
+                else:
+                    logger.warning(f"Unknown process type for {script_name}, trying generic cancellation")
+                    if hasattr(process_info, 'cancel'):
+                        process_info.cancel()
+                        
+                # Ensure motors are stopped as a safety measure
+                try:
+                    self.px.set_motor_speed(1, 0)  # rear_left
+                    self.px.set_motor_speed(2, 0)  # rear_right
+                    self.px.set_dir_servo_angle(0)  # steering
+                    self.px.set_cam_pan_angle(0)    # camera pan
+                    self.px.set_cam_tilt_angle(0)   # camera tilt
+                except Exception as motor_err:
+                    logger.error(f"Error stopping motors: {motor_err}")
                 
                 # Remove from active processes
                 del self.active_processes[script_name]
                 logger.info(f"Stopped script: {script_name}")
                 return True
+                
             except Exception as e:
                 logger.error(f"Error stopping script {script_name}: {e}")
+                # Ensure it's removed from active processes even if there was an error
+                if script_name in self.active_processes:
+                    del self.active_processes[script_name]
                 return False
         else:
             logger.warning(f"No script named {script_name} is running")

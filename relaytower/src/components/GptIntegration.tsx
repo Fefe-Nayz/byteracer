@@ -1,21 +1,66 @@
 import { useState, useEffect } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
-import { Card } from "./ui/card";
-import { Input } from "./ui/input";
-import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
-import { BrainCircuit, Camera, Sparkles, X, AlertTriangle, Loader2, CheckCircle2, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { Badge } from "./ui/badge";
-import { Progress } from "./ui/progress";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { BrainCircuit, Camera, Code, Plus, Terminal, RotateCw, X, Loader2, AlertTriangle, CheckCircle2, Sparkles } from "lucide-react";
+
+interface GptStatusData {
+  token_usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
+  execution_details?: {
+    type: string;
+    summary: string;
+  };
+  current_step?: number;
+  total_steps?: number;
+  error_type?: string;
+  details?: string;
+  traceback?: string;
+  error_details?: string;
+  response_content?: {
+    action_type: string;
+    text: string;
+    language: string;
+    python_script?: string;    predefined_functions?: Array<{
+      function_name: string;
+      parameters: Record<string, unknown>;
+    }>;
+    motor_sequence?: Array<{
+      motor_id: string;
+      actions: Array<{
+        timestamp: number;
+        command: string;
+        value: number;
+      }>;
+    }>;
+  };
+  full_response?: Record<string, unknown>;
+}
 
 export default function GptIntegration() {
   const [prompt, setPrompt] = useState("");
-  const [useCamera, setUseCamera] = useState(true);
+  const [useCamera, setUseCamera] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
+  const [responseDetails, setResponseDetails] = useState<GptStatusData | null>(null);
+  const [actionType, setActionType] = useState<string | null>(null);
+  const [tokenUsage, setTokenUsage] = useState<{prompt_tokens: number, completion_tokens: number, total_tokens: number} | null>(null);
+  const [executionProgress, setExecutionProgress] = useState<{current: number, total: number} | null>(null);
+  const [executionHistory, setExecutionHistory] = useState<Array<{timestamp: number, message: string, status: string}>>([]);
   const { status, sendGptCommand, cancelGptCommand, gptStatus, createNewThread } = useWebSocket();
   const { toast } = useToast();
+
+  console.log(actionType)
   
   // Listen for GPT responses
   useEffect(() => {
@@ -45,9 +90,7 @@ export default function GptIntegration() {
         handleGptResponse as EventListener
       );
     };
-  }, []);
-  
-  // Update processing state based on GPT status updates
+  }, []);      // Update processing state based on GPT status updates
   useEffect(() => {
     if (gptStatus) {
       // Set processing state based on the status
@@ -55,6 +98,50 @@ export default function GptIntegration() {
         setIsProcessing(false);
       } else {
         setIsProcessing(true);
+      }
+      
+      // Add to execution history
+      setExecutionHistory(prev => [...prev, {
+        timestamp: gptStatus.timestamp || Date.now(),
+        message: gptStatus.message,
+        status: gptStatus.status
+      }]);
+      
+      // Process additional data if available
+      if (gptStatus.data) {
+        // Update token usage if available
+        if (gptStatus.data.token_usage) {
+          setTokenUsage(gptStatus.data.token_usage);
+        }
+        
+        // Update response content if available (from our extended API)
+        if (gptStatus.data.response_content) {
+          setActionType(gptStatus.data.response_content.action_type);
+          setResponse(gptStatus.data.response_content.text);
+        }
+        
+        // Update execution details if available
+        if (gptStatus.data?.execution_details) {
+          setActionType(gptStatus.data.execution_details.type);
+          setResponseDetails(prev => ({
+            ...prev,
+            execution_details: gptStatus.data?.execution_details
+          }));
+        }
+        
+        // Update execution progress if available
+        if (gptStatus.data.current_step && gptStatus.data.total_steps) {
+          setExecutionProgress({
+            current: gptStatus.data.current_step,
+            total: gptStatus.data.total_steps
+          });
+        }
+        
+        // Store all response details
+        setResponseDetails(prev => ({
+          ...prev,
+          ...gptStatus.data
+        }));
       }
       
       // Show toast for important status updates
@@ -88,6 +175,11 @@ export default function GptIntegration() {
     
     setIsProcessing(true);
     setResponse(null);
+    setResponseDetails(null);
+    setActionType(null);
+    setTokenUsage(null);
+    setExecutionProgress(null);
+    setExecutionHistory([]);
     sendGptCommand(prompt, useCamera);
     
     toast({
@@ -104,6 +196,11 @@ export default function GptIntegration() {
     
     createNewThread();
     setResponse(null);
+    setResponseDetails(null);
+    setActionType(null);
+    setTokenUsage(null);
+    setExecutionProgress(null);
+    setExecutionHistory([]);
     
     toast({
       title: "New conversation started",
@@ -133,8 +230,49 @@ export default function GptIntegration() {
   const handleUseExample = (example: string) => {
     setPrompt(example);
   };  
+  
+  // Function to render action type badge
+  const renderActionTypeBadge = (type: string | null) => {
+    if (!type) return null;
+    
+    let icon = <Code className="h-3.5 w-3.5 mr-1" />;
+    let label = type;
+    let variant: "default" | "secondary" | "outline" = "default";
+    
+    switch(type) {
+      case "python_script":
+        icon = <Terminal className="h-3.5 w-3.5 mr-1" />;
+        label = "Python Script";
+        variant = "secondary";
+        break;
+      case "predefined_function":
+        icon = <RotateCw className="h-3.5 w-3.5 mr-1" />;
+        label = "Function Call";
+        variant = "outline";
+        break;
+      case "motor_sequence":
+        icon = <RotateCw className="h-3.5 w-3.5 mr-1" />;
+        label = "Motor Sequence";
+        variant = "outline";
+        break;
+      case "none":
+        icon = <BrainCircuit className="h-3.5 w-3.5 mr-1" />;
+        label = "Text Response";
+        variant = "default";
+        break;
+    }
+    
+    return (
+      <Badge variant={variant} className="mb-2">
+        {icon}
+        {label}
+      </Badge>
+    );
+  };
+  
   return (
-    <Card className="p-4">      <div className="flex items-center justify-between mb-4">
+    <Card className="p-4">      
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center space-x-2">
           <BrainCircuit className="h-5 w-5" />
           <h3 className="font-bold">GPT Integration</h3>
@@ -214,18 +352,31 @@ export default function GptIntegration() {
               )}
             </div>
             
-            <Progress value={
-              gptStatus.status === "starting" 
-                ? 10 
-                : gptStatus.status === "progress" 
-                  ? 50 
-                  : gptStatus.status === "completed" 
-                    ? 100 
-                    : 0
-            } className="h-1.5" />
+            {/* Show progress based on execution status */}
+            {executionProgress ? (
+              <Progress 
+                value={(executionProgress.current / executionProgress.total) * 100} 
+                className="h-1.5" 
+              />
+            ) : (
+              <Progress value={
+                gptStatus.status === "starting" 
+                  ? 10 
+                  : gptStatus.status === "progress" 
+                    ? 50 
+                    : gptStatus.status === "completed" 
+                      ? 100 
+                      : 0
+              } className="h-1.5" />
+            )}
             
             <p className="text-xs text-muted-foreground">
               {gptStatus.message}
+              {executionProgress && (
+                <span className="text-xs ml-1 opacity-75">
+                  (Step {executionProgress.current} of {executionProgress.total})
+                </span>
+              )}
             </p>
           </div>
         )}
@@ -250,11 +401,172 @@ export default function GptIntegration() {
           )}
         </Button>
       </form>
-      
-      {response && !isProcessing && (
-        <div className="mt-4 p-3 bg-muted rounded-md text-sm">
-          <div className="font-semibold mb-1">Response:</div>
-          <div>{response}</div>
+        {/* Enhanced response display */}
+      {(response || responseDetails) && !isProcessing && (
+        <div className="mt-4">
+          <Tabs defaultValue="response" className="w-full">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="response">Response</TabsTrigger>
+              <TabsTrigger value="code" disabled={!responseDetails?.response_content?.python_script}>Code</TabsTrigger>
+              <TabsTrigger value="functions" disabled={!responseDetails?.response_content?.predefined_functions?.length}>Functions</TabsTrigger>
+              <TabsTrigger value="details">Details</TabsTrigger>
+            </TabsList>
+            
+            {/* Text Response Tab */}
+            <TabsContent value="response" className="space-y-2 py-2">
+              {responseDetails?.response_content?.action_type && renderActionTypeBadge(responseDetails.response_content.action_type)}
+              <div className="p-3 bg-muted rounded-md text-sm whitespace-pre-wrap">
+                {responseDetails?.response_content?.text || response || "No response text available"}
+              </div>
+            </TabsContent>
+            
+            {/* Python Code Tab */}
+            <TabsContent value="code" className="space-y-2 py-2">
+              {responseDetails?.response_content?.python_script && (
+                <div className="rounded-md border overflow-hidden">
+                  <div className="p-2 bg-slate-100 dark:bg-slate-800 border-b flex items-center">
+                    <Terminal className="h-4 w-4 mr-2" />
+                    <span className="font-medium text-sm">Python Script</span>
+                  </div>
+                  <div className="p-4 bg-slate-50 dark:bg-slate-900 font-mono text-sm overflow-x-auto">
+                    <pre>{responseDetails.response_content.python_script}</pre>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+            
+            {/* Function Calls Tab */}
+            <TabsContent value="functions" className="space-y-3 py-2">
+              {responseDetails?.response_content?.predefined_functions?.map((func, index) => (
+                <div key={index} className="rounded-md border overflow-hidden">
+                  <div className="p-2 bg-slate-100 dark:bg-slate-800 border-b flex items-center">
+                    <RotateCw className="h-4 w-4 mr-2" />
+                    <span className="font-medium text-sm">{func.function_name}()</span>
+                  </div>
+                  <div className="p-3 font-mono text-sm overflow-x-auto bg-slate-50 dark:bg-slate-900">
+                    <pre>{JSON.stringify(func.parameters, null, 2)}</pre>
+                  </div>
+                </div>
+              ))}
+            </TabsContent>
+            
+            <TabsContent value="details" className="space-y-3 py-2">
+              {/* Token usage */}
+              {tokenUsage && (
+                <div className="rounded-md border p-3">
+                  <h4 className="font-medium mb-2 text-sm">Token Usage</h4>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div className="flex flex-col">
+                      <span className="text-gray-500 dark:text-gray-400">Prompt</span>
+                      <span className="font-mono">{tokenUsage.prompt_tokens}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-gray-500 dark:text-gray-400">Completion</span>
+                      <span className="font-mono">{tokenUsage.completion_tokens}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-gray-500 dark:text-gray-400">Total</span>
+                      <span className="font-mono">{tokenUsage.total_tokens}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Motor Sequence Display */}
+              {responseDetails?.response_content?.motor_sequence && 
+               responseDetails.response_content.motor_sequence.length > 0 && (
+                <div className="rounded-md border p-3">
+                  <h4 className="font-medium mb-2 text-sm">Motor Sequence</h4>
+                  <div className="space-y-3">
+                    {responseDetails.response_content.motor_sequence.map((motor, idx) => (
+                      <div key={idx} className="border rounded-sm p-2">
+                        <p className="font-medium text-sm mb-1">Motor: {motor.motor_id}</p>
+                        <div className="text-xs overflow-x-auto">
+                          <table className="min-w-full">
+                            <thead>
+                              <tr className="border-b">
+                                <th className="text-left p-1">Time (s)</th>
+                                <th className="text-left p-1">Command</th>
+                                <th className="text-left p-1">Value</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {motor.actions.map((action, actionIdx) => (
+                                <tr key={actionIdx} className="even:bg-gray-50 dark:even:bg-gray-800">
+                                  <td className="p-1">{action.timestamp.toFixed(2)}</td>
+                                  <td className="p-1">{action.command}</td>
+                                  <td className="p-1">{action.value}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Full Response (for debugging) */}
+              {responseDetails?.full_response && (
+                <Collapsible className="w-full">
+                  <CollapsibleTrigger className="flex w-full justify-between items-center p-2 bg-muted rounded-md text-sm font-medium">
+                    <span>Full Response Data</span>
+                    <Plus className="h-4 w-4" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="p-2 text-xs">
+                    <div className="p-2 bg-slate-50 dark:bg-slate-900 font-mono text-xs overflow-x-auto rounded-md">
+                      <pre>{JSON.stringify(responseDetails.full_response, null, 2)}</pre>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+              
+              {/* Error details */}
+              {responseDetails?.error_details && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-md text-sm border border-red-200 dark:border-red-900">
+                  <div className="font-medium mb-1 text-red-600 dark:text-red-400">Error</div>
+                  <div className="text-red-700 dark:text-red-300">{responseDetails.error_details}</div>
+                </div>
+              )}
+              
+              {/* Execution History */}
+              <Collapsible className="w-full">
+                <CollapsibleTrigger className="flex w-full justify-between items-center p-2 bg-muted rounded-md text-sm font-medium">
+                  <span>Execution History ({executionHistory.length})</span>
+                  <Plus className="h-4 w-4" />
+                </CollapsibleTrigger>
+                <CollapsibleContent className="max-h-40 overflow-y-auto">
+                  {executionHistory.length > 0 ? (
+                    <div className="space-y-1 p-2">
+                      {executionHistory.map((item, idx) => (
+                        <div key={idx} className="flex items-start space-x-2 text-xs p-1 border-b border-muted">
+                          <div className="min-w-16 text-muted-foreground">
+                            {new Date(item.timestamp).toLocaleTimeString()}
+                          </div>
+                          <Badge 
+                            variant={
+                              item.status === "error" 
+                                ? "destructive" 
+                                : item.status === "completed"
+                                  ? "secondary"
+                                  : "outline"
+                            }
+                            className="h-5 px-1"
+                          >
+                            {item.status}
+                          </Badge>
+                          <div>{item.message}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground p-3">No execution history available</div>
+                  )}
+                </CollapsibleContent>
+              </Collapsible>
+            </TabsContent>
+          </Tabs>
         </div>
       )}
       
