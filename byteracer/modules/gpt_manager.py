@@ -521,8 +521,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                                             token_usage = None
                                             if hasattr(response, 'usage') and response.usage:
                                                 token_usage = {
-                                                    "prompt_tokens": response.usage.prompt_tokens,
-                                                    "completion_tokens": response.usage.completion_tokens,
+                                                    "prompt_tokens": response.usage.input_tokens,
+                                                    "completion_tokens": response.usage.output_tokens,
                                                     "total_tokens": response.usage.total_tokens
                                                 }
                                             
