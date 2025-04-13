@@ -1016,6 +1016,7 @@ class ByteRacer:
                 self.config_manager.set("modes.tracking_enabled", modes["tracking_enabled"])
                 self.sensor_manager.set_tracking(modes["tracking_enabled"])
                 if modes["tracking_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.TRACKING_MODE
                     self.aicamera_manager.start_face_following()
                 else:   
                     self.aicamera_manager.stop_face_following()
@@ -1025,15 +1026,18 @@ class ByteRacer:
                 self.sensor_manager.set_circuit_mode(modes["circuit_mode_enabled"])
                 
                 if modes["circuit_mode_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
                     self.aicamera_manager.start_color_control()
                 else:   
                     self.aicamera_manager.stop_color_control()
 
             if "demo_mode_enabled" in modes:
+                self.sensor_manager.robot_state = RobotState.DEMO_MODE
                 self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])
                 self.sensor_manager.set_demo_mode(modes["demo_mode_enabled"])
 
             if "normal_mode_enabled" in modes:
+                self.sensor_manager.robot_state = RobotState.MANUAL_CONTROL
                 self.config_manager.set("modes.normal_mode_enabled", modes["normal_mode_enabled"])
                 self.sensor_manager.set_normal_mode(modes["normal_mode_enabled"])
 

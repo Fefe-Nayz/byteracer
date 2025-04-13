@@ -351,7 +351,7 @@ AVAILABLE ACTIONS:
    
    AVAILABLE PYTHON SCRIPT FUNCTIONS:
    
-   The `px` object provides these methods to control the robot, none of them are asynchronous:
+   The `px` object provides these methods to control the robot, none of them are asynchronous, thoes are the only ones you can use:
    • px.set_motor_speed(motor_id, speed): Controls individual motors
      - motor_id: 1=rear_left, 2=rear_right
      - speed: -100 to 100
@@ -457,56 +457,11 @@ AVAILABLE ACTIONS:
    • Simple text feedback for speech and display
 
 SCRIPT EXECUTION CONTEXT:
-- The execution environment will wrapp your code inside an asynchronous function called user_script(px, get_camera_image, logger, tts, sound, gpt_manager).
-- The execution environment will execute your code in a dedicated asyncio event loop within its own thread (created via asyncio.new_event_loop()) using loop.run_until_complete().
 - The execution environment already imports and provides modules such as asyncio, threading, time, json, and traceback.
 - Never re-import or redefine these modules. In particular, do not assign to or override asyncio (e.g. do not write asyncio = ... or def asyncio()).
+- NEVER IMPORT ASYNCIO
 - Do not use blocking functions like time.sleep(); always use asynchronous delays (await asyncio.sleep(seconds)).
-
-WHAT TO DO FOR EXAMPLE:
-```py
-await tts.say("Je vais avancer vers le mur maintenant.", priority=1, lang="fr-FR")
-while True:
-    distance = await px.get_distance()
-    if distance > 10:  # Continue forward until close to the wall
-        px.forward(30)
-    else:
-        px.stop()
-        await asyncio.sleep(1)
-        await tts.say("Je suis près du mur, je vais maintenant reculer.", priority=1, lang="fr-FR")
-        px.backward(20)
-        await asyncio.sleep(2)  # Move back a little
-        px.stop()
-        await tts.say("Mission accomplie!", priority=1, lang="fr-FR")
-        break
-    await asyncio.sleep(0.1)  # Small delay for loop iteration
-```
-
-WHAT NOT TO DO FOR EXAMPLE:
-```py
-import asyncio
-
-async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager):
-    
-    try:
-        await tts.say("Je vais avancer vers le mur maintenant.", priority=1, lang="fr-FR")
-        while True:
-            distance = await px.get_distance()
-            if distance > 10:  # Continue forward until close to the wall
-                px.forward(30)
-            else:
-                px.stop()
-                await asyncio.sleep(1)
-                await tts.say("Je suis près du mur, je vais maintenant reculer.", priority=1, lang="fr-FR")
-                px.backward(20)
-                await asyncio.sleep(2)  # Move back a little
-                px.stop()
-                await tts.say("Mission accomplie!", priority=1, lang="fr-FR")
-                break
-            await asyncio.sleep(0.1)  # Small delay for loop iteration
-    except Exception as e:
-        logger.error(f"An error occurred: {e}")
-```
+- You can use opencv for image processing
 
 SCRIPT EXECUTION GUIDELINES:
 - Always validate image data before processing
@@ -1140,11 +1095,14 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     # Don't wait indefinitely to avoid freezing the main thread
                     if not process_info['done_event'].wait(timeout=2.0):
                         logger.warning(f"Script {script_name} did not respond to cancellation signal within timeout")
-                        
-                        # Try to cancel the future if possible
+                          # Try to cancel the future if possible
                         if hasattr(process_info['future'], 'cancel'):
                             try:
                                 process_info['future'].cancel()
+                                # Force interrupt the thread if possible
+                                if hasattr(process_info, 'thread') and hasattr(process_info['thread'], '_tstate_lock'):
+                                    # Try to force interrupt the thread as a last resort
+                                    process_info['thread']._stop()
                                 logger.info(f"Forcibly cancelled future for {script_name}")
                             except Exception as future_err:
                                 logger.error(f"Error cancelling future: {future_err}")

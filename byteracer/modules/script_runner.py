@@ -149,11 +149,17 @@ async def run_script_in_isolated_environment(
                 logger.info(f"Running script '{script_name}' in background")
                 return True
             else:
-                # Run in thread but wait for completion
+            # Run in thread but wait for completion
                 logger.info(f"Running script '{script_name}' and waiting for completion")
                 future = executor.submit(run_script_in_thread)
+                thread_info = {
+                    'future': future,
+                    'done_event': script_done_event,
+                    'thread': threading.current_thread()
+                }
                 
-                # Wait for completion or cancellation
+                # Store reference for potential cancellation later
+                gpt_manager.active_processes[script_name] = thread_info
                 while not script_done_event.is_set() and not gpt_manager.gpt_command_cancelled:
                     await asyncio.sleep(0.1)
                 

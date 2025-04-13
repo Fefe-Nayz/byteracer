@@ -9,6 +9,42 @@ import json
 import websockets
 from logging.handlers import QueueHandler, QueueListener
 import queue
+import sys
+
+class ColoredFormatter(logging.Formatter):
+    """
+    A custom formatter that adds color to logs when displayed in the console.
+    """
+    # ANSI color codes
+    GREY = "\x1b[38;20m"
+    GREEN = "\x1b[32;20m"
+    YELLOW = "\x1b[33;20m"
+    RED = "\x1b[31;20m"
+    BOLD_RED = "\x1b[31;1m"
+    BLUE = "\x1b[34;20m"
+    MAGENTA = "\x1b[35;20m"
+    CYAN = "\x1b[36;20m"
+    RESET = "\x1b[0m"
+    
+    def __init__(self, fmt=None, datefmt=None, style='%'):
+        super().__init__(fmt, datefmt, style)
+        self.fmt = fmt or '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+        self.datefmt = datefmt or '%Y-%m-%d %H:%M:%S'
+        
+        # Define custom formats for each log level with colors
+        self.FORMATS = {
+            logging.DEBUG: self.GREY + self.fmt + self.RESET,
+            logging.INFO: self.GREEN + self.fmt + self.RESET,
+            logging.WARNING: self.YELLOW + self.fmt + self.RESET,
+            logging.ERROR: self.RED + self.fmt + self.RESET,
+            logging.CRITICAL: self.BOLD_RED + self.fmt + self.RESET
+        }
+    
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt, self.datefmt)
+        return formatter.format(record)
+
 
 class WebSocketLogHandler(logging.Handler):
     """
@@ -138,7 +174,6 @@ class LogManager:
         
         # Initial log
         logging.info("Log Manager initialized")
-    
     def _setup_logging(self):
         """Set up the logging configuration"""
         # Create a root logger
@@ -157,20 +192,22 @@ class LogManager:
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         
-        # Create formatter with timestamp
-        formatter = logging.Formatter(
-            '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        # Create standard formatter with timestamp (for file logging)
+        standard_format = '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+        standard_datefmt = '%Y-%m-%d %H:%M:%S'
+        standard_formatter = logging.Formatter(standard_format, datefmt=standard_datefmt)
+        
+        # Create colored formatter (for console output)
+        colored_formatter = ColoredFormatter(fmt=standard_format, datefmt=standard_datefmt)
         
         # Create WebSocket handler
         self.websocket_handler = WebSocketLogHandler()
         self.websocket_handler.setLevel(logging.INFO)
-        self.websocket_handler.setFormatter(formatter)
+        self.websocket_handler.setFormatter(standard_formatter)
         
-        # Set formatters
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
+        # Set formatters - standard for file, colored for console
+        file_handler.setFormatter(standard_formatter)
+        console_handler.setFormatter(colored_formatter)
         
         # Add handlers to root logger
         root_logger.addHandler(file_handler)
