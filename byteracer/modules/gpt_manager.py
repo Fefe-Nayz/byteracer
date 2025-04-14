@@ -406,7 +406,6 @@ AVAILABLE ACTIONS:
 Script execution environment for safely running ChatGPT-generated code.
 Provides isolation, cancellation support, and error reporting.
 
-
 import asyncio
 import logging
 import traceback
@@ -417,6 +416,8 @@ import concurrent.futures
 import multiprocessing
 import queue as queue_mod
 import sys
+import os
+import signal
 
 logger = logging.getLogger(__name__)
 
@@ -433,7 +434,8 @@ async def run_script_in_isolated_environment(
     gpt_manager,
     websocket=None,
     run_in_background=False
-) -> bool:
+) -> tuple[bool, dict|None]:
+    
     Executes user-generated scripts in an isolated thread with proper
     cancellation support and comprehensive error handling.
     
@@ -454,7 +456,7 @@ async def run_script_in_isolated_environment(
     script_name = f"script_{int(time.time())}"
     script_done_event = multiprocessing.Event()
     result_queue = multiprocessing.Queue()
-    script_result = {"success": False, "error": None}
+    script_result = {"success": False, "error": None, "traceback": None}
     gpt_manager.websocket = websocket
     full_script = _build_script_with_environment(script_code)
 
@@ -479,7 +481,7 @@ async def run_script_in_isolated_environment(
                 result_queue.put({"error": "Script compilation failed"})
                 return
             loop.run_until_complete(
-                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:
@@ -495,9 +497,9 @@ async def run_script_in_isolated_environment(
     gpt_manager.active_processes[script_name] = {"process": process, "done_event": script_done_event, "result_queue": result_queue}
     logger.info(f"Running script '{script_name}' in separate process")
 
+    # Wait for process to finish or be cancelled
     while process.is_alive() and not gpt_manager.gpt_command_cancelled:
         await asyncio.sleep(0.1)
-        # Check for result from queue
         try:
             result = result_queue.get_nowait()
             if "success" in result and result["success"]:
@@ -505,6 +507,7 @@ async def run_script_in_isolated_environment(
                 break
             elif "error" in result:
                 script_result["error"] = result["error"]
+                script_result["traceback"] = result.get("traceback", "")
                 if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
                     await gpt_manager._send_gpt_status_update(websocket, "error", f"Script error: {result['error']}", {"traceback": result.get("traceback", "")})
                 break
@@ -515,15 +518,54 @@ async def run_script_in_isolated_environment(
                 break
         except queue_mod.Empty:
             pass
+    # If cancelled, forcibly terminate
     if gpt_manager.gpt_command_cancelled and process.is_alive():
         process.terminate()
         process.join(timeout=2)
+        if process.is_alive():
+            os.kill(process.pid, signal.SIGKILL)
+            logger.warning(f"Script '{script_name}' forcibly killed with SIGKILL.")
+            if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                await gpt_manager._send_gpt_status_update(
+                    websocket, "error",
+                    "Script was forcibly killed (SIGKILL). Hardware may need to be reset."
+                )
         logger.info(f"Script '{script_name}' forcibly terminated due to cancellation.")
         if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
             await gpt_manager._send_gpt_status_update(websocket, "cancelled", "Script cancelled by user.")
+    # Always stop/reset motors from the main process after script ends
+    try:
+        px.set_motor_speed(1, 0)
+        px.set_motor_speed(2, 0)
+        px.set_dir_servo_angle(0)
+        px.set_cam_pan_angle(0)
+        px.set_cam_tilt_angle(0)
+        logger.info("All motors and servos reset after script termination.")
+    except Exception as e:
+        logger.error(f"Error resetting hardware after script termination: {e}")
+    # After process exit, check for error in result_queue (in case it was not read above)
+    try:
+        while True:
+            result = result_queue.get_nowait()
+            if "error" in result:
+                script_result["error"] = result["error"]
+                script_result["traceback"] = result.get("traceback", "")
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(
+                        websocket, "error", f"Script error: {result['error']}", {"traceback": result.get("traceback", "")}
+                    )
+            elif "cancelled" in result:
+                script_result["error"] = result["cancelled"]
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(websocket, "cancelled", result["cancelled"])
+    except queue_mod.Empty:
+        pass
     if script_name in gpt_manager.active_processes:
         del gpt_manager.active_processes[script_name]
-    return script_result["success"]
+    if script_result["success"]:
+        return True, None
+    else:
+        return False, {"error": script_result["error"], "traceback": script_result["traceback"]}
 
 def _build_script_with_environment(script_code: str) -> str:
     
@@ -546,7 +588,7 @@ def _build_script_with_environment(script_code: str) -> str:
         "import json\n"
         "import cv2\n"
         "import numpy as np\n\n"
-        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager):\n"
+        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue):\n"
         "    # Set up cancellation detection\n"
         "    cancel_event = threading.Event()\n\n"
         "    async def check_cancellation():\n"
@@ -574,11 +616,17 @@ def _build_script_with_environment(script_code: str) -> str:
         "            \n"
         "    except ScriptCancelledException as e:\n"
         "        logger.info(f'Script cancelled: {e}')\n"
+        "        try:\n"
+        "            result_queue.put({'cancelled': str(e)})\n"
+        "        except Exception as _queue_err: logger.error(f'Failed to send cancellation to parent: {_queue_err}')\n"
         "    except asyncio.CancelledError:\n"
         "        logger.info('Script task cancelled')\n"
         "    except Exception as e:\n"
         "        tb = traceback.format_exc()\n"
         "        logger.error(f'Script error: {e}\\n{tb}')\n"
+        "        try:\n"
+        "            result_queue.put({'error': str(e), 'traceback': tb})\n"
+        "        except Exception as _queue_err: logger.error(f'Failed to send error to parent: {_queue_err}')\n"
         "    finally:\n"
         "        # Ensure all motors are stopped\n"
         "        try:\n"
@@ -1550,8 +1598,9 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
                     return False
                     
-                if hasattr(self.sound_manager, "set_sound_enabled"):
-                    self.sound_manager.set_sound_enabled(enabled)
+                self.config_manager.set("sound.enabled", enabled)
+                if hasattr(self.sound_manager, "set_enabled"):
+                    self.sound_manager.set_enabled(enabled)
                     logger.info(f"Set sound enabled: {enabled}")
                     return True
                 return False
@@ -1562,7 +1611,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
                     volume = max(min(volume, 100), 0)  # Clamp to valid range
-                    
+                
+                self.config_manager.set("sound.volume", volume)    
                 if hasattr(self.sound_manager, "set_volume"):
                     self.sound_manager.set_volume(volume)
                     logger.info(f"Set sound volume: {volume}")
@@ -1576,8 +1626,9 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
                     volume = max(min(volume, 100), 0)  # Clamp to valid range
                     
-                if hasattr(self.sound_manager, "set_effect_volume"):
-                    self.sound_manager.set_effect_volume(volume)
+                self.config_manager.set("sound.sound_volume", volume)
+                if hasattr(self.sound_manager, "set_sound_volume"):
+                    self.sound_manager.set_sound_volume(volume)
                     logger.info(f"Set sound effect volume: {volume}")
                     return True
                 return False
@@ -1587,7 +1638,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(enabled, bool):
                     logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
                     return False
-                    
+                
+                self.config_manager.set("sound.tts_enabled", enabled)    
                 if hasattr(self.tts_manager, "set_enabled"):
                     self.tts_manager.set_enabled(enabled)
                     logger.info(f"Set TTS enabled: {enabled}")
@@ -1600,7 +1652,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
                     volume = max(min(volume, 100), 0)  # Clamp to valid range
-                    
+                
+                self.config_manager.set("sound.tts_volume", volume)    
                 if hasattr(self.tts_manager, "set_volume"):
                     self.tts_manager.set_volume(volume)
                     logger.info(f"Set TTS volume: {volume}")
@@ -1614,7 +1667,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if language not in valid_languages:
                     logger.warning(f"Invalid language: {language}. Must be one of {valid_languages}")
                     return False
-                    
+                
+                self.config_manager.set("sound.tts_language", language)    
                 if hasattr(self.tts_manager, "set_language"):
                     self.tts_manager.set_language(language)
                     logger.info(f"Set TTS language: {language}")
@@ -1637,7 +1691,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
                     volume = max(min(volume, 100), 0)
-                    
+                
+                self.config_manager.set(f"sound.{category}_volume", volume)    
                 if hasattr(self.sound_manager, "set_category_volume"):
                     self.sound_manager.set_category_volume(category, volume)
                     logger.info(f"Set {category} volume: {volume}")
@@ -1650,6 +1705,13 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(gain, (int, float)) or not 0 <= gain <= 15:
                     logger.warning(f"Invalid gain: {gain}. Must be between 0 and 15.")
                     gain = max(min(gain, 15), 0)
+                
+                self.config_manager.set("sound.tts_audio_gain", gain)
+                if hasattr(self.tts_manager, "set_tts_audio_gain"):
+                    self.tts_manager.set_tts_audio_gain(gain)
+                    logger.info(f"Set TTS audio gain: {gain}")
+                    return True
+                return False
 
             elif function_name == "set_user_tts_volume":
                 volume = parameters.get("volume", 50)
@@ -1657,9 +1719,10 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
                     volume = max(min(volume, 100), 0)
-                    
-                if hasattr(self.tts_manager, "set_user_volume"):
-                    self.tts_manager.set_user_volume(volume)
+                
+                self.config_manager.set("sound.user_tts_volume", volume)    
+                if hasattr(self.tts_manager, "set_user_tts_volume"):
+                    self.tts_manager.set_user_tts_volume(volume)
                     logger.info(f"Set user TTS volume: {volume}")
                     return True
                 return False
@@ -1670,9 +1733,10 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
                     volume = max(min(volume, 100), 0)
-                    
-                if hasattr(self.tts_manager, "set_system_volume"):
-                    self.tts_manager.set_system_volume(volume)
+                
+                self.config_manager.set("sound.system_tts_volume", volume)    
+                if hasattr(self.tts_manager, "set_system_tts_volume"):
+                    self.tts_manager.set_system_tts_volume(volume)
                     logger.info(f"Set system TTS volume: {volume}")
                     return True
                 return False
@@ -1683,7 +1747,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
                     volume = max(min(volume, 100), 0)
-                    
+                
+                self.config_manager.set("sound.emergency_tts_volume", volume)    
                 if hasattr(self.tts_manager, "set_emergency_volume"):
                     self.tts_manager.set_emergency_volume(volume)
                     logger.info(f"Set emergency TTS volume: {volume}")
@@ -1696,7 +1761,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(enabled, bool):
                     logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
                     return False
-                    
+                
+                self.config_manager.set("safety.collision_avoidance", enabled)    
                 if hasattr(self, "sensor_manager") and hasattr(self.sensor_manager, "set_collision_avoidance"):
                     self.sensor_manager.set_collision_avoidance(enabled)
                     logger.info(f"Set collision avoidance: {enabled}")
@@ -1709,9 +1775,10 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(threshold, (int, float)) or not 10 <= threshold <= 100:
                     logger.warning(f"Invalid threshold: {threshold}. Must be between 10 and 100.")
                     threshold = max(min(threshold, 100), 10)
-                    
+                
+                self.config_manager.set("safety.collision_threshold", threshold)    
                 if hasattr(self, "sensor_manager") and hasattr(self.sensor_manager, "set_collision_threshold"):
-                    self.sensor_manager.set_collision_threshold(threshold)
+                    self.sensor_manager.collision_threshold = threshold
                     logger.info(f"Set collision threshold: {threshold}")
                     return True
                 return False
@@ -1721,7 +1788,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(enabled, bool):
                     logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
                     return False
-                    
+                
+                self.config_manager.set("safety.edge_detection", enabled)    
                 if hasattr(self, "sensor_manager") and hasattr(self.sensor_manager, "set_edge_detection"):
                     self.sensor_manager.set_edge_detection(enabled)
                     logger.info(f"Set edge detection: {enabled}")
@@ -1734,9 +1802,10 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(threshold, (int, float)) or not 0.1 <= threshold <= 0.9:
                     logger.warning(f"Invalid threshold: {threshold}. Must be between 0.1 and 0.9.")
                     threshold = max(min(threshold, 0.9), 0.1)
-                    
-                if hasattr(self, "sensor_manager") and hasattr(self.sensor_manager, "set_edge_threshold"):
-                    self.sensor_manager.set_edge_threshold(threshold)
+                
+                self.config_manager.set("safety.edge_threshold", threshold)    
+                if hasattr(self, "sensor_manager") and hasattr(self.sensor_manager, "set_edge_detection_threshold"):
+                    self.sensor_manager.set_edge_detection_threshold(threshold)
                     logger.info(f"Set edge threshold: {threshold}")
                     return True
                 return False
@@ -1746,7 +1815,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(enabled, bool):
                     logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
                     return False
-                    
+                
+                self.config_manager.set("safety.auto_stop", enabled)    
                 if hasattr(self, "sensor_manager") and hasattr(self.sensor_manager, "set_auto_stop"):
                     self.sensor_manager.set_auto_stop(enabled)
                     logger.info(f"Set auto stop: {enabled}")
@@ -1759,6 +1829,15 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(timeout, (int, float)) or timeout <= 0:
                     logger.warning(f"Invalid timeout: {timeout}. Must be a positive number.")
                     timeout = max(timeout, 1)
+                
+                if 1 <= timeout <= 30:
+                    self.config_manager.set("safety.client_timeout", timeout)
+                    self.sensor_manager.client_timeout = timeout
+                    logger.info(f"Client timeout set to {timeout} seconds")
+                    return True
+                else:
+                    logger.warning(f"Invalid client timeout: {timeout}")
+                    return False
 
 
             # DRIVE SETTINGS FUNCTIONS
@@ -1768,7 +1847,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(speed, (int, float)) or not 0 <= speed <= 100:
                     logger.warning(f"Invalid speed: {speed}. Must be between 0 and 100.")
                     speed = max(min(speed, 100), 0)
-                    
+                
+                self.config_manager.set("drive.max_speed", speed)    
                 if hasattr(self.px, "set_max_speed"):
                     self.px.set_max_speed(speed)
                     logger.info(f"Set max speed: {speed}")
@@ -1781,7 +1861,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(angle, (int, float)) or not 0 <= angle <= 100:
                     logger.warning(f"Invalid angle percentage: {angle}. Must be between 0 and 100.")
                     angle = max(min(angle, 100), 0)
-                    
+                
+                self.config_manager.set("drive.max_turn_angle", angle)    
                 if hasattr(self.px, "set_max_turn_angle"):
                     self.px.set_max_turn_angle(angle)
                     logger.info(f"Set max turn angle: {angle}")
@@ -1794,13 +1875,22 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(factor, (int, float)) or factor <= 0:
                     logger.warning(f"Invalid acceleration factor: {factor}. Must be a positive number.")
                     factor = max(factor, 0.1)
+                
+                if 0.1 <= factor <= 1.0:
+                    self.config_manager.set("drive.acceleration_factor", factor)
+                    logger.info(f"Acceleration factor set to {factor}")
+                    return True
+                else:
+                    logger.warning(f"Invalid acceleration factor: {factor}")
+                    return False
 
             elif function_name == "set_enhanced_turning":
                 enabled = parameters.get("enabled", True)
                 if not isinstance(enabled, bool):
                     logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
                     return False
-                    
+                
+                self.config_manager.set("drive.enhanced_turning", enabled)    
                 if hasattr(self.px, "set_enhanced_turning"):
                     self.px.set_enhanced_turning(enabled)
                     logger.info(f"Set enhanced turning: {enabled}")
@@ -1812,7 +1902,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(enabled, bool):
                     logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
                     return False
-                    
+                
+                self.config_manager.set("drive.turn_in_place", enabled)    
                 if hasattr(self.px, "set_turn_in_place"):
                     self.px.set_turn_in_place(enabled)
                     logger.info(f"Set turn inplace: {enabled}")
@@ -1827,25 +1918,40 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(vflip, bool) or not isinstance(hflip, bool):
                     logger.warning(f"Invalid flip values: vflip={vflip}, hflip={hflip}. Must be boolean.")
                     return False
-                    
-                if hasattr(self, "camera_manager") and hasattr(self.camera_manager, "set_flip"):
-                    self.camera_manager.set_flip(vflip, hflip)
-                    logger.info(f"Set camera flip: vflip={vflip}, hflip={hflip}")
-                    return True
-                return False
+                
+                restart_needed = False
+                
+                self.config_manager.set("camera.vflip", vflip)
+                restart_needed |= self.camera_manager.update_settings(vflip=vflip)
+                
+                self.config_manager.set("camera.hflip", hflip)
+                restart_needed |= self.camera_manager.update_settings(hflip=hflip)
+                
+                if restart_needed:
+                    asyncio.create_task(self.camera_manager.restart())
+                logger.info(f"Camera flip settings updated: vflip={vflip}, hflip={hflip}")
+                return True
             
             elif function_name == "set_camera_display":
-                enabled = parameters.get("enabled", True)
+                local = parameters.get("local_display", False)
+                web = parameters.get("web_display", True)
                 
-                if not isinstance(enabled, bool):
-                    logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
+                if not isinstance(local, bool) or not isinstance(web, bool):
+                    logger.warning(f"Invalid display values: local={local}, web={web}. Must be boolean.")
                     return False
-                    
-                if hasattr(self, "camera_manager") and hasattr(self.camera_manager, "set_display"):
-                    self.camera_manager.set_display(enabled)
-                    logger.info(f"Set camera display: {enabled}")
-                    return True
-                return False
+                
+                restart_needed = False
+                
+                self.config_manager.set("camera.local_display", local)
+                restart_needed |= self.camera_manager.update_settings(local=local)
+                
+                self.config_manager.set("camera.web_display", web)
+                restart_needed |= self.camera_manager.update_settings(web=web)
+                
+                if restart_needed:
+                    asyncio.create_task(self.camera_manager.restart())
+                logger.info(f"Camera display settings updated: local={local}, web={web}")
+                return True
                 
             elif function_name == "set_camera_size":
                 width = parameters.get("width", 640)
@@ -1854,86 +1960,121 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if not isinstance(width, int) or not isinstance(height, int) or width <= 0 or height <= 0:
                     logger.warning(f"Invalid camera size: width={width}, height={height}. Must be positive integers.")
                     return False
-                    
-                if hasattr(self, "camera_manager") and hasattr(self.camera_manager, "set_resolution"):
-                    self.camera_manager.set_resolution(width, height)
-                    logger.info(f"Set camera size: width={width}, height={height}")
-                    return True
-                return False
+                
+                camera_size = [width, height]
+                
+                self.config_manager.set("camera.camera_size", camera_size)
+                restart_needed = self.camera_manager.update_settings(camera_size=camera_size)
+                
+                if restart_needed:
+                    asyncio.create_task(self.camera_manager.restart())
+                logger.info(f"Camera size updated to {width}x{height}")
+                return True
 
             # SYSTEM FUNCTIONS
             elif function_name == "restart_robot":
                 logger.info("Restart robot requested")
-                # This would typically call a system service or script
-                if hasattr(self, "restart_system"):
-                    self.restart_system()
-                    return True
-                return False
+                await self.tts_manager.say("Restarting system. Please wait.", priority=2, blocking=True)
+                import threading
+                threading.Timer(2.0, lambda: subprocess.run("sudo reboot", shell=True)).start()
+                return True
                 
             elif function_name == "shutdown_robot":
                 logger.info("Shutdown robot requested")
-                # This would typically call a system service or script
-                if hasattr(self, "shutdown_system"):
-                    self.shutdown_system()
-                    return True
-                return False
+                await self.tts_manager.say("Shutting down system. Goodbye!", priority=2, blocking=True)
+                import threading
+                threading.Timer(2.0, lambda: subprocess.run("sudo shutdown -h now", shell=True)).start()
+                return True
             
             elif function_name == "restart_all_services":
                 logger.info("Restart all services requested")
-                # This would typically call a system service or script
-
-                if hasattr(self, "restart_services"):
-                    self.restart_services()
-                    return True
+                await self.tts_manager.say("Restarting all services.", priority=1)
+                import threading, os
+                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+                subprocess.Popen(
+                    ["bash", f"{project_dir}/byteracer/scripts/restart_services.sh"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                return True
                 
             elif function_name == "restart_websocket":
                 logger.info("Restart websocket requested")
-                # This would typically call a system service or script
-                if hasattr(self, "restart_websocket_service"):
-                    self.restart_websocket_service()
-                    return True
+                await self.tts_manager.say("Restarting websocket service.", priority=1)
+                import os
+                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+                success = subprocess.run(
+                    f"cd {project_dir} && sudo bash ./byteracer/scripts/restart_websocket.sh",
+                    shell=True,
+                    check=False
+                ).returncode == 0
+                if not success:
+                    await self.tts_manager.say("Failed to restart websocket service.", priority=1)
+                    logger.error("Failed to restart websocket service")
+                return success
                 
             elif function_name == "restart_web_server":
                 logger.info("Restart web server requested")
-                # This would typically call a system service or script
-                if hasattr(self, "restart_web_server_service"):
-                    self.restart_web_server_service()
-                    return True
+                await self.tts_manager.say("Restarting web server.", priority=1)
+                import os
+                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+                success = subprocess.run(
+                    f"cd {project_dir} && sudo bash ./byteracer/scripts/restart_web_server.sh",
+                    shell=True,
+                    check=False
+                ).returncode == 0
+                if not success:
+                    await self.tts_manager.say("Failed to restart web server.", priority=1)
+                    logger.error("Failed to restart web server")
+                return success
                 
             elif function_name == "restart_python_service":
                 logger.info("Restart Python service requested")
-                # This would typically call a system service or script
-                if hasattr(self, "restart_python_service"):
-                    self.restart_python_service()
-                    return True
+                await self.tts_manager.say("Restarting Python service.", priority=1)
+                import os
+                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+                subprocess.Popen(
+                    ["bash", f"{project_dir}/byteracer/scripts/restart_python.sh"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                return True
                 
             elif function_name == "restart_camera_feed":
                 logger.info("Restart camera feed requested")
-                # This would typically call a system service or script
-                if hasattr(self, "restart_camera_feed_service"):
-                    self.restart_camera_feed_service()
-                    return True
+                await self.tts_manager.say("Restarting camera feed.", priority=1)
+                success = await self.camera_manager.restart()
+                if not success:
+                    await self.tts_manager.say("Failed to restart camera feed.", priority=1)
+                    logger.error("Failed to restart camera feed")
+                return success
                 
             elif function_name == "check_for_updates":
                 logger.info("Check for updates requested")
-                # This would typically call a system service or script
-                if hasattr(self, "check_for_updates_service"):
-                    self.check_for_updates_service()
-                    return True
+                await self.tts_manager.say("Checking for updates.", priority=1)
+                import os
+                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+                subprocess.Popen(
+                    ["bash", f"{project_dir}/byteracer/scripts/update.sh"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                return True
                 
             elif function_name == "emergency_stop":
                 logger.info("Emergency stop requested")
-                # This would typically call a system service or script
-                if hasattr(self, "emergency_stop_service"):
-                    self.emergency_stop_service()
-                    return True
+                await self.tts_manager.say("Emergency stop activated.", priority=2)
+                self.sensor_manager.manual_emergency_stop()
+                return True
                 
             elif function_name == "clear_emergency":
                 logger.info("Clear emergency stop requested")
-                # This would typically call a system service or script
-                if hasattr(self, "clear_emergency_service"):
-                    self.clear_emergency_service()
-                    return True
+                await self.tts_manager.say("Emergency stop cleared.", priority=1)
+                self.sensor_manager.clear_manual_stop()
+                return True
 
                 # ANIMATIONS/EMOTIONS FUNCTIONS
             elif function_name == "wave_hands":

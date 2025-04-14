@@ -78,7 +78,7 @@ async def run_script_in_isolated_environment(
                 result_queue.put({"error": "Script compilation failed"})
                 return
             loop.run_until_complete(
-                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:
@@ -185,7 +185,7 @@ def _build_script_with_environment(script_code: str) -> str:
         "import json\n"
         "import cv2\n"
         "import numpy as np\n\n"
-        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager):\n"
+        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue):\n"
         "    # Set up cancellation detection\n"
         "    cancel_event = threading.Event()\n\n"
         "    async def check_cancellation():\n"
@@ -212,11 +212,17 @@ def _build_script_with_environment(script_code: str) -> str:
         "            \n"
         "    except ScriptCancelledException as e:\n"
         "        logger.info(f'Script cancelled: {e}')\n"
+        "        try:\n"
+        "            result_queue.put({'cancelled': str(e)})\n"
+        "        except Exception as _queue_err: logger.error(f'Failed to send cancellation to parent: {_queue_err}')\n"
         "    except asyncio.CancelledError:\n"
         "        logger.info('Script task cancelled')\n"
         "    except Exception as e:\n"
         "        tb = traceback.format_exc()\n"
         "        logger.error(f'Script error: {e}\\n{tb}')\n"
+        "        try:\n"
+        "            result_queue.put({'error': str(e), 'traceback': tb})\n"
+        "        except Exception as _queue_err: logger.error(f'Failed to send error to parent: {_queue_err}')\n"
         "    finally:\n"
         "        # Ensure all motors are stopped\n"
         "        try:\n"
