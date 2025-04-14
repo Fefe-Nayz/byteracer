@@ -89,36 +89,20 @@ async def run_script_in_isolated_environment(
             loop.run_until_complete(
                 user_script(px, get_camera_image, logger, tts_manager, sound_manager, gpt_manager)
             )
-            
-            # Mark as successful if we get here
             script_result["success"] = True
-            
+        except ScriptCancelledException as e:
+            logger.info(f"Script cancelled: {e}")
+            script_result["error"] = str(e)
+            if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                coro = gpt_manager._send_gpt_status_update(websocket, "cancelled", str(e))
+                asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
         except Exception as e:
             tb = traceback.format_exc()
             logger.error(f"Error in script execution: {e}\n{tb}")
             script_result["error"] = str(e)
-            
-            # Report error via websocket if available
-            if websocket:
-                try:
-                    error_report = {
-                        "name": "script_error",
-                        "data": {
-                            "error": str(e),
-                            "traceback": tb,
-                            "timestamp": int(time.time() * 1000)
-                        }
-                    }
-                    
-                    # We can't await in this thread, so we'll have to 
-                    # add it to the main event loop somehow
-                    if hasattr(gpt_manager, "report_error"):
-                        asyncio.run_coroutine_threadsafe(
-                            gpt_manager.report_error(error_report),
-                            asyncio.get_event_loop()
-                        )
-                except Exception as ws_err:
-                    logger.error(f"Failed to report error: {ws_err}")
+            if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                coro = gpt_manager._send_gpt_status_update(websocket, "error", f"Script error: {e}", {"traceback": tb})
+                asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
         finally:
             # Ensure motors are stopped
             try:

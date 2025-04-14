@@ -57,7 +57,7 @@ class GPTManager:
         
         api_settings = self.config_manager.get("api")
         self.api_key = os.environ.get("OPENAI_API_KEY") or api_settings.get("openai_api_key", "")
-        self.model = api_settings.get("model", "gpt-4o")
+        self.model = api_settings.get("model", "gpt-4.1-2025-04-14")
         
         if not self.api_key:
             logger.warning("OPENAI_API_KEY not found in environment variables or settings")
@@ -1070,66 +1070,56 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 logger.warning(f"set_angle command received for unknown servo motor id: {motor_id}")
         else:            
             logger.warning(f"Unknown motor command: {command}")      
-    async def _stop_script(self, script_name: str) -> bool:
+    async def _stop_script(self, script_name: str, websocket=None) -> bool:
         """
         Stop a running script by setting the cancellation flag and waiting for it to terminate.
         Works with our new script execution environment.
-        
         Args:
             script_name: The name of the script to stop
-            
+            websocket: Optional websocket to send status updates
         Returns:
             bool: Success status
         """
         if script_name in self.active_processes:
             process_info = self.active_processes[script_name]
             try:
-                # Set the cancellation flag first - this works with our new script runner
                 self.gpt_command_cancelled = True
-                
                 # For thread-based execution (with 'future' and 'done_event')
                 if isinstance(process_info, dict) and 'future' in process_info and 'done_event' in process_info:
                     logger.info(f"Waiting for script {script_name} to acknowledge cancellation...")
-                    
-                    # Give the thread a chance to notice the cancellation and clean up
-                    # Don't wait indefinitely to avoid freezing the main thread
                     if not process_info['done_event'].wait(timeout=2.0):
                         logger.warning(f"Script {script_name} did not respond to cancellation signal within timeout")
-                          # Try to cancel the future if possible
+                        # Try to cancel the future if possible
                         if hasattr(process_info['future'], 'cancel'):
                             try:
                                 process_info['future'].cancel()
-                                # Force interrupt the thread if possible
-                                if hasattr(process_info, 'thread') and hasattr(process_info['thread'], '_tstate_lock'):
-                                    # Try to force interrupt the thread as a last resort
-                                    process_info['thread']._stop()
-                                logger.info(f"Forcibly cancelled future for {script_name}")
+                                logger.info(f"Cancelled future for {script_name}")
                             except Exception as future_err:
                                 logger.error(f"Error cancelling future: {future_err}")
-                    
+                        # Try to forcibly stop the thread (dangerous, but last resort)
+                        if 'thread' in process_info and hasattr(process_info['thread'], '_tstate_lock'):
+                            try:
+                                process_info['thread']._stop()
+                                logger.warning(f"Thread forcibly stopped for {script_name}")
+                            except Exception as thread_err:
+                                logger.error(f"Error forcibly stopping thread: {thread_err}")
                     logger.info(f"Cancelled script: {script_name}")
-                    
                 # For asyncio Tasks
                 elif hasattr(process_info, 'cancel'):
-                    # It's an asyncio Task
                     process_info.cancel()
                     logger.info(f"Cancelled async task: {script_name}")
-                    
                 # For subprocesses (legacy support)
                 elif hasattr(process_info, 'terminate'):
-                    # It's a subprocess.Popen
                     process_info.terminate()
                     process_info.wait(timeout=3)
                     if process_info.poll() is None:
                         process_info.kill()
                     logger.info(f"Terminated subprocess: {script_name}")
-                    
                 # For any other type, try our best to cancel it
                 else:
                     logger.warning(f"Unknown process type for {script_name}, trying generic cancellation")
                     if hasattr(process_info, 'cancel'):
                         process_info.cancel()
-                        
                 # Ensure motors are stopped as a safety measure
                 try:
                     self.px.set_motor_speed(1, 0)  # rear_left
@@ -1139,20 +1129,22 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     self.px.set_cam_tilt_angle(0)   # camera tilt
                 except Exception as motor_err:
                     logger.error(f"Error stopping motors: {motor_err}")
-                
-                # Remove from active processes
                 del self.active_processes[script_name]
                 logger.info(f"Stopped script: {script_name}")
+                if websocket:
+                    await self._send_gpt_status_update(websocket, "cancelled", f"Script {script_name} cancelled/stopped.")
                 return True
-                
             except Exception as e:
                 logger.error(f"Error stopping script {script_name}: {e}")
-                # Ensure it's removed from active processes even if there was an error
                 if script_name in self.active_processes:
                     del self.active_processes[script_name]
+                if websocket:
+                    await self._send_gpt_status_update(websocket, "error", f"Error stopping script: {e}")
                 return False
         else:
             logger.warning(f"No script named {script_name} is running")
+            if websocket:
+                await self._send_gpt_status_update(websocket, "info", f"No script named {script_name} is running.")
             return False
     
     async def cleanup(self):
@@ -1716,3 +1708,15 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         except Exception as e:
             logger.error(f"Error executing function {function_name}: {e}")
             return False
+        
+    async def report_error(self, error_report):
+        """
+        Send an error or cancellation report to the websocket client in a consistent format.
+        error_report: dict with keys 'name', 'data' (should include 'error', 'traceback', 'timestamp')
+        """
+        websocket = getattr(self, 'websocket', None)
+        if websocket:
+            try:
+                await websocket.send(json.dumps(error_report))
+            except Exception as e:
+                logger.error(f"Failed to send error report to websocket: {e}")
