@@ -383,6 +383,218 @@ AVAILABLE ACTIONS:
    • await asyncio.sleep(seconds): Asynchronous sleep, pauses execution
    • DO NOT use time.sleep() in scripts - it blocks the event loop
 
+   SCRIPT EXECUTION CONTEXT:
+    - The execution environment already imports and provides modules such as asyncio, threading, time, json, and traceback.
+    - Never re-import or redefine these modules. In particular, do not assign to or override asyncio (e.g. do not write asyncio = ... or def asyncio()).
+    - NEVER IMPORT ASYNCIO
+    - Do not use blocking functions like time.sleep(); always use asynchronous delays (await asyncio.sleep(seconds)).
+    - You can use opencv for image processing
+
+   SCRIPT EXECUTION GUIDELINES:
+    - Always validate image data before processing
+    - get_camera_image() is an asynchronous function that returns returns the camera image as raw bytes
+    - Do not assign or redefine asyncio, which is a built-in module. Only use it to call asyncio.sleep or similar functions.
+    - Use proper async/await patterns with asyncio
+    - Use await asyncio.sleep() not time.sleep() for waiting
+    - Always include proper error handling
+    - Remember: Your code is executed in a sandboxed environment. Do not create infinite loops, blocking calls, or instantiate new hardware controllers.
+
+    This is how your generated script will be executed. Take the necessary measures and precautions to ensure that your script will run correctly in this environment.
+
+    ```py
+
+Script execution environment for safely running ChatGPT-generated code.
+Provides isolation, cancellation support, and error reporting.
+
+
+import asyncio
+import logging
+import traceback
+import time
+import json
+from typing import Dict, Any, Optional, Callable
+import concurrent.futures
+import multiprocessing
+import queue as queue_mod
+import sys
+
+logger = logging.getLogger(__name__)
+
+class ScriptCancelledException(Exception):
+    Raised when a script is cancelled by user request.
+    pass
+
+async def run_script_in_isolated_environment(
+    script_code: str,
+    px,
+    get_camera_image,
+    tts_manager,
+    sound_manager,
+    gpt_manager,
+    websocket=None,
+    run_in_background=False
+) -> bool:
+    Executes user-generated scripts in an isolated thread with proper
+    cancellation support and comprehensive error handling.
+    
+    Args:
+        script_code: The Python code to execute
+        px: Picarx instance for hardware control
+        get_camera_image: Function to get camera image
+        tts_manager: TTS manager for text-to-speech
+        sound_manager: Sound manager for audio playback
+        gpt_manager: GPT manager reference for cancellation checks
+        websocket: Optional websocket for error reporting
+        run_in_background: Whether to run the script in background
+        
+    Returns:
+        bool: Success status
+    
+    
+    script_name = f"script_{int(time.time())}"
+    script_done_event = multiprocessing.Event()
+    result_queue = multiprocessing.Queue()
+    script_result = {"success": False, "error": None}
+    gpt_manager.websocket = websocket
+    full_script = _build_script_with_environment(script_code)
+
+    def run_script_in_process(result_queue, script_done_event):
+        try:
+            import asyncio
+            import threading
+            import time
+            import json
+            import traceback
+            local_env = {"ScriptCancelledException": ScriptCancelledException,
+                         "asyncio": asyncio,
+                         "time": time,
+                         "json": json,
+                         "traceback": traceback,
+                         "threading": threading}
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            exec(full_script, local_env)
+            user_script = local_env.get("user_script")
+            if not user_script:
+                result_queue.put({"error": "Script compilation failed"})
+                return
+            loop.run_until_complete(
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager)
+            )
+            result_queue.put({"success": True})
+        except ScriptCancelledException as e:
+            result_queue.put({"cancelled": str(e)})
+        except Exception as e:
+            tb = traceback.format_exc()
+            result_queue.put({"error": str(e), "traceback": tb})
+        finally:
+            script_done_event.set()
+
+    process = multiprocessing.Process(target=run_script_in_process, args=(result_queue, script_done_event))
+    process.start()
+    gpt_manager.active_processes[script_name] = {"process": process, "done_event": script_done_event, "result_queue": result_queue}
+    logger.info(f"Running script '{script_name}' in separate process")
+
+    while process.is_alive() and not gpt_manager.gpt_command_cancelled:
+        await asyncio.sleep(0.1)
+        # Check for result from queue
+        try:
+            result = result_queue.get_nowait()
+            if "success" in result and result["success"]:
+                script_result["success"] = True
+                break
+            elif "error" in result:
+                script_result["error"] = result["error"]
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(websocket, "error", f"Script error: {result['error']}", {"traceback": result.get("traceback", "")})
+                break
+            elif "cancelled" in result:
+                script_result["error"] = result["cancelled"]
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(websocket, "cancelled", result["cancelled"])
+                break
+        except queue_mod.Empty:
+            pass
+    if gpt_manager.gpt_command_cancelled and process.is_alive():
+        process.terminate()
+        process.join(timeout=2)
+        logger.info(f"Script '{script_name}' forcibly terminated due to cancellation.")
+        if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+            await gpt_manager._send_gpt_status_update(websocket, "cancelled", "Script cancelled by user.")
+    if script_name in gpt_manager.active_processes:
+        del gpt_manager.active_processes[script_name]
+    return script_result["success"]
+
+def _build_script_with_environment(script_code: str) -> str:
+    
+    Builds a complete script with proper environment setup, error handling,
+    and resource safety mechanisms.
+    
+    Args:
+        script_code: The user's Python code
+        
+    Returns:
+        str: Complete script with execution environment
+    
+    # Script header with imports and environment setup
+    script_header = (
+        "import asyncio\n"
+        "import time\n"
+        "import threading\n"
+        "import sys\n"
+        "import traceback\n"
+        "import json\n"
+        "import cv2\n"
+        "import numpy as np\n\n"
+        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager):\n"
+        "    # Set up cancellation detection\n"
+        "    cancel_event = threading.Event()\n\n"
+        "    async def check_cancellation():\n"
+        "        \"\"\"Checks if the script should be cancelled\"\"\"\n"
+        "        while not gpt_manager.gpt_command_cancelled:\n"
+        "            await asyncio.sleep(0.1)\n"
+        "        logger.info('Script cancellation requested')\n"
+        "        cancel_event.set()\n"
+        "        raise ScriptCancelledException('Script cancelled by user')\n\n"
+        "    # Start the cancellation checker\n"
+        "    cancellation_task = asyncio.create_task(check_cancellation())\n\n"
+        "    try:\n"
+    )
+    # THE CODE YOU ARE GENERATING IT PUT HERE IN THE TRY BLOCK
+    # NO NEED TO DEFINE THE user_script FUNCTION, JUST COMPLETE THE BODY WITH YOUR CODE
+    # Indent the user's code to fit under try block
+    indented_user_code = "\n".join(f"        {line}" for line in script_code.split("\n"))
+    
+    # Footer with cleanup and exception handling
+    script_footer = (
+        "\n"
+        "        # Clean up cancellation task\n"
+        "        if not cancellation_task.done():\n"
+        "            cancellation_task.cancel()\n"
+        "            \n"
+        "    except ScriptCancelledException as e:\n"
+        "        logger.info(f'Script cancelled: {e}')\n"
+        "    except asyncio.CancelledError:\n"
+        "        logger.info('Script task cancelled')\n"
+        "    except Exception as e:\n"
+        "        tb = traceback.format_exc()\n"
+        "        logger.error(f'Script error: {e}\\n{tb}')\n"
+        "    finally:\n"
+        "        # Ensure all motors are stopped\n"
+        "        try:\n"
+        "            px.set_motor_speed(1, 0)  # rear_left\n"
+        "            px.set_motor_speed(2, 0)  # rear_right\n"
+        "            px.set_dir_servo_angle(0) # steering\n"
+        "            px.set_cam_pan_angle(0)   # camera pan\n"
+        "            px.set_cam_tilt_angle(0)  # camera tilt\n"
+        "            logger.info('Motors safely stopped')\n"
+        "        except Exception as e:\n"
+        "            logger.error(f'Error stopping motors: {e}')\n"
+    )
+    
+    return script_header + indented_user_code + script_footer
+    ```
+
 2. CALL PREDEFINED FUNCTIONS (action_type: "predefined_function"): 
    Sensor Functions:
    • get_distance(): Returns ultrasonic sensor measurement with TTS feedback
@@ -455,22 +667,6 @@ AVAILABLE ACTIONS:
 
 4. TEXT RESPONSE (action_type: "none"):
    • Simple text feedback for speech and display
-
-SCRIPT EXECUTION CONTEXT:
-- The execution environment already imports and provides modules such as asyncio, threading, time, json, and traceback.
-- Never re-import or redefine these modules. In particular, do not assign to or override asyncio (e.g. do not write asyncio = ... or def asyncio()).
-- NEVER IMPORT ASYNCIO
-- Do not use blocking functions like time.sleep(); always use asynchronous delays (await asyncio.sleep(seconds)).
-- You can use opencv for image processing
-
-SCRIPT EXECUTION GUIDELINES:
-- Always validate image data before processing
-- get_camera_image() is an asynchronous function that returns returns the camera image as raw bytes
-- Do not assign or redefine asyncio, which is a built-in module. Only use it to call asyncio.sleep or similar functions.
-- Use proper async/await patterns with asyncio
-- Use await asyncio.sleep() not time.sleep() for waiting
-- Always include proper error handling
-- Remember: Your code is executed in a sandboxed environment. Do not create infinite loops, blocking calls, or instantiate new hardware controllers.
 
 RESPONSE FORMAT REQUIREMENTS:
 - ALL fields in response JSON must be included, even if empty
@@ -1071,32 +1267,33 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         else:            
             logger.warning(f"Unknown motor command: {command}")      
     async def _stop_script(self, script_name: str, websocket=None) -> bool:
-        """
-        Stop a running script by setting the cancellation flag and waiting for it to terminate.
-        Works with our new script execution environment.
-        Args:
-            script_name: The name of the script to stop
-            websocket: Optional websocket to send status updates
-        Returns:
-            bool: Success status
-        """
         if script_name in self.active_processes:
             process_info = self.active_processes[script_name]
             try:
                 self.gpt_command_cancelled = True
-                # For thread-based execution (with 'future' and 'done_event')
-                if isinstance(process_info, dict) and 'future' in process_info and 'done_event' in process_info:
-                    logger.info(f"Waiting for script {script_name} to acknowledge cancellation...")
+                # For process-based execution
+                if isinstance(process_info, dict) and 'process' in process_info and 'done_event' in process_info:
+                    process = process_info['process']
+                    done_event = process_info['done_event']
+                    if process.is_alive():
+                        logger.info(f"Terminating process for script {script_name}...")
+                        process.terminate()
+                        process.join(timeout=2)
+                        logger.info(f"Process for script {script_name} terminated.")
+                    else:
+                        logger.info(f"Process for script {script_name} already stopped.")
+                    done_event.set()
+                # Legacy: thread-based or other
+                elif 'future' in process_info and 'done_event' in process_info:
+                    logger.info(f"Waiting for thread-based script {script_name} to acknowledge cancellation...")
                     if not process_info['done_event'].wait(timeout=2.0):
                         logger.warning(f"Script {script_name} did not respond to cancellation signal within timeout")
-                        # Try to cancel the future if possible
                         if hasattr(process_info['future'], 'cancel'):
                             try:
                                 process_info['future'].cancel()
                                 logger.info(f"Cancelled future for {script_name}")
                             except Exception as future_err:
                                 logger.error(f"Error cancelling future: {future_err}")
-                        # Try to forcibly stop the thread (dangerous, but last resort)
                         if 'thread' in process_info and hasattr(process_info['thread'], '_tstate_lock'):
                             try:
                                 process_info['thread']._stop()
@@ -1104,17 +1301,6 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                             except Exception as thread_err:
                                 logger.error(f"Error forcibly stopping thread: {thread_err}")
                     logger.info(f"Cancelled script: {script_name}")
-                # For asyncio Tasks
-                elif hasattr(process_info, 'cancel'):
-                    process_info.cancel()
-                    logger.info(f"Cancelled async task: {script_name}")
-                # For subprocesses (legacy support)
-                elif hasattr(process_info, 'terminate'):
-                    process_info.terminate()
-                    process_info.wait(timeout=3)
-                    if process_info.poll() is None:
-                        process_info.kill()
-                    logger.info(f"Terminated subprocess: {script_name}")
                 # For any other type, try our best to cancel it
                 else:
                     logger.warning(f"Unknown process type for {script_name}, trying generic cancellation")
@@ -1447,6 +1633,52 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     return True
                 return False
             
+            elif function_name == "set_tts_audio_gain":
+                gain = parameters.get("gain", 1.0)
+                
+                if not isinstance(gain, (int, float)) or not 0 <= gain <= 15:
+                    logger.warning(f"Invalid gain: {gain}. Must be between 0 and 15.")
+                    gain = max(min(gain, 15), 0)
+
+            elif function_name == "set_user_tts_volume":
+                volume = parameters.get("volume", 50)
+                
+                if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
+                    logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
+                    volume = max(min(volume, 100), 0)
+                    
+                if hasattr(self.tts_manager, "set_user_volume"):
+                    self.tts_manager.set_user_volume(volume)
+                    logger.info(f"Set user TTS volume: {volume}")
+                    return True
+                return False
+            
+            elif function_name == "set_system_tts_volume":
+                volume = parameters.get("volume", 50)
+                
+                if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
+                    logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
+                    volume = max(min(volume, 100), 0)
+                    
+                if hasattr(self.tts_manager, "set_system_volume"):
+                    self.tts_manager.set_system_volume(volume)
+                    logger.info(f"Set system TTS volume: {volume}")
+                    return True
+                return False
+            
+            elif function_name == "set_emergency_tts_volume":
+                volume = parameters.get("volume", 50)
+                
+                if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
+                    logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
+                    volume = max(min(volume, 100), 0)
+                    
+                if hasattr(self.tts_manager, "set_emergency_volume"):
+                    self.tts_manager.set_emergency_volume(volume)
+                    logger.info(f"Set emergency TTS volume: {volume}")
+                    return True
+                return False
+
             # SAFETY SETTINGS FUNCTIONS
             elif function_name == "set_collision_avoidance":
                 enabled = parameters.get("enabled", True)
@@ -1497,6 +1729,26 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     logger.info(f"Set edge threshold: {threshold}")
                     return True
                 return False
+            
+            elif function_name == "set_auto_stop":
+                enabled = parameters.get("enabled", True)
+                if not isinstance(enabled, bool):
+                    logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
+                    return False
+                    
+                if hasattr(self, "sensor_manager") and hasattr(self.sensor_manager, "set_auto_stop"):
+                    self.sensor_manager.set_auto_stop(enabled)
+                    logger.info(f"Set auto stop: {enabled}")
+                    return True
+                return False
+            
+            elif function_name == "set_client_timeout":
+                timeout = parameters.get("timeout", 30)
+                
+                if not isinstance(timeout, (int, float)) or timeout <= 0:
+                    logger.warning(f"Invalid timeout: {timeout}. Must be a positive number.")
+                    timeout = max(timeout, 1)
+
 
             # DRIVE SETTINGS FUNCTIONS
             elif function_name == "set_max_speed":
@@ -1524,6 +1776,37 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     logger.info(f"Set max turn angle: {angle}")
                     return True
                 return False
+            
+            elif function_name == "set_acceleration_factor":
+                factor = parameters.get("factor", 1.0)
+                
+                if not isinstance(factor, (int, float)) or factor <= 0:
+                    logger.warning(f"Invalid acceleration factor: {factor}. Must be a positive number.")
+                    factor = max(factor, 0.1)
+
+            elif function_name == "set_enhanced_turning":
+                enabled = parameters.get("enabled", True)
+                if not isinstance(enabled, bool):
+                    logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
+                    return False
+                    
+                if hasattr(self.px, "set_enhanced_turning"):
+                    self.px.set_enhanced_turning(enabled)
+                    logger.info(f"Set enhanced turning: {enabled}")
+                    return True
+                return False
+                
+            elif function_name == "set_turn_in_place":
+                enabled = parameters.get("enabled", True)
+                if not isinstance(enabled, bool):
+                    logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
+                    return False
+                    
+                if hasattr(self.px, "set_turn_in_place"):
+                    self.px.set_turn_in_place(enabled)
+                    logger.info(f"Set turn in place: {enabled}")
+                    return True
+                return False
                 
             # CAMERA SETTINGS FUNCTIONS
             elif function_name == "set_camera_flip":
@@ -1537,6 +1820,19 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 if hasattr(self, "camera_manager") and hasattr(self.camera_manager, "set_flip"):
                     self.camera_manager.set_flip(vflip, hflip)
                     logger.info(f"Set camera flip: vflip={vflip}, hflip={hflip}")
+                    return True
+                return False
+            
+            elif function_name == "set_camera_display":
+                enabled = parameters.get("enabled", True)
+                
+                if not isinstance(enabled, bool):
+                    logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
+                    return False
+                    
+                if hasattr(self, "camera_manager") and hasattr(self.camera_manager, "set_display"):
+                    self.camera_manager.set_display(enabled)
+                    logger.info(f"Set camera display: {enabled}")
                     return True
                 return False
                 
@@ -1570,6 +1866,64 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     self.shutdown_system()
                     return True
                 return False
+            
+            elif function_name == "restart_all_services":
+                logger.info("Restart all services requested")
+                # This would typically call a system service or script
+
+                if hasattr(self, "restart_services"):
+                    self.restart_services()
+                    return True
+                
+            elif function_name == "restart_websocket":
+                logger.info("Restart websocket requested")
+                # This would typically call a system service or script
+                if hasattr(self, "restart_websocket_service"):
+                    self.restart_websocket_service()
+                    return True
+                
+            elif function_name == "restart_web_server":
+                logger.info("Restart web server requested")
+                # This would typically call a system service or script
+                if hasattr(self, "restart_web_server_service"):
+                    self.restart_web_server_service()
+                    return True
+                
+            elif function_name == "restart_python_service":
+                logger.info("Restart Python service requested")
+                # This would typically call a system service or script
+                if hasattr(self, "restart_python_service"):
+                    self.restart_python_service()
+                    return True
+                
+            elif function_name == "restart_camera_feed":
+                logger.info("Restart camera feed requested")
+                # This would typically call a system service or script
+                if hasattr(self, "restart_camera_feed_service"):
+                    self.restart_camera_feed_service()
+                    return True
+                
+            elif function_name == "check_for_updates":
+                logger.info("Check for updates requested")
+                # This would typically call a system service or script
+                if hasattr(self, "check_for_updates_service"):
+                    self.check_for_updates_service()
+                    return True
+                
+            elif function_name == "emergency_stop":
+                logger.info("Emergency stop requested")
+                # This would typically call a system service or script
+                if hasattr(self, "emergency_stop_service"):
+                    self.emergency_stop_service()
+                    return True
+                
+            elif function_name == "clear_emergency":
+                logger.info("Clear emergency stop requested")
+                # This would typically call a system service or script
+                if hasattr(self, "clear_emergency_service"):
+                    self.clear_emergency_service()
+                    return True
+
                 # ANIMATIONS/EMOTIONS FUNCTIONS
             elif function_name == "wave_hands":
                 try:

@@ -4,12 +4,15 @@ Provides isolation, cancellation support, and error reporting.
 """
 
 import asyncio
-import threading
 import logging
 import traceback
 import time
 import json
 from typing import Dict, Any, Optional, Callable
+import concurrent.futures
+import multiprocessing
+import queue as queue_mod
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -44,125 +47,80 @@ async def run_script_in_isolated_environment(
     Returns:
         bool: Success status
     """
-    import concurrent.futures
     
-    # Create a unique script name based on timestamp
     script_name = f"script_{int(time.time())}"
-    
-    # Create threading event for script completion signaling
-    script_done_event = threading.Event()
+    script_done_event = multiprocessing.Event()
+    result_queue = multiprocessing.Queue()
     script_result = {"success": False, "error": None}
-    
-    # Store the websocket for error reporting
     gpt_manager.websocket = websocket
-    
-    # Prepare the script with our execution environment
     full_script = _build_script_with_environment(script_code)
-    
-    # Local namespace for script execution
-    local_env = {"ScriptCancelledException": ScriptCancelledException,
-    "asyncio": asyncio,
-    "time": time,
-    "json": json,
-    "traceback": traceback,
-    "threading": threading
-    }
-    
-    # Function to run in separate thread
-    def run_script_in_thread():
+
+    def run_script_in_process(result_queue, script_done_event):
         try:
-            # Create new event loop for this thread
+            import asyncio
+            import threading
+            import time
+            import json
+            import traceback
+            local_env = {"ScriptCancelledException": ScriptCancelledException,
+                         "asyncio": asyncio,
+                         "time": time,
+                         "json": json,
+                         "traceback": traceback,
+                         "threading": threading}
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
-            # Execute the script to define the user_script function
             exec(full_script, local_env)
-            
-            # Get the defined function and run it
             user_script = local_env.get("user_script")
             if not user_script:
-                logger.error("Failed to compile user script - user_script function not defined")
-                script_result["error"] = "Script compilation failed"
+                result_queue.put({"error": "Script compilation failed"})
                 return
-                
-            # Run the script with provided resources
             loop.run_until_complete(
-                user_script(px, get_camera_image, logger, tts_manager, sound_manager, gpt_manager)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager)
             )
-            script_result["success"] = True
+            result_queue.put({"success": True})
         except ScriptCancelledException as e:
-            logger.info(f"Script cancelled: {e}")
-            script_result["error"] = str(e)
-            if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
-                coro = gpt_manager._send_gpt_status_update(websocket, "cancelled", str(e))
-                asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
+            result_queue.put({"cancelled": str(e)})
         except Exception as e:
             tb = traceback.format_exc()
-            logger.error(f"Error in script execution: {e}\n{tb}")
-            script_result["error"] = str(e)
-            if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
-                coro = gpt_manager._send_gpt_status_update(websocket, "error", f"Script error: {e}", {"traceback": tb})
-                asyncio.run_coroutine_threadsafe(coro, asyncio.get_event_loop())
+            result_queue.put({"error": str(e), "traceback": tb})
         finally:
-            # Ensure motors are stopped
-            try:
-                px.set_motor_speed(1, 0)  # rear_left
-                px.set_motor_speed(2, 0)  # rear_right
-                px.set_dir_servo_angle(0)  # steering
-                px.set_cam_pan_angle(0)    # camera pan
-                px.set_cam_tilt_angle(0)   # camera tilt
-            except Exception as shutdown_e:
-                logger.error(f"Error stopping motors: {shutdown_e}")
-                
-            # Signal that we're done
             script_done_event.set()
-    
-    try:
-        # Create thread pool for execution
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            if run_in_background:
-                # Run script in background thread
-                future = executor.submit(run_script_in_thread)
-                
-                # Store references for later cancellation
-                thread_info = {
-                    'future': future,
-                    'done_event': script_done_event
-                }
-                gpt_manager.active_processes[script_name] = thread_info
-                logger.info(f"Running script '{script_name}' in background")
-                return True
-            else:
-            # Run in thread but wait for completion
-                logger.info(f"Running script '{script_name}' and waiting for completion")
-                future = executor.submit(run_script_in_thread)
-                thread_info = {
-                    'future': future,
-                    'done_event': script_done_event,
-                    'thread': threading.current_thread()
-                }
-                
-                # Store reference for potential cancellation later
-                gpt_manager.active_processes[script_name] = thread_info
-                while not script_done_event.is_set() and not gpt_manager.gpt_command_cancelled:
-                    await asyncio.sleep(0.1)
-                
-                # Handle cancellation
-                if gpt_manager.gpt_command_cancelled and not script_done_event.is_set():
-                    logger.info(f"Script '{script_name}' execution cancelled")
-                    # Wait briefly for thread cleanup
-                    script_done_event.wait(timeout=3.0)
-                
-                return script_result["success"]
-    except Exception as e:
-        logger.error(f"Error setting up script execution: {e}")
-        if websocket:
-            await _send_error_to_websocket(
-                websocket, 
-                "ScriptSetupError", 
-                f"Failed to set up script execution: {e}"
-            )
-        return False
+
+    process = multiprocessing.Process(target=run_script_in_process, args=(result_queue, script_done_event))
+    process.start()
+    gpt_manager.active_processes[script_name] = {"process": process, "done_event": script_done_event, "result_queue": result_queue}
+    logger.info(f"Running script '{script_name}' in separate process")
+
+    while process.is_alive() and not gpt_manager.gpt_command_cancelled:
+        await asyncio.sleep(0.1)
+        # Check for result from queue
+        try:
+            result = result_queue.get_nowait()
+            if "success" in result and result["success"]:
+                script_result["success"] = True
+                break
+            elif "error" in result:
+                script_result["error"] = result["error"]
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(websocket, "error", f"Script error: {result['error']}", {"traceback": result.get("traceback", "")})
+                break
+            elif "cancelled" in result:
+                script_result["error"] = result["cancelled"]
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(websocket, "cancelled", result["cancelled"])
+                break
+        except queue_mod.Empty:
+            pass
+    if gpt_manager.gpt_command_cancelled and process.is_alive():
+        process.terminate()
+        process.join(timeout=2)
+        logger.info(f"Script '{script_name}' forcibly terminated due to cancellation.")
+        if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+            await gpt_manager._send_gpt_status_update(websocket, "cancelled", "Script cancelled by user.")
+    if script_name in gpt_manager.active_processes:
+        del gpt_manager.active_processes[script_name]
+    return script_result["success"]
 
 def _build_script_with_environment(script_code: str) -> str:
     """
