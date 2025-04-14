@@ -522,11 +522,18 @@ export default function GptIntegration() {
                 </Collapsible>
               )}
               
-              {/* Error details */}
-              {responseDetails?.error_details && (
-                <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-md text-sm border border-red-200 dark:border-red-900">
-                  <div className="font-medium mb-1 text-red-600 dark:text-red-400">Error</div>
-                  <div className="text-red-700 dark:text-red-300">{responseDetails.error_details}</div>
+              {/* Error details and traceback */}
+              {(gptStatus?.status === "error" && (gptStatus.data?.traceback || gptStatus.data?.error_details)) && (
+                <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-md text-sm border border-red-200 dark:border-red-900 mb-2">
+                  <div className="font-medium mb-1 text-red-600 dark:text-red-400">Python Script Error</div>
+                  {gptStatus.data?.error_details && (
+                    <div className="text-red-700 dark:text-red-300 mb-2">{gptStatus.data.error_details}</div>
+                  )}
+                  {gptStatus.data?.traceback && (
+                    <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded font-mono text-xs overflow-x-auto max-h-60">
+                      <pre>{gptStatus.data.traceback}</pre>
+                    </div>
+                  )}
                 </div>
               )}
               

@@ -13,6 +13,8 @@ import concurrent.futures
 import multiprocessing
 import queue as queue_mod
 import sys
+import os
+import signal
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +31,7 @@ async def run_script_in_isolated_environment(
     gpt_manager,
     websocket=None,
     run_in_background=False
-) -> bool:
+) -> tuple[bool, dict|None]:
     """
     Executes user-generated scripts in an isolated thread with proper
     cancellation support and comprehensive error handling.
@@ -51,7 +53,7 @@ async def run_script_in_isolated_environment(
     script_name = f"script_{int(time.time())}"
     script_done_event = multiprocessing.Event()
     result_queue = multiprocessing.Queue()
-    script_result = {"success": False, "error": None}
+    script_result = {"success": False, "error": None, "traceback": None}
     gpt_manager.websocket = websocket
     full_script = _build_script_with_environment(script_code)
 
@@ -92,9 +94,9 @@ async def run_script_in_isolated_environment(
     gpt_manager.active_processes[script_name] = {"process": process, "done_event": script_done_event, "result_queue": result_queue}
     logger.info(f"Running script '{script_name}' in separate process")
 
+    # Wait for process to finish or be cancelled
     while process.is_alive() and not gpt_manager.gpt_command_cancelled:
         await asyncio.sleep(0.1)
-        # Check for result from queue
         try:
             result = result_queue.get_nowait()
             if "success" in result and result["success"]:
@@ -102,6 +104,7 @@ async def run_script_in_isolated_environment(
                 break
             elif "error" in result:
                 script_result["error"] = result["error"]
+                script_result["traceback"] = result.get("traceback", "")
                 if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
                     await gpt_manager._send_gpt_status_update(websocket, "error", f"Script error: {result['error']}", {"traceback": result.get("traceback", "")})
                 break
@@ -112,15 +115,54 @@ async def run_script_in_isolated_environment(
                 break
         except queue_mod.Empty:
             pass
+    # If cancelled, forcibly terminate
     if gpt_manager.gpt_command_cancelled and process.is_alive():
         process.terminate()
         process.join(timeout=2)
+        if process.is_alive():
+            os.kill(process.pid, signal.SIGKILL)
+            logger.warning(f"Script '{script_name}' forcibly killed with SIGKILL.")
+            if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                await gpt_manager._send_gpt_status_update(
+                    websocket, "error",
+                    "Script was forcibly killed (SIGKILL). Hardware may need to be reset."
+                )
         logger.info(f"Script '{script_name}' forcibly terminated due to cancellation.")
         if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
             await gpt_manager._send_gpt_status_update(websocket, "cancelled", "Script cancelled by user.")
+    # Always stop/reset motors from the main process after script ends
+    try:
+        px.set_motor_speed(1, 0)
+        px.set_motor_speed(2, 0)
+        px.set_dir_servo_angle(0)
+        px.set_cam_pan_angle(0)
+        px.set_cam_tilt_angle(0)
+        logger.info("All motors and servos reset after script termination.")
+    except Exception as e:
+        logger.error(f"Error resetting hardware after script termination: {e}")
+    # After process exit, check for error in result_queue (in case it was not read above)
+    try:
+        while True:
+            result = result_queue.get_nowait()
+            if "error" in result:
+                script_result["error"] = result["error"]
+                script_result["traceback"] = result.get("traceback", "")
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(
+                        websocket, "error", f"Script error: {result['error']}", {"traceback": result.get("traceback", "")}
+                    )
+            elif "cancelled" in result:
+                script_result["error"] = result["cancelled"]
+                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                    await gpt_manager._send_gpt_status_update(websocket, "cancelled", result["cancelled"])
+    except queue_mod.Empty:
+        pass
     if script_name in gpt_manager.active_processes:
         del gpt_manager.active_processes[script_name]
-    return script_result["success"]
+    if script_result["success"]:
+        return True, None
+    else:
+        return False, {"error": script_result["error"], "traceback": script_result["traceback"]}
 
 def _build_script_with_environment(script_code: str) -> str:
     """

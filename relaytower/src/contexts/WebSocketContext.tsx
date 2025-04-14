@@ -213,6 +213,7 @@ export interface GptStatusUpdate {
     error_details?: string;
     current_step?: number;
     total_steps?: number;
+    traceback?: string;
   };
 }
 

@@ -990,6 +990,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 self.px.set_motor_speed(1, 0)  # rear_left
                 self.px.set_motor_speed(2, 0)  # rear_right
                 self.px.set_dir_servo_angle(0)  # front steering
+                self.px.set_cam_pan_angle(0)  # camera pan
+                self.px.set_cam_tilt_angle(0)  # camera tilt
                 logger.info("All motors stopped due to cancellation")
             except Exception as e:
                 logger.error(f"Error stopping motors during cancellation: {e}")
@@ -1120,7 +1122,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
               # Now run the script after TTS is completely done
             script_code = response.get("python_script", "")
             if script_code:
-                return await run_script_in_isolated_environment(
+                script_success, script_error = await run_script_in_isolated_environment(
                     script_code,
                     self.px,
                     self._get_camera_image,
@@ -1130,6 +1132,15 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     websocket,
                     run_in_background=False
                 )
+                # If script failed, send error status update with traceback if available
+                if not script_success and websocket:
+                    await self._send_gpt_status_update(
+                        websocket,
+                        "error",
+                        script_error["error"] if script_error else "Script execution failed.",
+                        {"traceback": script_error["traceback"] if script_error else ""}
+                    )
+                return script_success
             else:
                 await self.tts_manager.say("No Python script provided.", priority=1)
                 return False
@@ -1550,7 +1561,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
-                    volume = max(min(volume, 100), 0)
+                    volume = max(min(volume, 100), 0)  # Clamp to valid range
                     
                 if hasattr(self.sound_manager, "set_volume"):
                     self.sound_manager.set_volume(volume)
@@ -1563,7 +1574,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
-                    volume = max(min(volume, 100), 0)
+                    volume = max(min(volume, 100), 0)  # Clamp to valid range
                     
                 if hasattr(self.sound_manager, "set_effect_volume"):
                     self.sound_manager.set_effect_volume(volume)
@@ -1588,7 +1599,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 
                 if not isinstance(volume, (int, float)) or not 0 <= volume <= 100:
                     logger.warning(f"Invalid volume: {volume}. Must be between 0 and 100.")
-                    volume = max(min(volume, 100), 0)
+                    volume = max(min(volume, 100), 0)  # Clamp to valid range
                     
                 if hasattr(self.tts_manager, "set_volume"):
                     self.tts_manager.set_volume(volume)
@@ -1804,7 +1815,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     
                 if hasattr(self.px, "set_turn_in_place"):
                     self.px.set_turn_in_place(enabled)
-                    logger.info(f"Set turn in place: {enabled}")
+                    logger.info(f"Set turn inplace: {enabled}")
                     return True
                 return False
                 
