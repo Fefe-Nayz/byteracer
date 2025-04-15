@@ -377,7 +377,7 @@ AVAILABLE ACTIONS:
      - blocking: True=wait for completion, False=non-blocking
    
    For sound effects:
-   • sound.play_sound("sound_name"): Plays a specific sound effect
+   • sound.play_sound("custom", sound_name): Plays a specific sound effect
      - Available sounds: "alarm", "aurores", "bruh", etc. (see full list above)
    
    For timing (always use await for sleep):
