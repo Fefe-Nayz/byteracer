@@ -262,7 +262,7 @@ class ByteRacer:
                         should_announce = True
                         
                         # Update client status in sensor manager
-                        self.sensor_manager.update_client_status(False, True)
+                        # self.sensor_manager.update_client_status(False, True)
                     
                     # Make announcement if needed
                     if should_announce:
@@ -330,7 +330,7 @@ class ByteRacer:
                             self.sensor_manager.robot_state = RobotState.STANDBY
                             
                             # Update sensor manager about client disconnect
-                            self.sensor_manager.update_client_status(False, True)
+                            # self.sensor_manager.update_client_status(False, True)
                             break
             except Exception as e:
                 logging.error(f"WebSocket connection error: {e}")
@@ -338,7 +338,7 @@ class ByteRacer:
                 self.sensor_manager.robot_state = RobotState.STANDBY
                 
                 # Update sensor manager about client disconnect
-                self.sensor_manager.update_client_status(False, True)
+                # self.sensor_manager.update_client_status(False, True)
                 
                 # Announce reconnection attempts via TTS
                 await self.tts_manager.say("Connection to control server lost. Attempting to reconnect.", priority=1)
@@ -373,7 +373,7 @@ class ByteRacer:
                     self.last_activity_time = time.time()
                     
                     # Update sensor manager about client connection
-                    self.sensor_manager.update_client_status(False, True)
+                    # self.sensor_manager.update_client_status(False, True)
                     
                     # Now that a controller is connected, clear IP announcements
                     self.tts_manager.clear_queue(min_priority=1)
@@ -402,7 +402,7 @@ class ByteRacer:
                 if self.sensor_manager.robot_state != RobotState.MANUAL_CONTROL and self.sensor_manager.robot_state != RobotState.CIRCUIT_MODE:
                     logging.info("Received gamepad input from client, marking as connected")
                     self.sensor_manager.robot_state = RobotState.MANUAL_CONTROL
-                    self.sensor_manager.update_client_status(True, True)
+                    # self.sensor_manager.update_client_status(True, True)
             
             elif data["name"] == "robot_command":
                 # Handle robot commands

@@ -152,7 +152,7 @@ class GPTManager:
                 # Check if camera is in RUNNING state
                 camera_status = self.camera_manager.get_status()
                 if camera_status["state"] == "RUNNING":
-                    image_data = await self._get_camera_image()
+                    image_data = await self._get_camera_image_for_apî()
                     if not image_data:
                         await self.tts_manager.say("Unable to access the camera feed. Processing without image.", priority=1)
                         if websocket:
@@ -371,9 +371,10 @@ AVAILABLE ACTIONS:
    • get_camera_image(): Returns the camera image as raw bytes from camera, it's an async function
    
    For text-to-speech (always use await):
-   • await tts.say("Your message", priority=1, lang="en-US"): Speaks message
+   • await tts("Your message", priority=1, lang="en-US", blocking=False): Speaks message
      - priority: 1=high, 2=medium, 3=low
      - lang: "en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"
+     - blocking: True=wait for completion, False=non-blocking
    
    For sound effects:
    • sound.play_sound("sound_name"): Plays a specific sound effect
@@ -435,7 +436,6 @@ async def run_script_in_isolated_environment(
     websocket=None,
     run_in_background=False
 ) -> tuple[bool, dict|None]:
-    
     Executes user-generated scripts in an isolated thread with proper
     cancellation support and comprehensive error handling.
     
@@ -452,7 +452,6 @@ async def run_script_in_isolated_environment(
     Returns:
         bool: Success status
     
-    
     script_name = f"script_{int(time.time())}"
     script_done_event = multiprocessing.Event()
     result_queue = multiprocessing.Queue()
@@ -467,6 +466,12 @@ async def run_script_in_isolated_environment(
             import time
             import json
             import traceback
+            
+            # Create a forwarding function for TTS requests
+            async def tts_say(text, priority=0, blocking=False, lang=None):
+                await tts_manager.say(text, priority=priority, blocking=blocking, lang=lang)
+                return True
+            
             local_env = {"ScriptCancelledException": ScriptCancelledException,
                          "asyncio": asyncio,
                          "time": time,
@@ -481,7 +486,7 @@ async def run_script_in_isolated_environment(
                 result_queue.put({"error": "Script compilation failed"})
                 return
             loop.run_until_complete(
-                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_say, sound_manager, gpt_manager, result_queue)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:
@@ -568,7 +573,6 @@ async def run_script_in_isolated_environment(
         return False, {"error": script_result["error"], "traceback": script_result["traceback"]}
 
 def _build_script_with_environment(script_code: str) -> str:
-    
     Builds a complete script with proper environment setup, error handling,
     and resource safety mechanisms.
     
@@ -577,7 +581,6 @@ def _build_script_with_environment(script_code: str) -> str:
         
     Returns:
         str: Complete script with execution environment
-    
     # Script header with imports and environment setup
     script_header = (
         "import asyncio\n"
@@ -602,8 +605,7 @@ def _build_script_with_environment(script_code: str) -> str:
         "    cancellation_task = asyncio.create_task(check_cancellation())\n\n"
         "    try:\n"
     )
-    # THE CODE YOU ARE GENERATING IT PUT HERE IN THE TRY BLOCK
-    # NO NEED TO DEFINE THE user_script FUNCTION, JUST COMPLETE THE BODY WITH YOUR CODE
+
     # Indent the user's code to fit under try block
     indented_user_code = "\n".join(f"        {line}" for line in script_code.split("\n"))
     
@@ -661,6 +663,7 @@ def _build_script_with_environment(script_code: str) -> str:
    • set_tts_volume(volume: number): Sets TTS volume (0-100)
    • set_tts_language(language: string): Sets TTS language
    • set_category_volume(category: string, volume: number): Volume by category
+   • available categories: "driving", "alert", "custom", "voice"
    • set_tts_audio_gain(gain: number): Sets TTS audio gain (1.0-15.0)
    • set_user_tts_volume(volume: number): Sets user TTS volume (0-100)
    • set_system_tts_volume(volume: number): Sets system TTS volume (0-100)
@@ -1078,6 +1081,25 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         except Exception as e:
             logger.error(f"Error getting camera image: {e}")
             return None    
+    
+    async def _get_camera_image_for_apî(self) -> Optional[str]:
+        try:
+            import requests
+            response = requests.get("http://127.0.0.1:9000/mjpg.jpg", timeout=2)
+            if response.status_code == 200:
+                image_bytes = response.content
+                image = Image.open(io.BytesIO(image_bytes))
+                buffered = io.BytesIO()
+                image.save(buffered, format="JPEG")
+                image_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                return image_base64
+            else:
+                logger.error(f"Failed to get camera image, status code: {response.status_code}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting camera image: {e}")
+            return None        
+
     async def _process_actions(self, response: Dict[str, Any], websocket=None) -> bool:
         """
         Process actions from the GPT response. Handles action execution with robust validation
@@ -1157,17 +1179,14 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         if not language or language not in ["en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"]:
             language = DEFAULT_LANGUAGE
             response["language"] = language
+
+                    # First speak the text if available
+        if text_output:
+            # For python_script we need to wait until TTS is actually finished
+            await self.tts_manager.say(text_output, priority=1, blocking=True, lang=language)
         
         # For python_script action type, ensure TTS completes before script execution
         if action_type == "python_script":
-            # First speak the text if available
-            if text_output:
-                # For python_script we need to wait until TTS is actually finished
-                await self.tts_manager.say(text_output, priority=1, blocking=True, lang=language)
-                # Double-check speaking is really done
-                while self.tts_manager.is_speaking():
-                    await asyncio.sleep(0.1)
-              # Now run the script after TTS is completely done
             script_code = response.get("python_script", "")
             if script_code:
                 script_success, script_error = await run_script_in_isolated_environment(
@@ -1192,10 +1211,6 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             else:
                 await self.tts_manager.say("No Python script provided.", priority=1)
                 return False
-        else:
-            # For other action types, speak the text but don't necessarily need to fully block
-            if text_output:
-                await self.tts_manager.say(text_output, priority=1, blocking=False, lang=language)
         
         # Process predefined function actions
         if action_type == "predefined_function":
@@ -2116,8 +2131,6 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "act_cute":
                 try:
                     logger.info("Executing act_cute animation")
-                    # Play a cute sound first (this is not part of the preset function)
-                    self.sound_manager.play_sound("custom", name="wow")
                     # Import and call the preset animation
                     from modules.gpt.preset_actions import act_cute
                     act_cute(self.px)
@@ -2129,8 +2142,6 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "think":
                 try:
                     logger.info("Executing think animation")
-                    # Play a thinking sound first (not part of the preset)
-                    self.sound_manager.play_sound("custom", name="pipe")
                     # Import and call the preset animation
                     from modules.gpt.preset_actions import think
                     think(self.px)
@@ -2142,8 +2153,6 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "celebrate":
                 try:
                     logger.info("Executing celebrate animation")
-                    # Play celebration sound first
-                    self.sound_manager.play_sound("custom", name="rat-dance")
                     # Import and call the preset animation
                     from modules.gpt.preset_actions import celebrate
                     celebrate(self.px)
