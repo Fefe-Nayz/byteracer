@@ -64,12 +64,6 @@ async def run_script_in_isolated_environment(
             import time
             import json
             import traceback
-            
-            # Create a forwarding function for TTS requests
-            async def tts_say(text, priority=0, blocking=False, lang=None):
-                await tts_manager.say(text, priority=priority, blocking=blocking, lang=lang)
-                return True
-            
             local_env = {"ScriptCancelledException": ScriptCancelledException,
                          "asyncio": asyncio,
                          "time": time,
@@ -84,7 +78,7 @@ async def run_script_in_isolated_environment(
                 result_queue.put({"error": "Script compilation failed"})
                 return
             loop.run_until_complete(
-                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_say, sound_manager, gpt_manager, result_queue)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:

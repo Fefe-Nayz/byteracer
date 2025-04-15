@@ -371,7 +371,7 @@ AVAILABLE ACTIONS:
    • get_camera_image(): Returns the camera image as raw bytes from camera, it's an async function
    
    For text-to-speech (always use await):
-   • await tts("Your message", priority=1, lang="en-US", blocking=False): Speaks message
+   • await tts.say("Your message", priority=1, lang="en-US", blocking=False): Speaks message
      - priority: 1=high, 2=medium, 3=low
      - lang: "en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"
      - blocking: True=wait for completion, False=non-blocking
@@ -436,6 +436,7 @@ async def run_script_in_isolated_environment(
     websocket=None,
     run_in_background=False
 ) -> tuple[bool, dict|None]:
+    
     Executes user-generated scripts in an isolated thread with proper
     cancellation support and comprehensive error handling.
     
@@ -452,6 +453,7 @@ async def run_script_in_isolated_environment(
     Returns:
         bool: Success status
     
+    
     script_name = f"script_{int(time.time())}"
     script_done_event = multiprocessing.Event()
     result_queue = multiprocessing.Queue()
@@ -466,12 +468,6 @@ async def run_script_in_isolated_environment(
             import time
             import json
             import traceback
-            
-            # Create a forwarding function for TTS requests
-            async def tts_say(text, priority=0, blocking=False, lang=None):
-                await tts_manager.say(text, priority=priority, blocking=blocking, lang=lang)
-                return True
-            
             local_env = {"ScriptCancelledException": ScriptCancelledException,
                          "asyncio": asyncio,
                          "time": time,
@@ -486,7 +482,7 @@ async def run_script_in_isolated_environment(
                 result_queue.put({"error": "Script compilation failed"})
                 return
             loop.run_until_complete(
-                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_say, sound_manager, gpt_manager, result_queue)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:
@@ -573,6 +569,7 @@ async def run_script_in_isolated_environment(
         return False, {"error": script_result["error"], "traceback": script_result["traceback"]}
 
 def _build_script_with_environment(script_code: str) -> str:
+    
     Builds a complete script with proper environment setup, error handling,
     and resource safety mechanisms.
     
@@ -581,6 +578,7 @@ def _build_script_with_environment(script_code: str) -> str:
         
     Returns:
         str: Complete script with execution environment
+    
     # Script header with imports and environment setup
     script_header = (
         "import asyncio\n"
@@ -605,7 +603,8 @@ def _build_script_with_environment(script_code: str) -> str:
         "    cancellation_task = asyncio.create_task(check_cancellation())\n\n"
         "    try:\n"
     )
-
+    # THE CODE YOU ARE GENERATING IT PUT HERE IN THE TRY BLOCK
+    # NO NEED TO DEFINE THE user_script FUNCTION, JUST COMPLETE THE BODY WITH YOUR CODE
     # Indent the user's code to fit under try block
     indented_user_code = "\n".join(f"        {line}" for line in script_code.split("\n"))
     
