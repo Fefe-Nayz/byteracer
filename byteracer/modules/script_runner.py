@@ -19,8 +19,114 @@ import signal
 logger = logging.getLogger(__name__)
 
 class ScriptCancelledException(Exception):
-    """Raised when a script is cancelled by user request."""
+    """Exception raised when a script is cancelled by user or system."""
     pass
+
+async def _process_audio_commands(audio_queue, tts_manager, sound_manager):
+    """
+    Process audio commands from the script process and relay them to the main process audio systems.
+    This is key to allowing audio playback across process boundaries.
+
+    Args:
+        audio_queue: Queue for audio commands from child process
+        tts_manager: TTS manager instance from parent process
+        sound_manager: Sound manager instance from parent process
+    """
+    logger.info("Starting audio command processor")
+    while True:
+        try:
+            # Check if there's a command in the queue (non-blocking)
+            try:
+                command = audio_queue.get_nowait()
+            except queue_mod.Empty:
+                await asyncio.sleep(0.05)
+                continue
+
+            # Process the command based on its type
+            if command["type"] == "tts":
+                # Text-to-speech request
+                text = command.get("text", "")
+                priority = command.get("priority", 0)
+                lang = command.get("lang")
+                logger.debug(f"Audio processor: TTS request: '{text}'")
+                await tts_manager.say(text, priority=priority, blocking=False, lang=lang)
+
+            elif command["type"] == "tts_lang":
+                # Set TTS language
+                lang = command.get("lang")
+                if lang:
+                    tts_manager.set_language(lang)
+
+            elif command["type"] == "sound":
+                # Sound effect request
+                sound_type = command.get("sound_type")
+                loop = command.get("loop", False)
+                name = command.get("name")
+                logger.info(f"Audio processor: Sound request: type={sound_type}, name={name}")
+                sound_manager.play_sound(sound_type, loop=loop, name=name)
+
+            elif command["type"] == "stop_sound":
+                # Stop sound request
+                sound_type = command.get("sound_type")
+                channel_id = command.get("channel_id")
+                sound_manager.stop_sound(sound_type, channel_id)
+
+            elif command["type"] == "alert":
+                # Play alert sound
+                name = command.get("name")
+                sound_manager.play_alert(name)
+
+            elif command["type"] == "custom_sound":
+                # Play custom sound
+                name = command.get("name")
+                sound_manager.play_custom_sound(name)
+
+        except asyncio.CancelledError:
+            logger.info("Audio command processor cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error processing audio command: {e}")
+            await asyncio.sleep(0.5)  # Avoid tight loop on error
+
+def _build_script_with_environment(script_code: str) -> str:
+    """
+    Wraps user code in a function with proper exception handling.
+    Automatically indents the user's script properly.
+    """
+    # Add proper indentation to user code (4 spaces)
+    indented_script_lines = []
+    for line in script_code.split('\n'):
+        if line.strip():  # If not an empty line
+            indented_script_lines.append('        ' + line)
+        else:
+            indented_script_lines.append(line)
+
+    indented_script = '\n'.join(indented_script_lines)
+
+    # Add a simple pass statement if the script is empty to avoid indentation errors
+    if not indented_script.strip():
+        indented_script = '        pass  # Empty script'
+
+    script_wrapper = f"""
+# Generated script wrapper
+async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue):
+    try:
+        # Start user code
+{indented_script}
+        # End user code
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Script error: {{e}}\\n{{tb}}")
+        result_queue.put({{"error": str(e), "traceback": tb}})
+    finally:
+        # Clean up any hardware state
+        if hasattr(px, 'motor_speed') and callable(px.motor_speed):
+            px.motor_speed(0)  # Stop motors
+        if hasattr(px, 'set_dir_servo_angle') and callable(px.set_dir_servo_angle):
+            px.set_dir_servo_angle(0)  # Center steering
+"""
+    return script_wrapper
 
 async def run_script_in_isolated_environment(
     script_code: str,
@@ -35,7 +141,7 @@ async def run_script_in_isolated_environment(
     """
     Executes user-generated scripts in an isolated thread with proper
     cancellation support and comprehensive error handling.
-    
+
     Args:
         script_code: The Python code to execute
         px: Picarx instance for hardware control
@@ -45,25 +151,47 @@ async def run_script_in_isolated_environment(
         gpt_manager: GPT manager reference for cancellation checks
         websocket: Optional websocket for error reporting
         run_in_background: Whether to run the script in background
-        
+
     Returns:
         bool: Success status
     """
-    
+
     script_name = f"script_{int(time.time())}"
     script_done_event = multiprocessing.Event()
     result_queue = multiprocessing.Queue()
+    audio_command_queue = multiprocessing.Queue()  # For TTS and sound requests
     script_result = {"success": False, "error": None, "traceback": None}
     gpt_manager.websocket = websocket
     full_script = _build_script_with_environment(script_code)
 
-    def run_script_in_process(result_queue, script_done_event):
+    # Start audio request handler task
+    audio_task = asyncio.create_task(_process_audio_commands(audio_command_queue, tts_manager, sound_manager))
+
+    def run_script_in_process(result_queue, script_done_event, audio_command_queue):
         try:
             import asyncio
             import threading
             import time
             import json
             import traceback
+
+            # Create proxy classes for TTS and Sound managers
+            class TTSProxy:
+                def say(self, text, priority=0, blocking=False, lang=None):
+                    audio_command_queue.put({"type": "tts", "text": text, "priority": priority, "lang": lang})
+                    # For blocking calls, we need to wait a reasonable time
+                    if blocking:
+                        time.sleep(len(text) * 0.07)  # Rough estimate of TTS duration            
+            class SoundProxy:
+                def play_sound(self, sound_type, name=None, loop=False):
+                    audio_command_queue.put({"type": "sound", "sound_type": sound_type,
+                                            "name": name, "loop": loop})
+                    return 1  # Fake channel ID
+
+            # Create proxy instances
+            tts_proxy = TTSProxy()
+            sound_proxy = SoundProxy()
+
             local_env = {"ScriptCancelledException": ScriptCancelledException,
                          "asyncio": asyncio,
                          "time": time,
@@ -78,7 +206,8 @@ async def run_script_in_isolated_environment(
                 result_queue.put({"error": "Script compilation failed"})
                 return
             loop.run_until_complete(
-                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"),
+                          tts_proxy, sound_proxy, gpt_manager, result_queue)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:
@@ -89,7 +218,9 @@ async def run_script_in_isolated_environment(
         finally:
             script_done_event.set()
 
-    process = multiprocessing.Process(target=run_script_in_process, args=(result_queue, script_done_event))
+    # Launch process with audio_command_queue
+    process = multiprocessing.Process(target=run_script_in_process,
+                                     args=(result_queue, script_done_event, audio_command_queue))
     process.start()
     gpt_manager.active_processes[script_name] = {"process": process, "done_event": script_done_event, "result_queue": result_queue}
     logger.info(f"Running script '{script_name}' in separate process")
@@ -115,150 +246,81 @@ async def run_script_in_isolated_environment(
                 break
         except queue_mod.Empty:
             pass
-    # If cancelled, forcibly terminate
-    if gpt_manager.gpt_command_cancelled and process.is_alive():
-        process.terminate()
-        process.join(timeout=2)
-        if process.is_alive():
-            os.kill(process.pid, signal.SIGKILL)
-            logger.warning(f"Script '{script_name}' forcibly killed with SIGKILL.")
+
+    # If we need to cancel the process
+    if process.is_alive():
+        if gpt_manager.gpt_command_cancelled:
+            logger.info(f"Cancelling script '{script_name}' due to user request")
+            script_result["error"] = "Script cancelled by user"
             if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
-                await gpt_manager._send_gpt_status_update(
-                    websocket, "error",
-                    "Script was forcibly killed (SIGKILL). Hardware may need to be reset."
-                )
-        logger.info(f"Script '{script_name}' forcibly terminated due to cancellation.")
-        if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
-            await gpt_manager._send_gpt_status_update(websocket, "cancelled", "Script cancelled by user.")
-    # Always stop/reset motors from the main process after script ends
-    try:
-        px.set_motor_speed(1, 0)
-        px.set_motor_speed(2, 0)
-        px.set_dir_servo_angle(0)
-        px.set_cam_pan_angle(0)
-        px.set_cam_tilt_angle(0)
-        logger.info("All motors and servos reset after script termination.")
-    except Exception as e:
-        logger.error(f"Error resetting hardware after script termination: {e}")
-    # After process exit, check for error in result_queue (in case it was not read above)
-    try:
-        while True:
-            result = result_queue.get_nowait()
-            if "error" in result:
-                script_result["error"] = result["error"]
-                script_result["traceback"] = result.get("traceback", "")
-                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
-                    await gpt_manager._send_gpt_status_update(
-                        websocket, "error", f"Script error: {result['error']}", {"traceback": result.get("traceback", "")}
-                    )
-            elif "cancelled" in result:
-                script_result["error"] = result["cancelled"]
-                if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
-                    await gpt_manager._send_gpt_status_update(websocket, "cancelled", result["cancelled"])
-    except queue_mod.Empty:
-        pass
+                await gpt_manager._send_gpt_status_update(websocket, "cancelled", "Script cancelled by user")
+        else:
+            # Timeout or other issue
+            logger.warning(f"Script '{script_name}' timeout or unexpected state")
+            script_result["error"] = "Script execution timed out or encountered an issue"
+            if websocket and hasattr(gpt_manager, "_send_gpt_status_update"):
+                await gpt_manager._send_gpt_status_update(websocket, "error", "Script timed out or encountered an issue")
+
+        # Force kill child process
+        if script_name in gpt_manager.active_processes:
+            try:
+                # Instead of using multiprocessing API, use OS signals for reliable termination
+                os.kill(process.pid, signal.SIGTERM)
+                process.join(1.0)  # Give it a second to shut down
+                if process.is_alive():  # If still alive, force kill
+                    os.kill(process.pid, signal.SIGKILL)
+            except Exception as e:
+                logger.error(f"Error terminating script process: {e}")
+
+    # Clean up process tracking
     if script_name in gpt_manager.active_processes:
         del gpt_manager.active_processes[script_name]
-    if script_result["success"]:
-        return True, None
-    else:
-        return False, {"error": script_result["error"], "traceback": script_result["traceback"]}
 
-def _build_script_with_environment(script_code: str) -> str:
-    """
-    Builds a complete script with proper environment setup, error handling,
-    and resource safety mechanisms.
-    
-    Args:
-        script_code: The user's Python code
-        
-    Returns:
-        str: Complete script with execution environment
-    """
-    # Script header with imports and environment setup
-    script_header = (
-        "import asyncio\n"
-        "import time\n"
-        "import threading\n"
-        "import sys\n"
-        "import traceback\n"
-        "import json\n"
-        "import cv2\n"
-        "import numpy as np\n\n"
-        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue):\n"
-        "    # Set up cancellation detection\n"
-        "    cancel_event = threading.Event()\n\n"
-        "    async def check_cancellation():\n"
-        "        \"\"\"Checks if the script should be cancelled\"\"\"\n"
-        "        while not gpt_manager.gpt_command_cancelled:\n"
-        "            await asyncio.sleep(0.1)\n"
-        "        logger.info('Script cancellation requested')\n"
-        "        cancel_event.set()\n"
-        "        raise ScriptCancelledException('Script cancelled by user')\n\n"
-        "    # Start the cancellation checker\n"
-        "    cancellation_task = asyncio.create_task(check_cancellation())\n\n"
-        "    try:\n"
-    )
-
-    # Indent the user's code to fit under try block
-    indented_user_code = "\n".join(f"        {line}" for line in script_code.split("\n"))
-    
-    # Footer with cleanup and exception handling
-    script_footer = (
-        "\n"
-        "        # Clean up cancellation task\n"
-        "        if not cancellation_task.done():\n"
-        "            cancellation_task.cancel()\n"
-        "            \n"
-        "    except ScriptCancelledException as e:\n"
-        "        logger.info(f'Script cancelled: {e}')\n"
-        "        try:\n"
-        "            result_queue.put({'cancelled': str(e)})\n"
-        "        except Exception as _queue_err: logger.error(f'Failed to send cancellation to parent: {_queue_err}')\n"
-        "    except asyncio.CancelledError:\n"
-        "        logger.info('Script task cancelled')\n"
-        "    except Exception as e:\n"
-        "        tb = traceback.format_exc()\n"
-        "        logger.error(f'Script error: {e}\\n{tb}')\n"
-        "        try:\n"
-        "            result_queue.put({'error': str(e), 'traceback': tb})\n"
-        "        except Exception as _queue_err: logger.error(f'Failed to send error to parent: {_queue_err}')\n"
-        "    finally:\n"
-        "        # Ensure all motors are stopped\n"
-        "        try:\n"
-        "            px.set_motor_speed(1, 0)  # rear_left\n"
-        "            px.set_motor_speed(2, 0)  # rear_right\n"
-        "            px.set_dir_servo_angle(0) # steering\n"
-        "            px.set_cam_pan_angle(0)   # camera pan\n"
-        "            px.set_cam_tilt_angle(0)  # camera tilt\n"
-        "            logger.info('Motors safely stopped')\n"
-        "        except Exception as e:\n"
-        "            logger.error(f'Error stopping motors: {e}')\n"
-    )
-    
-    return script_header + indented_user_code + script_footer
-
-async def _send_error_to_websocket(websocket, error_type: str, message: str, traceback_str: str = None):
-    """
-    Sends script execution errors to the websocket client.
-    
-    Args:
-        websocket: The websocket connection
-        error_type: Type of error
-        message: Error message
-        traceback_str: Optional traceback string
-    """
+    # Reset hardware state again from parent to be extra sure
+    # This is important in case the child process didn't clean up properly
     try:
-        error_data = {
-            "name": "script_error",
-            "data": {
-                "error_type": error_type,
-                "message": message,
-                "traceback": traceback_str if traceback_str else "",
-                "timestamp": int(time.time() * 1000)
-            },
-            "createdAt": int(time.time() * 1000)
-        }
-        await websocket.send(json.dumps(error_data))
+        if hasattr(px, 'motor_speed') and callable(px.motor_speed):
+            px.motor_speed(0)
+        if hasattr(px, 'set_dir_servo_angle') and callable(px.set_dir_servo_angle):
+            px.set_dir_servo_angle(0)
     except Exception as e:
-        logger.error(f"Failed to send error to websocket: {e}")
+        logger.error(f"Error resetting hardware after script: {e}")
+
+    # Clean up the audio task
+    audio_task.cancel()
+    try:
+        await audio_task
+    except asyncio.CancelledError:
+        pass
+
+    # Process will be cleaned up by Python's garbage collector
+    return script_result["success"], script_result
+
+async def check_script_for_issues(script_code: str) -> dict:
+    """
+    Check a script for common issues and problematic patterns.
+
+    Args:
+        script_code: The Python code to check
+
+    Returns:
+        dict: Issues found in the script
+    """
+    issues = []
+
+    # Check for potentially dangerous imports
+    dangerous_imports = [
+        "os.system", "subprocess", "pty", "popen",
+        "eval(", "exec(", "__import__",
+        "shutil.rmtree", "os.remove", "unlink",
+    ]
+
+    for item in dangerous_imports:
+        if item in script_code:
+            issues.append(f"Script contains potentially dangerous code: '{item}'")
+
+    # Check for infinite loops without sleep/delay
+    if "while True" in script_code and "await asyncio.sleep" not in script_code:
+        issues.append("Script contains 'while True' without 'await asyncio.sleep()', may cause CPU overuse")
+
+    return {"issues": issues}
