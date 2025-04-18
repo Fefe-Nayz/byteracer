@@ -1028,8 +1028,10 @@ class ByteRacer:
                 if modes["circuit_mode_enabled"]:
                     self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
                     self.aicamera_manager.start_color_control()
+                    self.aicamera_manager.start_traffic_sign_detection()
                 else:   
                     self.aicamera_manager.stop_color_control()
+                    self.aicamera_manager.stop_traffic_sign_detection()
 
             if "demo_mode_enabled" in modes:
                 self.sensor_manager.robot_state = RobotState.DEMO_MODE
