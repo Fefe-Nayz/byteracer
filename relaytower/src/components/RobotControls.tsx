@@ -7,7 +7,8 @@ import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { 
   RefreshCw, Power, Megaphone, Play,
-  RotateCw, Radio, WifiOff, Download, Camera
+  RotateCw, Radio, WifiOff, Download, Camera,
+  PersonStanding, TrafficCone, BarChart, Gamepad2
 } from "lucide-react";
 
 interface ActionStatusState {
@@ -21,7 +22,7 @@ interface RobotControlsProps {
 }
 
 export default function RobotControls({ showAllControls = false }: RobotControlsProps) {
-  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, settings, requestSettings } = useWebSocket();
+  const { status, sendRobotCommand, speakText, playSound, restartCameraFeed, settings, requestSettings, updateSettings } = useWebSocket();
   const [textToSpeak, setTextToSpeak] = useState("");
   const [language, setLanguage] = useState("");
   const [selectedSound, setSelectedSound] = useState("klaxon");
@@ -52,15 +53,29 @@ export default function RobotControls({ showAllControls = false }: RobotControls
   }, [settings]);
   
   // Available sounds
-  const availableSounds = [
-    { id: "klaxon", name: "Klaxon" },
-    { id: "fart", name: "Fart" },
-    { id: "car_start", name: "Car Start" },
-    { id: "car_stop", name: "Car Stop" },
-    { id: "beep", name: "Beep" },
-    { id: "siren", name: "Siren" },
-    { id: "drift", name: "Drift" },
-    { id: "accelerate", name: "Accelerate" }
+
+    const availableSounds = [
+    { id: "fart", name: "💨 Fart"},
+    { id: "klaxon", name: "📢 Klaxon"},
+    { id: "alarm", name: "🚨 Alarm"},
+    { id: "wow", name: "🤩 Wow"},
+    { id: "laugh", name: "😂 Laugh"},
+    { id: "bruh", name: "😑 Bruh"},
+    { id: "nope", name: "❌ Nope"},
+    { id:"lingango", name: "🗣️ Lingango"},
+    { id: "cailloux", name: "🪨 Cailloux"},
+    { id: "fave", name: "🎤 Favéé"},
+    { id: "pipe", name: "🔩 Pipe"},
+    { id: "tuile", name: "🧱 Une Tuile"},
+    { id: "india", name: "🇮🇳 India"},
+    { id: "vine-boom", name: "💥 Vine Boom"},
+    { id: "tralalelo-tralala", name: "🦈 Tralalelo"},
+    { id: "get-out", name: "🚪 Get Out"},
+    { id:"scream", name: "😱 Scream"},
+    { id:"wtf", name: "🤯 WTF"},
+    { id:"rat-dance", name: "🐀 Rat Dance"},
+    { id:"ph", name: "🤨 PH"},
+    { id:"aurores", name: "🐉 Dragorores"},
   ];
 
   // Handle command responses
@@ -123,10 +138,10 @@ export default function RobotControls({ showAllControls = false }: RobotControls
   if (!showAllControls) {
     return (
       <Card className="p-4">
-        <h3 className="font-bold mb-3">Quick Controls</h3>
+        <h3 className="font-bold">Quick Controls</h3>
         
         {/* TTS input */}
-        <form onSubmit={handleTtsSubmit} className="mb-4 space-y-2">
+        <form onSubmit={handleTtsSubmit} className="space-y-2">
           <div className="flex space-x-2">
             <Input
               placeholder="Text to speak..."
@@ -162,7 +177,7 @@ export default function RobotControls({ showAllControls = false }: RobotControls
         </form>
         
         {/* Sound player */}
-        <div className="flex space-x-2 mb-4">
+        <div className="flex space-x-2 mb-1">
           <Select 
             value={selectedSound} 
             onValueChange={setSelectedSound}
@@ -186,6 +201,66 @@ export default function RobotControls({ showAllControls = false }: RobotControls
           >
             <Play className="h-4 w-4" />
           </Button>
+        </div>
+        
+        {/* Mode Selector */}
+        <div>
+          <Select 
+            value={
+              settings?.modes.normal_mode_enabled ? "normal" :
+              settings?.modes.tracking_enabled ? "tracking" :
+              settings?.modes.circuit_mode_enabled ? "circuit" :
+              settings?.modes.demo_mode_enabled ? "demo" :
+              "normal" // Default fallback
+            } 
+            onValueChange={(value) => {
+              if (settings) {
+                // Create updated settings with the selected mode enabled and others disabled
+                const updatedSettings = {
+                  ...settings,
+                  modes: {
+                    ...settings.modes,
+                    normal_mode_enabled: value === "normal",
+                    tracking_enabled: value === "tracking",
+                    circuit_mode_enabled: value === "circuit",
+                    demo_mode_enabled: value === "demo"
+                  }
+                };
+                updateSettings(updatedSettings);
+              }
+            }}
+            disabled={status !== "connected" || !settings}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select mode" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="normal">
+                <div className="flex items-center space-x-2">
+                  <Gamepad2 className="h-4 w-4" />
+                  <span>Default Controller Mode</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="tracking">
+                <div className="flex items-center space-x-2">
+                  <PersonStanding className="h-4 w-4" />
+                  <span>Person Tracking</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="circuit">
+                <div className="flex items-center space-x-2">
+                  <TrafficCone className="h-4 w-4" />
+                  <span>Circuit Mode</span>
+                </div>
+              </SelectItem>
+              <SelectItem value="demo">
+                <div className="flex items-center space-x-2">
+                  <BarChart className="h-4 w-4" />
+                  <span>Demo Mode</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
         </div>
         
         {/* Essential controls */}

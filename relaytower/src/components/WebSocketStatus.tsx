@@ -30,7 +30,7 @@ export default function WebSocketStatus() {
         requestBatteryLevel();
         requestPythonStatus();
       }
-    }, 30000); // Check every 30 seconds
+    }, 3000); // Check every 30 seconds
 
     return () => clearInterval(interval);
   }, [status, requestBatteryLevel, requestPythonStatus]);

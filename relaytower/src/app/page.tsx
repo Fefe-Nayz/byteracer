@@ -31,7 +31,9 @@ function GamepadPage() {
   return (
     <div className="container mx-auto p-4 max-w-6xl">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">ByteRacer Control Panel</h1>
+        <h1 className="text-2xl font-bold">
+          <img src="/icon.png" alt="Logo" className="h-8 inline-block mr-2" />
+          ByteRacer Control Panel</h1>
         <ThemeToggle />
       </div>
 
@@ -73,9 +75,7 @@ function GamepadPage() {
           {selectedGamepadId ? (
             <GamepadPreview />
           ) : (
-            <div className="text-center text-gray-500">
-              Select a gamepad to see its inputs
-            </div>
+              <GamepadList />
           )}
         </TabsContent>
 

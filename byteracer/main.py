@@ -928,6 +928,40 @@ class ByteRacer:
 
     async def update_settings(self, settings):
         """Update settings based on client request"""
+        if "modes" in settings:
+            modes = settings["modes"]
+            if "tracking_enabled" in modes:
+                self.config_manager.set("modes.tracking_enabled", modes["tracking_enabled"])
+                self.sensor_manager.set_tracking(modes["tracking_enabled"])
+                if modes["tracking_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.TRACKING_MODE
+                    self.aicamera_manager.start_face_following()
+                else:   
+                    self.aicamera_manager.stop_face_following()
+            
+            if "circuit_mode_enabled" in modes:
+                self.config_manager.set("modes.circuit_mode_enabled", modes["circuit_mode_enabled"])
+                self.sensor_manager.set_circuit_mode(modes["circuit_mode_enabled"])
+                
+                if modes["circuit_mode_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
+                    self.aicamera_manager.start_color_control()
+                    self.aicamera_manager.start_traffic_sign_detection()
+                else:   
+                    self.aicamera_manager.stop_color_control()
+                    self.aicamera_manager.stop_traffic_sign_detection()
+
+            if "demo_mode_enabled" in modes:
+                self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])
+                self.sensor_manager.set_demo_mode(modes["demo_mode_enabled"])
+                if modes["demo_mode_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.DEMO_MODE
+
+            if "normal_mode_enabled" in modes:
+                self.config_manager.set("modes.normal_mode_enabled", modes["normal_mode_enabled"])
+                self.sensor_manager.set_normal_mode(modes["normal_mode_enabled"])
+                if modes["normal_mode_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.STANDBY
         if "sound" in settings:
             sound = settings["sound"]
             if "enabled" in sound:
@@ -986,33 +1020,6 @@ class ByteRacer:
                 self.config_manager.set("sound.emergency_tts_volume", sound["emergency_tts_volume"])
                 self.tts_manager.set_emergency_tts_volume(sound["emergency_tts_volume"])
         
-        if "camera" in settings:
-            camera = settings["camera"]
-            restart_needed = False
-            
-            if "vflip" in camera:
-                self.config_manager.set("camera.vflip", camera["vflip"])
-                restart_needed |= self.camera_manager.update_settings(vflip=camera["vflip"])
-            
-            if "hflip" in camera:
-                self.config_manager.set("camera.hflip", camera["hflip"])
-                restart_needed |= self.camera_manager.update_settings(hflip=camera["hflip"])
-
-            if "local_display" in camera:
-                self.config_manager.set("camera.local_display", camera["local_display"])
-                restart_needed |= self.camera_manager.update_settings(local=camera["local_display"])
-
-            if "web_display" in camera:
-                self.config_manager.set("camera.web_display", camera["web_display"])
-                restart_needed |= self.camera_manager.update_settings(web=camera["web_display"])
-
-            if "camera_size" in camera:
-                self.config_manager.set("camera.camera_size", camera["camera_size"])
-                restart_needed |= self.camera_manager.update_settings(camera_size=camera["camera_size"])
-            
-            if restart_needed:
-                await self.camera_manager.restart()
-        
         if "safety" in settings:
             safety = settings["safety"]
             if "collision_avoidance" in safety:
@@ -1038,41 +1045,6 @@ class ByteRacer:
             if "client_timeout" in safety:
                 self.config_manager.set("safety.client_timeout", safety["client_timeout"])
                 self.sensor_manager.client_timeout = safety["client_timeout"]
-        
-        if "modes" in settings:
-            modes = settings["modes"]
-            if "tracking_enabled" in modes:
-                self.config_manager.set("modes.tracking_enabled", modes["tracking_enabled"])
-                self.sensor_manager.set_tracking(modes["tracking_enabled"])
-                if modes["tracking_enabled"]:
-                    self.sensor_manager.robot_state = RobotState.TRACKING_MODE
-                    self.aicamera_manager.start_face_following()
-                else:   
-                    self.aicamera_manager.stop_face_following()
-            
-            if "circuit_mode_enabled" in modes:
-                self.config_manager.set("modes.circuit_mode_enabled", modes["circuit_mode_enabled"])
-                self.sensor_manager.set_circuit_mode(modes["circuit_mode_enabled"])
-                
-                if modes["circuit_mode_enabled"]:
-                    self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
-                    self.aicamera_manager.start_color_control()
-                    self.aicamera_manager.start_traffic_sign_detection()
-                else:   
-                    self.aicamera_manager.stop_color_control()
-                    self.aicamera_manager.stop_traffic_sign_detection()
-
-            if "demo_mode_enabled" in modes:
-                self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])
-                self.sensor_manager.set_demo_mode(modes["demo_mode_enabled"])
-                if modes["demo_mode_enabled"]:
-                    self.sensor_manager.robot_state = RobotState.DEMO_MODE
-
-            if "normal_mode_enabled" in modes:
-                self.config_manager.set("modes.normal_mode_enabled", modes["normal_mode_enabled"])
-                self.sensor_manager.set_normal_mode(modes["normal_mode_enabled"])
-                if modes["normal_mode_enabled"]:
-                    self.sensor_manager.robot_state = RobotState.STANDBY
 
         if "drive" in settings:
             drive = settings["drive"]
@@ -1108,6 +1080,38 @@ class ByteRacer:
                 if hasattr(self, 'gpt_manager'):
                     self.gpt_manager.api_key = api["openai_api_key"]
                     logging.info("Updated GPT manager with new API key")
+
+        if "camera" in settings:
+            camera = settings["camera"]
+            
+            # First collect all camera setting changes
+            camera_changes = {}
+            
+            if "vflip" in camera:
+                self.config_manager.set("camera.vflip", camera["vflip"])
+                camera_changes['vflip'] = camera["vflip"]
+            
+            if "hflip" in camera:
+                self.config_manager.set("camera.hflip", camera["hflip"])
+                camera_changes['hflip'] = camera["hflip"]
+
+            if "local_display" in camera:
+                self.config_manager.set("camera.local_display", camera["local_display"])
+                camera_changes['local'] = camera["local_display"]
+
+            if "web_display" in camera:
+                self.config_manager.set("camera.web_display", camera["web_display"])
+                camera_changes['web'] = camera["web_display"]
+
+            if "camera_size" in camera:
+                self.config_manager.set("camera.camera_size", camera["camera_size"])
+                camera_changes['camera_size'] = camera["camera_size"]
+            
+            # Only update and restart if there are actual changes
+            if camera_changes:
+                restart_needed = self.camera_manager.update_settings(**camera_changes)
+                if restart_needed:
+                    await self.camera_manager.restart()        
         
         # Save settings
         await self.save_config_settings()
