@@ -34,7 +34,7 @@ class GPTManager:
       - Running custom scripts
     """
     
-    def __init__(self, px, camera_manager, tts_manager, sound_manager, sensor_manager, config_manager):
+    def __init__(self, px, camera_manager, tts_manager, sound_manager, sensor_manager, config_manager, aicamera_manager):
         """
         Initialize the GPT manager with references to other system components.
         
@@ -52,6 +52,7 @@ class GPTManager:
         self.sound_manager = sound_manager
         self.sensor_manager = sensor_manager
         self.config_manager = config_manager
+        self.aicamera_manager = aicamera_manager
 
         self.robot_state_enum = RobotState
         
@@ -102,7 +103,7 @@ class GPTManager:
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", f"Failed to create new conversation: {str(e)}")
             return False
-    async def process_gpt_command(self, prompt: str, use_camera: bool = False, websocket = None, new_conversation=False, robot_state=None) -> bool:
+    async def process_gpt_command(self, prompt: str, use_camera: bool = False, websocket = None, new_conversation=False) -> bool:
         """
         Process a GPT command with optional camera feed inclusion.
         
@@ -129,8 +130,7 @@ class GPTManager:
                 if websocket:
                     await self._send_gpt_status_update(websocket, "error", "API key missing")
                 return False
-
-            old_state = robot_state if robot_state is not None else self.robot_state_enum.STANDBY
+            
             self.sensor_manager.robot_state = self.robot_state_enum.GPT_CONTROLLED
 
             if websocket:
@@ -831,12 +831,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         finally:
             # Reset the processing flag and restore the previous robot state
             self.is_processing = False
-            if old_state != self.robot_state_enum.STANDBY:
-                # Only restore to previous state if it wasn't the waiting state
-                self.sensor_manager.robot_state = old_state
-            else:
-                # If previous state was waiting, set to client controlled
-                self.sensor_manager.robot_state = self.robot_state_enum.MANUAL_CONTROL
+
+            self.restore_robot_state()
             
             logger.info(f"Robot state restored from {self.robot_state_enum.GPT_CONTROLLED} to {self.sensor_manager.robot_state}")
                     
@@ -1047,9 +1043,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 logger.error(f"Error stopping motors during cancellation: {e}")
             
             # Restore the robot state to MANUAL_CONTROL explicitly
-            old_state = self.sensor_manager.robot_state
-            self.sensor_manager.robot_state = self.robot_state_enum.MANUAL_CONTROL
-            logger.info(f"Robot state forcibly restored from {old_state} to {self.sensor_manager.robot_state}")
+            self.restore_robot_state()
             
             # Reset the processing flag explicitly
             self.is_processing = False
@@ -2234,3 +2228,24 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 await websocket.send(json.dumps(error_report))
             except Exception as e:
                 logger.error(f"Failed to send error report to websocket: {e}")
+
+    def restore_robot_state(self):
+        """
+        Restore the robot state from the config manager.
+        """
+        settings = self.config_manager.get()
+        self.sensor_manager.set_tracking(settings["modes"]["tracking_enabled"])
+        self.sensor_manager.set_circuit_mode(settings["modes"]["circuit_mode_enabled"])
+        self.sensor_manager.set_normal_mode(settings["modes"]["normal_mode_enabled"])
+
+        if settings["modes"]["tracking_enabled"]:
+            self.aicamera_manager.start_face_following()
+        else:
+            self.aicamera_manager.stop_face_following()
+        
+        if settings["modes"]["circuit_mode_enabled"]:
+            self.aicamera_manager.start_color_control()
+            self.aicamera_manager.start_traffic_sign_detection()
+        else:
+            self.aicamera_manager.stop_color_control()
+            self.aicamera_manager.stop_traffic_sign_detection()

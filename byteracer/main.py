@@ -66,7 +66,7 @@ class ByteRacer:
 
         self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager)
         self.network_manager = NetworkManager()
-        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager)
+        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager)
         
         # WebSocket state
         self.websocket = None
@@ -198,23 +198,6 @@ class ByteRacer:
         self.sensor_manager.collision_threshold = settings["safety"]["collision_threshold"]
         self.sensor_manager.edge_detection_threshold = settings["safety"]["edge_threshold"]
         self.sensor_manager.client_timeout = settings["safety"]["client_timeout"]
-        
-        # Apply special modes
-        self.sensor_manager.set_tracking(settings["modes"]["tracking_enabled"])
-        self.sensor_manager.set_circuit_mode(settings["modes"]["circuit_mode_enabled"])
-        self.sensor_manager.set_normal_mode(settings["modes"]["normal_mode_enabled"])
-
-        if settings["modes"]["tracking_enabled"]:
-            self.aicamera_manager.start_face_following()
-        else:
-            self.aicamera_manager.stop_face_following()
-        
-        if settings["modes"]["circuit_mode_enabled"]:
-            self.aicamera_manager.start_color_control()
-            self.aicamera_manager.start_traffic_sign_detection()
-        else:
-            self.aicamera_manager.stop_color_control()
-            self.aicamera_manager.stop_traffic_sign_detection()
 
         
         logging.info("Applied settings from configuration")
@@ -243,6 +226,8 @@ class ByteRacer:
                     # Get the primary interface IP
                     wifi_interface = self.network_manager.wifi_interface
                     current_ip = current_ips.get(wifi_interface, "unknown")
+
+                    logging.info(f"Current IP: {current_ip}, Mode: {current_mode}")
                     
                     # Check if IP or mode has changed
                     ip_changed = current_ip != previous_ip and previous_ip is not None
@@ -252,7 +237,7 @@ class ByteRacer:
                     should_announce = False
                     
                     # Always announce on first run or when not connected
-                    if first_run or self.sensor_manager.robot_state == RobotState.INITIALIZING:
+                    if first_run or not self.sensor_manager.robot_state.isConnected():
                         should_announce = True
                         first_run = False
                     # Announce if network changed while connected
@@ -331,6 +316,7 @@ class ByteRacer:
                             
                             # Update sensor manager about client disconnect
                             # self.sensor_manager.update_client_status(False, True)
+                            self.sensor_manager.robot_state.setConnected(False)
                             break
             except Exception as e:
                 logging.error(f"WebSocket connection error: {e}")
@@ -339,6 +325,7 @@ class ByteRacer:
                 
                 # Update sensor manager about client disconnect
                 # self.sensor_manager.update_client_status(False, True)
+                self.sensor_manager.robot_state.setConnected(False)
                 
                 # Announce reconnection attempts via TTS
                 await self.tts_manager.say("Connection to control server lost. Attempting to reconnect.", priority=1)
@@ -368,26 +355,64 @@ class ByteRacer:
                 # Only set client_connected when a controller connects to the server
                 if data["data"].get("type") == "controller":
                     logging.info(f"Received client register message from controller, client ID: {data['data'].get('id', 'unknown')}")
-                    self.sensor_manager.robot_state = RobotState.STANDBY
-                    self.sensor_manager.register_client_connection()
-                    self.last_activity_time = time.time()
                     
-                    # Update sensor manager about client connection
+                    self.sensor_manager.robot_state.setConnected(True)
+                    # if self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL:
+                    #     self.sensor_manager.robot_state = RobotState.STANDBY
+                    #     self.sensor_manager.register_client_connection()
+
+                    # Apply the right mode based on the settings
+                            # Apply special modes
+                    settings = self.config_manager.get()
+                    self.sensor_manager.set_tracking(settings["modes"]["tracking_enabled"])
+                    self.sensor_manager.set_circuit_mode(settings["modes"]["circuit_mode_enabled"])
+                    self.sensor_manager.set_normal_mode(settings["modes"]["normal_mode_enabled"])
+
+                    if settings["modes"]["tracking_enabled"]:
+                        self.aicamera_manager.start_face_following()
+                    else:
+                        self.aicamera_manager.stop_face_following()
+                    
+                    if settings["modes"]["circuit_mode_enabled"]:
+                        self.aicamera_manager.start_color_control()
+                        self.aicamera_manager.start_traffic_sign_detection()
+                    else:
+                        self.aicamera_manager.stop_color_control()
+                        self.aicamera_manager.stop_traffic_sign_detection()
+
+                    self.last_activity_time = time.time()
+                      # Update sensor manager about client connection
                     # self.sensor_manager.update_client_status(False, True)
                     
-                    # Now that a controller is connected, clear IP announcements
+                    # Now that a controller is connected, clear IP announcement queue
+                    # but keep the task running to detect network changes
                     self.tts_manager.clear_queue(min_priority=1)
-                    if self.ip_speaking_task and not self.ip_speaking_task.done():
-                        self.ip_speaking_task.cancel()
+                    await self.tts_manager.stop_speech()
+                    
+                    # Note: We're not cancelling self.ip_speaking_task anymore
+                    # so it keeps monitoring for IP address changes
                     
                     # Send initial data
                     await self.send_sensor_data_to_client()
                     await self.send_camera_status_to_client()
                 else:
                     logging.info(f"Received client register message, type: {data['data'].get('type', 'unknown')}")
+
+            elif data["name"] == "client_disconnected":
+                # Handle client disconnect notification
+                logging.info(f"Received client disconnect notification, client ID: {data['data'].get('id', 'unknown')}")
+                
+                # Update sensor manager about client disconnect
+                self.sensor_manager.robot_state = RobotState.STANDBY
+                self.sensor_manager.robot_state.setConnected(False)
+                
+                # Update sensor manager about client disconnect
+                # self.sensor_manager.update_client_status(False, True)
+                
+
             elif data["name"] == "gamepad_input":
                 # Check if robot is in GPT controlled state - completely ignore input if it is
-                if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED or self.sensor_manager.robot_state == RobotState.TRACKING_MODE or self.sensor_manager.robot_state == RobotState.DEMO_MODE:
+                if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED or self.sensor_manager.robot_state == RobotState.TRACKING_MODE or self.sensor_manager.robot_state == RobotState.DEMO_MODE or self.sensor_manager.robot_state == RobotState.CIRCUIT_MODE:
                     logging.info("Completely ignoring gamepad input while in GPT controlled state")
                     return
                     
@@ -399,10 +424,9 @@ class ByteRacer:
                 self.last_activity_time = time.time()
                 
                 # Ensure client is marked as connected when we receive input
-                if self.sensor_manager.robot_state != RobotState.MANUAL_CONTROL and self.sensor_manager.robot_state != RobotState.CIRCUIT_MODE:
+                if self.sensor_manager.robot_state != RobotState.MANUAL_CONTROL and self.sensor_manager.robot_state != RobotState.EMERGENCY_CONTROL:
                     logging.info("Received gamepad input from client, marking as connected")
                     self.sensor_manager.robot_state = RobotState.MANUAL_CONTROL
-                    # self.sensor_manager.update_client_status(True, True)
             
             elif data["name"] == "robot_command":
                 # Handle robot commands
@@ -481,6 +505,11 @@ class ByteRacer:
                     logging.info(f"Received GPT command: {prompt}, useCamera: {use_camera}")
 
                     old_state = self.sensor_manager.robot_state
+                    # stop aicamera_manager ai features
+                    self.aicamera_manager.stop_face_following()
+                    self.aicamera_manager.stop_color_control()
+                    self.aicamera_manager.stop_traffic_sign_detection()
+
 
                     # Set robot state to GPT controlled
                     self.sensor_manager.robot_state = RobotState.GPT_CONTROLLED
@@ -489,7 +518,7 @@ class ByteRacer:
                     await self.send_sensor_data_to_client()
                     
                     # Process GPT command in a separate task to avoid blocking the WebSocket message handler
-                    asyncio.create_task(self._handle_gpt_command(prompt, use_camera, old_state))
+                    asyncio.create_task(self._handle_gpt_command(prompt, use_camera))
                     
 
             elif data["name"] == "cancel_gpt":
@@ -698,7 +727,7 @@ class ByteRacer:
     
     async def send_network_list(self, networks):
         """Send list of available WiFi networks to client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL or self.sensor_manager.robot_state == RobotState.STANDBY):
+        if self.websocket:
             try:
                 # Freeze robot state while sending network list
                 self.sensor_manager.robot_state = RobotState.STANDBY
@@ -1028,18 +1057,22 @@ class ByteRacer:
                 if modes["circuit_mode_enabled"]:
                     self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
                     self.aicamera_manager.start_color_control()
+                    self.aicamera_manager.start_traffic_sign_detection()
                 else:   
                     self.aicamera_manager.stop_color_control()
+                    self.aicamera_manager.stop_traffic_sign_detection()
 
             if "demo_mode_enabled" in modes:
-                self.sensor_manager.robot_state = RobotState.DEMO_MODE
                 self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])
                 self.sensor_manager.set_demo_mode(modes["demo_mode_enabled"])
+                if modes["demo_mode_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.DEMO_MODE
 
             if "normal_mode_enabled" in modes:
-                self.sensor_manager.robot_state = RobotState.MANUAL_CONTROL
                 self.config_manager.set("modes.normal_mode_enabled", modes["normal_mode_enabled"])
                 self.sensor_manager.set_normal_mode(modes["normal_mode_enabled"])
+                if modes["normal_mode_enabled"]:
+                    self.sensor_manager.robot_state = RobotState.STANDBY
 
         if "drive" in settings:
             drive = settings["drive"]
@@ -1211,7 +1244,7 @@ class ByteRacer:
     
     async def send_battery_info(self, level):
         """Send battery information to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL or self.sensor_manager.robot_state == RobotState.STANDBY or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
+        if self.websocket:
             try:
                 await self.websocket.send(json.dumps({
                     "name": "battery_info",
@@ -1227,7 +1260,7 @@ class ByteRacer:
     
     async def send_sensor_data_to_client(self):
         """Send sensor data to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL or self.sensor_manager.robot_state == RobotState.STANDBY or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
+        if self.websocket:
             try:
                 # Get raw sensor data
                 sensor_data = self.sensor_manager.get_sensor_data()
@@ -1273,7 +1306,7 @@ class ByteRacer:
     
     async def send_camera_status_to_client(self):
         """Send camera status to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL or self.sensor_manager.robot_state == RobotState.STANDBY or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
+        if self.websocket:
             try:
                 camera_status = self.camera_manager.get_status()
                 
@@ -1288,7 +1321,7 @@ class ByteRacer:
     
     async def send_command_response(self, result):
         """Send command response to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL or self.sensor_manager.robot_state == RobotState.STANDBY or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
+        if self.websocket:
             try:
                 await self.websocket.send(json.dumps({
                     "name": "command_response",
@@ -1301,7 +1334,7 @@ class ByteRacer:
     
     async def send_settings_to_client(self):
         """Send current settings to the client"""
-        if self.websocket and (self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL or self.sensor_manager.robot_state == RobotState.STANDBY or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED):
+        if self.websocket:
             try:
                 settings = self.config_manager.get()
                 
@@ -1326,14 +1359,13 @@ class ByteRacer:
                 # )
                 
                 # Send sensor data every second if client is connected
-                if self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL or self.sensor_manager.robot_state == RobotState.STANDBY or self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
-                    try:
-                        await self.send_sensor_data_to_client()
-                        logging.debug("Periodic sensor data sent")
-                    except Exception as e:
-                        logging.error(f"Error sending periodic sensor data: {e}")
-                else:
-                    logging.debug("Client not connected, skipping sensor data")
+
+                try:
+                    await self.send_sensor_data_to_client()
+                    logging.debug("Periodic sensor data sent")
+                except Exception as e:
+                    logging.error(f"Error sending periodic sensor data: {e}")
+
                 
                 # Always use a consistent update interval, don't slow down when idle
                 # This ensures continuous data flow
@@ -1346,7 +1378,7 @@ class ByteRacer:
                 logging.error(f"Error in periodic tasks: {e}", exc_info=True)
                 await asyncio.sleep(2)  # Shorter sleep on error
 
-    async def _handle_gpt_command(self, prompt, use_camera, old_state):
+    async def _handle_gpt_command(self, prompt, use_camera):
         """
         Handle GPT command processing in a separate task so it doesn't block the WebSocket message handler.
         This allows the robot to properly ignore input during GPT mode instead of queuing them.
@@ -1359,8 +1391,7 @@ class ByteRacer:
         try:
             # Process the GPT command
             success = await self.gpt_manager.process_gpt_command(prompt, use_camera, 
-                                                                websocket=self.websocket,
-                                                                robot_state=old_state)
+                                                                websocket=self.websocket)
             
             logging.info(f"GPT command processing completed with status: {success}")
             
@@ -1369,8 +1400,6 @@ class ByteRacer:
             
         except Exception as e:
             logging.error(f"Error processing GPT command: {e}")
-            # Make sure to restore robot state on error
-            self.sensor_manager.robot_state = old_state
             await self.send_sensor_data_to_client()
 
 async def main():

@@ -429,13 +429,13 @@ export default function SensorData() {
             <span className="text-sm font-medium">Client Status:</span>
           </div>
           <div className="flex items-center justify-between text-xs mt-1">
-            <span>Connection:</span>
+            <span>Gamepad Connection:</span>
             <span className={`font-medium ${sensorData.clientConnected ? 'text-green-500' : 'text-red-500'}`}>
               {sensorData.clientConnected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
           <div className="flex items-center justify-between text-xs mt-1">
-            <span>Last Activity:</span>
+            <span>Last Gamepad Activity:</span>
             <span className="text-gray-500">
               {new Date(sensorData.lastClientActivity).toLocaleTimeString()}
             </span>

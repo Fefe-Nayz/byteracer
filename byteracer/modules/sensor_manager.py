@@ -33,6 +33,23 @@ class RobotState(Enum):
     DEMO_MODE = auto() # The robot is doing pre-registered actions and tts to demo it capabilities. The user inputs are not taken into account. The emergency of collision and cliff are active
     TRACKING_MODE = auto() # The robot is going arround (by itself) until he detects a person. When it detects a person the head will lock on it and the robot will follow the person. The robot will use it's camera to detect the person and the line following sensors to avoid cliffs. The robot will not be able to move if it detects a cliff or an obstacle in front of it. The user inputs are not taken into account. The emergency of collision and cliff are active
 
+    _connected = False  # Class variable to track connection status
+
+    @classmethod
+    def isConnected(cls) -> bool:
+        """
+        Class‐level method: returns the single 'connected' flag.
+        """
+        return cls._connected
+
+    @classmethod
+    def setConnected(cls, value: bool):
+        """
+        Class‐level setter: updates the flag.
+        """
+        type.__setattr__(cls, "_connected", bool(value))
+        
+
 class SensorManager:
     """
     Manages all sensors and detects emergency situations.
@@ -51,6 +68,11 @@ class SensorManager:
         
         # Robot state
         self.robot_state = RobotState.INITIALIZING  # Start with waiting for client
+        
+        # State history tracking
+        self.state_history = [(time.time(), self.robot_state, "Initial state")]
+        self.previous_state = self.robot_state
+        self._state_monitor_task = None
         
         # Sensor readings
         self.ultrasonic_distance = float('inf')  # In cm
@@ -97,8 +119,8 @@ class SensorManager:
     async def start(self):
         """Start the sensor monitoring tasks"""
         self._sensors_task = asyncio.create_task(self._monitor_sensors())
+        self._state_monitor_task = asyncio.create_task(self.monitor_state_changes())
         logger.info("Sensor monitoring started")
-    
     async def stop(self):
         """Stop the sensor monitoring tasks"""
         self._running = False
@@ -115,6 +137,17 @@ class SensorManager:
                 await self._emergency_task
             except asyncio.CancelledError:
                 pass
+                
+        # Stop and clean up state monitoring task
+        if self._state_monitor_task:
+            self._state_monitor_task.cancel()
+            try:
+                await self._state_monitor_task
+            except asyncio.CancelledError:
+                pass
+            
+            # Print state history when stopping
+            self.print_state_history()
         
         logger.info("Sensor monitoring stopped")
     
@@ -126,7 +159,7 @@ class SensorManager:
                 # Update sensor readings
                 await self._update_sensor_readings()
                   # Check for emergencies - only if client has connected at least once and not in GPT mode
-                if self.robot_state != RobotState.INITIALIZING and self.robot_state != RobotState.GPT_CONTROLLED:
+                if self.robot_state != RobotState.INITIALIZING and self.robot_state != RobotState.STANDBY and self.robot_state != RobotState.GPT_CONTROLLED and self.robot_state != RobotState.CIRCUIT_MODE and self.robot_state != RobotState.DEMO_MODE and self.robot_state != RobotState.TRACKING_MODE:
                     emergency = self._check_emergency_conditions()
                     
                     # Handle any detected emergency
@@ -201,7 +234,6 @@ class SensorManager:
             # Exception: check for client disconnection only if client was previously connected
             if self.robot_state != RobotState.INITIALIZING and now - self.last_client_seen > self.client_timeout:
                 return EmergencyState.CLIENT_DISCONNECTED
-            return EmergencyState.NONE
         
         # Check for obstacles if collision avoidance is enabled
         if self.collision_avoidance_enabled:
@@ -319,8 +351,7 @@ class SensorManager:
                 # Stop after reaching safe position
                 self.px.forward(0)
                 logger.info("Edge emergency - Recovery complete")
-                
-                # Clear emergency
+                  # Clear emergency
                 if self.current_emergency == EmergencyState.EDGE_DETECTED:
                     self.emergency_active = False
                     self.current_emergency = EmergencyState.NONE
@@ -331,9 +362,15 @@ class SensorManager:
                 self.px.forward(0)
                 self.px.set_dir_servo_angle(0)
                 
-                # Wait until client reconnects or emergency is cleared manually
-                while self.emergency_active and self.current_emergency == EmergencyState.CLIENT_DISCONNECTED:
-                    await asyncio.sleep(0.5)
+                # Wait 3 seconds before auto-clearing
+                await asyncio.sleep(3)
+                
+                # If we are *still* in client disconnected state after 3 seconds, clear it automatically
+                if self.current_emergency == EmergencyState.CLIENT_DISCONNECTED:
+                    logger.warning("Auto-clearing client disconnected emergency after 3 seconds")
+                    self.emergency_active = False
+                    self.current_emergency = EmergencyState.NONE
+                    self.robot_state = RobotState.STANDBY
             
             elif emergency == EmergencyState.LOW_BATTERY:
                 # No specific motion action for low battery
@@ -580,12 +617,7 @@ class SensorManager:
         # self.circuit_mode_enabled = not enabled
         # logger.info(f"Normal mode {'enabled' if enabled else 'disabled'}")
         if enabled:
-            if self.robot_state == RobotState.INITIALIZING:
-                self.robot_state = RobotState.INITIALIZING
-            elif self.robot_state == RobotState.STANDBY:
-                self.robot_state = RobotState.STANDBY
-            else:
-                self.robot_state = RobotState.MANUAL_CONTROL
+            self.robot_state = RobotState.STANDBY
             logger.info("Normal mode enabled")
     
     def set_demo_mode(self, enabled):
@@ -596,3 +628,45 @@ class SensorManager:
         if enabled:
             self.robot_state = RobotState.DEMO_MODE
             logger.info("Demo mode enabled")
+    
+    async def monitor_state_changes(self):
+        """Continuously monitors robot state changes and records them in history"""
+        logger.info("Starting robot state monitoring")
+        
+        try:
+            while self._running:
+                # Check if state has changed
+                if self.robot_state != self.previous_state:
+                    # Record state change with timestamp
+                    transition_msg = f"{self.previous_state.name} → {self.robot_state.name}"
+                    self.state_history.append((time.time(), self.robot_state, transition_msg))
+                    
+                    # Log the state change
+                    logger.info(f"Robot state changed: {transition_msg}")
+                    
+                    # Update previous state
+                    self.previous_state = self.robot_state
+                
+                # Short delay to avoid CPU overuse
+                await asyncio.sleep(0.1)
+                
+        except asyncio.CancelledError:
+            logger.info("State monitoring task cancelled")
+            # Print state history on task cancellation
+            self.print_state_history()
+            raise
+        except Exception as e:
+            logger.error(f"Error in state monitoring: {e}")
+    
+    def print_state_history(self):
+        """Print the complete state history"""
+        logger.info("========================")
+        logger.info("ROBOT STATE HISTORY:")
+        logger.info("========================")
+        
+        for i, (timestamp, state, transition) in enumerate(self.state_history):
+            time_str = time.strftime('%H:%M:%S', time.localtime(timestamp))
+            ms = int((timestamp % 1) * 1000)
+            logger.info(f"{i}. [{time_str}.{ms:03d}] {transition}")
+        
+        logger.info("========================")
