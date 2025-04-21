@@ -371,7 +371,7 @@ AVAILABLE ACTIONS:
    • get_camera_image(): Returns the camera image as raw bytes from camera, it's an async function
    
    For text-to-speech:
-   • tts.say("Your message", priority=1, lang="en-US", blocking=False): Speaks message
+   • tts.say("Your message", priority=1, lang="en-US", blocking=False): Speaks message, This is not an async function
      - priority: 1=high, 2=medium, 3=low
      - lang: "en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"
      - blocking: True=wait for completion, False=non-blocking
