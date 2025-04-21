@@ -817,9 +817,6 @@ class ByteRacer:
         self.last_acceleration = acceleration
         self.last_motion_update = now
         
-        # Update driving sounds
-        self.sound_manager.update_driving_sounds(speed_value, turn_value, acceleration)
-        
         # Pass inputs through sensor manager to handle safety overrides
         speed_value, turn_value, emergency = self.sensor_manager.update_motion(speed_value, turn_value)
 
@@ -884,6 +881,9 @@ class ByteRacer:
                 self.px.set_motor_speed(1, speed_value * max_speed * 100)   # Left motor at full speed
                 self.px.set_motor_speed(2, speed_value * -max_speed * 100)  # Right motor at full speed (reversed)
                 self.px.set_dir_servo_angle(turn_value * max_turn)    # Use steering only
+
+                # Update driving sounds
+        self.sound_manager.update_driving_sounds(speed_value, turn_value, acceleration)
     
     async def handle_emergency(self, emergency):
         """Handle emergency situations"""
