@@ -66,6 +66,11 @@ export default function PushToTalk() {
     setIsRecording(false);
     setIsConnecting(false);
     setConnectionStatus("idle");
+    
+    // Notify other components that Push-to-Talk is no longer active
+    window.dispatchEvent(new CustomEvent("pushToTalk:status", {
+      detail: { isActive: false }
+    }));
   }, []);
 
   // Extract WAV header from the first chunk
@@ -188,6 +193,11 @@ export default function PushToTalk() {
       }
       setIsConnecting(true);
       setConnectionStatus("connecting");
+
+      // Notify other components that Push-to-Talk is active
+      window.dispatchEvent(new CustomEvent("pushToTalk:status", {
+        detail: { isActive: true }
+      }));
 
       // Reset the WAV header
       wavHeaderRef.current = null;

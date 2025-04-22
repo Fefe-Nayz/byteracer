@@ -20,6 +20,7 @@ export default function Listen() {
   const [connectionStatus, setConnectionStatus] = useState<string>("idle");
   const [toggleMode, setToggleMode] = useLocalStorage<boolean>("listen-toggleMode", false);
   const [audioEnabled, setAudioEnabled] = useState(true);
+  const [isPushToTalkActive, setIsPushToTalkActive] = useState(false);
     // Access WebSocket context
   const { status, startListening: wsStartListening, stopListening: wsStopListening } = useWebSocket();
   
@@ -80,15 +81,15 @@ export default function Listen() {
       setIsConnecting(false);
     }
   }, [wsStartListening]);
-    // Stop listening
-  const stopListening = () => {
+  // Stop listening
+  const stopListening = useCallback(() => {
     // Tell the robot to stop streaming audio
     wsStopListening();
     
     // Clean up local audio resources
     cleanupAudio();
     console.log("Stopped listening to robot microphone");
-  };
+  }, [wsStopListening, cleanupAudio]);
   
   // Listen for audio data from WebSocket
   useEffect(() => {
@@ -149,20 +150,18 @@ export default function Listen() {
       );
     };
   }, [isListening, audioEnabled]);
-  
-  // Auto-mute when PushToTalk is active to prevent echo
+    // Auto-mute when PushToTalk is active to prevent echo
   useEffect(() => {
     const handlePushToTalkStatus = (event: CustomEvent) => {
-      const isPushToTalkActive = event.detail.isActive;
+      const isPTTActive = event.detail.isActive;
       
-      if (isPushToTalkActive && isListening) {
-        // Temporarily disable audio when push-to-talk is active
-        setAudioEnabled(false);
-        console.log("Audio listening muted due to push-to-talk activity");
-      } else {
-        // Re-enable audio when push-to-talk is no longer active
-        setAudioEnabled(true);
-        console.log("Audio listening restored after push-to-talk");
+      // Update the state to track PTT activity
+      setIsPushToTalkActive(isPTTActive);
+      
+      if (isPTTActive && isListening) {
+        // Force stop listening when push-to-talk is active
+        stopListening();
+        console.log("Listening stopped due to push-to-talk activity");
       }
     };
     
@@ -177,9 +176,8 @@ export default function Listen() {
         handlePushToTalkStatus as EventListener
       );
     };
-  }, [isListening]);
-  
-  // Toggle listening based on gamepad button
+  }, [isListening, stopListening]);
+    // Toggle listening based on gamepad button
   useEffect(() => {
     if (status !== "connected") return;
   
@@ -198,15 +196,25 @@ export default function Listen() {
           stopListening();
           console.log("Stopped listening (toggle mode).");
         } else {
-          startListening();
-          console.log("Started listening (toggle mode).");
+          // Only start listening if Push-to-Talk is not active
+          if (!isPushToTalkActive) {
+            startListening();
+            console.log("Started listening (toggle mode).");
+          } else {
+            console.log("Cannot start listening: Push-to-Talk is active");
+          }
         }
       }
     } else {
       // HOLD MODE: start on press, stop on release
       if (listenButtonActive && !isListening) {
-        startListening();
-        console.log("Started listening (hold mode).");
+        // Only start listening if Push-to-Talk is not active
+        if (!isPushToTalkActive) {
+          startListening();
+          console.log("Started listening (hold mode).");
+        } else {
+          console.log("Cannot start listening: Push-to-Talk is active");
+        }
       } else if (!listenButtonActive && isListening) {
         stopListening();
         console.log("Stopped listening (hold mode).");
@@ -259,12 +267,11 @@ export default function Listen() {
             <div className="text-sm text-gray-500 mb-2">
               {connectionStatus === "connecting" ? "Establishing connection..." : `Status: ${connectionStatus}`}
             </div>
-          )}
-
-          {!isListening ? (
+          )}          {!isListening ? (
             <Button 
-              disabled={status !== "connected" || isConnecting}
+              disabled={status !== "connected" || isConnecting || isPushToTalkActive}
               onClick={startListening}
+              title={isPushToTalkActive ? "Cannot listen while Push-to-Talk is active" : ""}
             >
               <Volume2 className="h-4 w-4 mr-1" />
               {isConnecting ? "Connecting..." : "Start Listening"}
@@ -274,6 +281,12 @@ export default function Listen() {
               <VolumeX className="h-4 w-4 mr-1" />
               Stop Listening
             </Button>
+          )}
+
+          {isPushToTalkActive && !isListening && (
+            <div className="text-xs text-amber-600 mt-2">
+              Listening is disabled while Push-to-Talk is active
+            </div>
           )}
 
           {connectionStatus === "error" && (
