@@ -7,7 +7,7 @@ import wave
 import io
 import base64
 import threading
-from queue import Queue
+from queue import Queue, Empty
 from typing import Optional
 
 class AudioManager:
@@ -57,9 +57,11 @@ class AudioManager:
             
         self.logger.info("AudioManager stopped")
 
-    async def start_recording(self, websocket = None):
+    async def start_recording(self, websocket=None):
         """Start recording audio from the microphone and streaming to client"""
-        self.websocket = websocket
+        if websocket:
+            self.websocket = websocket
+            
         if self.active_recording:
             self.logger.info("Recording already active, ignoring start request")
             return
@@ -187,7 +189,7 @@ class AudioManager:
                 # Get next audio chunk with a timeout
                 try:
                     audio_data = self.audio_queue.get(timeout=0.5)
-                except Queue.Empty:
+                except Empty:  # Fixed: Use imported Empty exception
                     continue
                 
                 # Skip if no WebSocket or queue too large (prevent backlog)

@@ -57,6 +57,8 @@ type WebSocketEventName =
   | "network_list"        // For receiving network list
   | "network_update"      // For updating network settings
   | "audio_stream"        // For streaming audio data to the robot
+  | "start_listening"      // For starting audio listening
+  | "stop_listening"       // For stopping audio listening
   | "python_status_request" // For requesting Python connection status
   | "log_message";
 
@@ -357,6 +359,18 @@ const wsHandlers = {
           else if (client.type === "car") {
             broadcastToType(message, "controller", ws);
           }
+          break;
+        
+        case "start_listening":
+          console.log("Start listening command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "stop_listening":
+          console.log("Stop listening command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
           break;
 
         // Python status request
