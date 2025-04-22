@@ -354,6 +354,9 @@ const wsHandlers = {
           if (client.type === "controller") {
             broadcastToType(message, "car", ws);
           }
+          else if (client.type === "car") {
+            broadcastToType(message, "controller", ws);
+          }
           break;
 
         // Python status request

@@ -68,6 +68,10 @@ class ByteRacer:
         self.network_manager = NetworkManager()
         self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager)
         
+        # Initialize audio manager for microphone streaming
+        from modules.audio_manager import AudioManager
+        self.audio_manager = AudioManager()
+        
         # WebSocket state
         self.websocket = None
         self.last_activity_time = time.time()
@@ -92,6 +96,7 @@ class ByteRacer:
         await self.sensor_manager.start()
         await self.camera_manager.start(self.handle_camera_status)
         await self.log_manager.start()
+        await self.audio_manager.start()
         
         # Initialize network manager
         self.network_manager = NetworkManager()
@@ -141,6 +146,7 @@ class ByteRacer:
         await self.sound_manager.shutdown()
         await self.tts_manager.stop()
         await self.config_manager.stop()
+        await self.audio_manager.stop()
         
         logging.info("ByteRacer stopped")
     
@@ -580,6 +586,24 @@ class ByteRacer:
                 
                 # Announce via TTS
                 await self.tts_manager.say(f"Settings reset to defaults{' for ' + section if section else ''}", priority=1)
+
+            elif data["name"] == "start_listening":
+                # Handle start listening request
+                logging.info("Received start listening request")
+                await self.audio_manager.start_recording(self.websocket)
+                await self.send_command_response({
+                    "success": True,
+                    "message": "Started listening"
+                })
+
+            elif data["name"] == "stop_listening":
+                # Handle stop listening request
+                logging.info("Received stop listening request")
+                await self.audio_manager.stop_recording()
+                await self.send_command_response({
+                    "success": True,
+                    "message": "Stopped listening"
+                })
 
             elif data["name"] == "audio_stream":
                 audio_base64 = data["data"].get("audio")

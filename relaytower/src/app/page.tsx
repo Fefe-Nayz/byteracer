@@ -25,6 +25,10 @@ const PushToTalk = dynamic(() => import("@/components/PushToTalk"), {
   ssr: false,
 });
 
+const Listen = dynamic(() => import("@/components/Listen"), {
+  ssr: false,
+});
+
 function GamepadPage() {
   const { selectedGamepadId } = useGamepadContext();
 
@@ -54,10 +58,17 @@ function GamepadPage() {
             <div className="md:col-span-2 space-y-4">
               <CameraFeed />
               <SensorData />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <TextToSpeech />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-col gap-4">
+                  <div className="h-auto">
+                  <TextToSpeech />
+                  </div>
+                  <div className="h-auto">
+                  <Listen />
+                  </div>
+                </div>
                 <SoundEffects />
-              </div>
+                </div>
             </div>
 
             <div className="space-y-4">

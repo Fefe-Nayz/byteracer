@@ -256,9 +256,11 @@ interface WebSocketContextValue {
   restartCameraFeed: () => void;
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
-  sendGptCommand: (prompt: string, useCamera: boolean) => void;
+sendGptCommand: (prompt: string, useCamera: boolean) => void;
   cancelGptCommand: () => void;
   sendAudioStream: (audioData: string) => void;
+  startListening: () => void;
+  stopListening: () => void;
 }
 
 // Create context with default values
@@ -496,10 +498,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               // Keep only the most recent 500 logs to avoid memory issues
               return newLogs.slice(-500);
             });
-            break;
-
+            break;          
+          
           case "python_status":
             setPythonStatus(event.data.connected ? "connected" : "disconnected");
+            break;
+            
+          case "audio_stream":
+            // Forward robot audio data to the Listen component
+            window.dispatchEvent(
+              new CustomEvent("robot:audio-data", {
+                detail: { audioData: event.data.audioData }
+              })
+            );
             break;
         }
       } catch (e) {
@@ -937,6 +948,60 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       setPythonStatus("disconnected");
     }
   }, [socket]);
+  
+  // Function to tell the robot to start recording microphone and streaming audio
+  const startListening = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const startListeningData = {
+        name: "start_listening",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(startListeningData));
+      trackWsMessage("sent", startListeningData);
+      console.log("Start listening request sent to robot");
+      
+      // Notify other components about PushToTalk status for coordination
+      window.dispatchEvent(new CustomEvent("listen:status", {
+        detail: { isActive: true }
+      }));
+    } else {
+      logError("Cannot send start listening request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+  
+  // Function to tell the robot to stop recording microphone and streaming audio
+  const stopListening = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const stopListeningData = {
+        name: "stop_listening",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(stopListeningData));
+      trackWsMessage("sent", stopListeningData);
+      console.log("Stop listening request sent to robot");
+      
+      // Notify other components about PushToTalk status for coordination
+      window.dispatchEvent(new CustomEvent("listen:status", {
+        detail: { isActive: false }
+      }));
+    } else {
+      logError("Cannot send stop listening request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
 
   // Combine all values and functions for the context
   const contextValue: WebSocketContextValue = {
@@ -980,6 +1045,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     sendGptCommand,
     cancelGptCommand,
     sendAudioStream,
+    startListening,
+    stopListening,
   };
 
   return (
