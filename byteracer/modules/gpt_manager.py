@@ -1009,7 +1009,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             self.gpt_command_cancelled = True
 
             if websocket:
-                await self._send_gpt_status_update(websocket, "cancelling", "Cancelling current command...")
+                await self._send_gpt_status_update(websocket, "cancelled", "Cancelling current command...")
 
             # Stop all active scripts
             for script_name in list(self.active_processes.keys()):

@@ -76,8 +76,6 @@ export default function GptIntegration() {
   const [activeTab, setActiveTab] = useState<string>("text");
   const [isConversationActive, setIsConversationActive] = useState(false);
   const [recognizedText, setRecognizedText] = useState<string | null>(null);
-
-  console.log(actionType)
   
   const { 
     status, 
@@ -138,7 +136,7 @@ export default function GptIntegration() {
   // Update processing state based on GPT status updates
   useEffect(() => {
     if (gptStatus) {
-      console.log("GPT Status Update:", gptStatus);
+      console.log("GPT Status Update:", gptStatus, actionType);
       // Set processing state based on the status
       if (gptStatus.status === "completed" || gptStatus.status === "error" || gptStatus.status === "cancelled") {
         setIsProcessing(false);
@@ -160,39 +158,39 @@ export default function GptIntegration() {
       }]);
       
       // Process additional data if available
-      if (gptStatus.data) {
+      if (gptStatus) {
         // Update token usage if available
-        if (gptStatus.data.token_usage) {
-          setTokenUsage(gptStatus.data.token_usage);
+        if (gptStatus.token_usage) {
+          setTokenUsage(gptStatus.token_usage);
         }
         
         // Update response content if available (from our extended API)
-        if (gptStatus.data.response_content) {
-          setActionType(gptStatus.data.response_content.action_type);
-          setResponse(gptStatus.data.response_content.text);
+        if (gptStatus.response_content) {
+          setActionType(gptStatus.response_content.action_type);
+          setResponse(gptStatus.response_content.text);
         }
         
         // Update execution details if available
-        if (gptStatus.data?.execution_details) {
-          setActionType(gptStatus.data.execution_details.type);
+        if (gptStatus.execution_details) {
+          setActionType(gptStatus.execution_details.type);
           setResponseDetails(prev => ({
             ...prev,
-            execution_details: gptStatus.data?.execution_details
+            execution_details: gptStatus.execution_details
           }));
         }
         
         // Update execution progress if available
-        if (gptStatus.data.current_step && gptStatus.data.total_steps) {
+        if (gptStatus.current_step && gptStatus.total_steps) {
           setExecutionProgress({
-            current: gptStatus.data.current_step,
-            total: gptStatus.data.total_steps
+            current: gptStatus.current_step,
+            total: gptStatus.total_steps
           });
         }
         
         // Store all response details
         setResponseDetails(prev => ({
           ...prev,
-          ...gptStatus.data
+          ...gptStatus
         }));
       }
       
@@ -714,15 +712,15 @@ export default function GptIntegration() {
               )}
               
               {/* Error details and traceback */}
-              {(gptStatus?.status === "error" && (gptStatus.data?.traceback || gptStatus.data?.error_details)) && (
+              {(gptStatus?.status === "error" && (gptStatus.traceback || gptStatus.error_details)) && (
                 <div className="p-3 bg-red-50 dark:bg-red-950/20 rounded-md text-sm border border-red-200 dark:border-red-900 mb-2">
                   <div className="font-medium mb-1 text-red-600 dark:text-red-400">Python Script Error</div>
-                  {gptStatus.data?.error_details && (
-                    <div className="text-red-700 dark:text-red-300 mb-2">{gptStatus.data.error_details}</div>
+                  {gptStatus.error_details && (
+                    <div className="text-red-700 dark:text-red-300 mb-2">{gptStatus.error_details}</div>
                   )}
-                  {gptStatus.data?.traceback && (
+                  {gptStatus.traceback && (
                     <div className="bg-slate-100 dark:bg-slate-900 p-2 rounded font-mono text-xs overflow-x-auto max-h-60">
-                      <pre>{gptStatus.data.traceback}</pre>
+                      <pre>{gptStatus.traceback}</pre>
                     </div>
                   )}
                 </div>

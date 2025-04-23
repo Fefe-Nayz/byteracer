@@ -182,40 +182,38 @@ export interface GptStatusUpdate {
   status: "starting" | "progress" | "completed" | "error" | "warning" | "cancelled";
   message: string;
   timestamp: number;
-  data?: {
-    token_usage?: {
-      prompt_tokens: number;
-      completion_tokens: number;
-      total_tokens: number;
-    };
-    response_content?: {
-      action_type: string;
-      text: string;
-      language: string;
-      python_script?: string;
-      predefined_functions?: Array<{
-        function_name: string;
-        parameters: Record<string, unknown>;
-      }>;
-      motor_sequence?: Array<{
-        motor_id: string;
-        actions: Array<{
-          timestamp: number;
-          command: string;
-          value: number;
-        }>;
-      }>;
-    };
-    full_response?: Record<string, unknown>;
-    execution_details?: {
-      type: string;
-      summary: string;
-    };
-    error_details?: string;
-    current_step?: number;
-    total_steps?: number;
-    traceback?: string;
+  token_usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
   };
+  response_content?: {
+    action_type: string;
+    text: string;
+    language: string;
+    python_script?: string;
+    predefined_functions?: Array<{
+      function_name: string;
+      parameters: Record<string, unknown>;
+    }>;
+    motor_sequence?: Array<{
+      motor_id: string;
+      actions: Array<{
+        timestamp: number;
+        command: string;
+        value: number;
+      }>;
+    }>;
+  };
+  full_response?: Record<string, unknown>;
+  execution_details?: {
+    type: string;
+    summary: string;
+  };
+  error_details?: string;
+  current_step?: number;
+  total_steps?: number;
+  traceback?: string;
 }
 
 // Define WebSocket context value interface
@@ -451,7 +449,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
           case "sensor_data":
             setSensorData(event.data);
             break;
-          
+
           case "camera_status":
             setCameraStatus(event.data);
             break;
@@ -508,12 +506,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               // Keep only the most recent 500 logs to avoid memory issues
               return newLogs.slice(-500);
             });
-            break;          
-          
+            break;
+
           case "python_status":
             setPythonStatus(event.data.connected ? "connected" : "disconnected");
             break;
-            
+
           case "audio_stream":
             // Forward robot audio data to the Listen component
             window.dispatchEvent(
@@ -854,7 +852,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.send(JSON.stringify(gptData));
       trackWsMessage("sent", gptData);
       console.log(`GPT command sent: ${prompt}`);
-      
+
       // Update local GPT status immediately to show it's starting
       setGptStatus({
         status: "starting",
@@ -884,7 +882,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.send(JSON.stringify(cancelData));
       trackWsMessage("sent", cancelData);
       console.log("GPT command cancellation request sent");
-      
+
       // Update local GPT status to show cancellation in progress
       setGptStatus({
         status: "warning",
@@ -913,7 +911,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.send(JSON.stringify(createThreadData));
       trackWsMessage("sent", createThreadData);
       console.log("Create new thread request sent");
-      
+
     } else {
       logError("Cannot create new thread", {
         reason: "Socket not connected",
@@ -961,7 +959,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       setPythonStatus("disconnected");
     }
   }, [socket]);
-  
+
   // Function to tell the robot to start recording microphone and streaming audio
   const startListening = useCallback(() => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -976,7 +974,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.send(JSON.stringify(startListeningData));
       trackWsMessage("sent", startListeningData);
       console.log("Start listening request sent to robot");
-      
+
       // Notify other components about PushToTalk status for coordination
       window.dispatchEvent(new CustomEvent("listen:status", {
         detail: { isActive: true }
@@ -988,7 +986,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       });
     }
   }, [socket]);
-  
+
   // Function to tell the robot to stop recording microphone and streaming audio
   const stopListening = useCallback(() => {
     if (socket && socket.readyState === WebSocket.OPEN) {
@@ -1003,7 +1001,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.send(JSON.stringify(stopListeningData));
       trackWsMessage("sent", stopListeningData);
       console.log("Stop listening request sent to robot");
-      
+
       // Notify other components about PushToTalk status for coordination
       window.dispatchEvent(new CustomEvent("listen:status", {
         detail: { isActive: false }

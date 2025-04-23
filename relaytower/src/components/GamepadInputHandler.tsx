@@ -120,7 +120,7 @@ export default function GamepadInputHandler() {
         }
       });
     } else {
-      console.log("No active gamepad found despite selectedGamepadId being set:", selectedGamepadId);
+      // console.log("No active gamepad found despite selectedGamepadId being set:", selectedGamepadId);
     }
 
     return gamepadState;
@@ -193,7 +193,7 @@ export default function GamepadInputHandler() {
   useEffect(() => {
     // Only send data if connected to WebSocket AND have a selected gamepad
     if (status !== "connected" || !selectedGamepadId) {
-      console.log(`Not sending gamepad data: WebSocket status=${status}, selectedGamepadId=${selectedGamepadId}`);
+      // console.log(`Not sending gamepad data: WebSocket status=${status}, selectedGamepadId=${selectedGamepadId}`);
       return;
     }
 
