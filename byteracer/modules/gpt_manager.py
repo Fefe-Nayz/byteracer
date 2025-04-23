@@ -1313,9 +1313,11 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     logger.error(f"TTS synthesis failed: {e}")
                     audio_file = None
                 if audio_file:
-                    await self.sound_manager.play_file(audio_file)
+                    self.sound_manager.play_file(audio_file, blocking=True)
                 else:
-                    await self.tts_manager.say(text_output, lang=language)
+                    await self.tts_manager.say(text_output, lang=language, blocking=True)
+            else:
+                await self.tts_manager.say(text_output, lang=language, blocking=True)
         
         # For python_script action type, ensure TTS completes before script execution
         if action_type == "python_script":

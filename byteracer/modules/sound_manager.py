@@ -274,9 +274,17 @@ class SoundManager:
         
         logger.warning("No available sound channels for voice stream")
         return None
-    
-    def play_file(self, file_path):
-        """Play a specific sound file, volume and catergory are voice"""
+    def play_file(self, file_path, blocking=False):
+        """
+        Play a specific sound file, volume and catergory are voice
+        
+        Args:
+            file_path (str): Path to the sound file to play
+            blocking (bool): If True, wait for the sound to finish before returning
+        
+        Returns:
+            int or None: Channel ID if successful, None if failed
+        """
         if not self.enabled:
             return None
         
@@ -301,6 +309,14 @@ class SoundManager:
                         self.current_voice_channel = channel_id
                         
                         logger.debug(f"Playing file on channel {channel_id}")
+                        
+                        # If blocking is enabled, wait for the sound to finish
+                        if blocking:
+                            logger.debug(f"Waiting for sound to finish on channel {channel_id}")
+                            while pygame.mixer.Channel(channel_id).get_busy():
+                                time.sleep(0.1)  # Check every 100ms
+                            logger.debug(f"Sound finished on channel {channel_id}")
+                        
                         return channel_id
                     except Exception as e:
                         logger.error(f"Error playing file: {e}")
