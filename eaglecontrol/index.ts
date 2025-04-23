@@ -60,7 +60,8 @@ type WebSocketEventName =
   | "start_listening"      // For starting audio listening
   | "stop_listening"       // For stopping audio listening
   | "python_status_request" // For requesting Python connection status
-  | "log_message";
+  | "log_message"
+  | "speech_recognition";
 
 type WebSocketEvent = {
   name: WebSocketEventName;
@@ -397,6 +398,12 @@ const wsHandlers = {
           // Forward log messages to all controllers and viewers
           broadcastToType(message, "controller", ws);
           broadcastToType(message, "viewer", ws);
+          break;
+        
+        case "speech_recognition":
+          console.log("Speech recognition data received");
+          // Forward speech recognition data to all controllers
+          broadcastToType(message, "controller", ws);
           break;
 
         default:

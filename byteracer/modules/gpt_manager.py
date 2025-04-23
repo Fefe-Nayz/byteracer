@@ -14,6 +14,14 @@ from typing import Dict, List, Any, Optional, Union
 from openai import OpenAI, AsyncOpenAI
 from modules.sensor_manager import RobotState
 from modules.script_runner import run_script_in_isolated_environment, ScriptCancelledException
+import speech_recognition as sr
+import sox
+from io import BytesIO
+from datetime import datetime
+import asyncio
+import tempfile
+import os
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -45,6 +53,7 @@ class GPTManager:
             sound_manager: Sound manager for audio playback.
             sensor_manager: Sensor manager for accessing robot sensors.
             config_manager: Configuration manager for accessing settings.
+            aicamera_manager: AI Camera manager for computer vision features.
         """
         self.px = px
         self.camera_manager = camera_manager
@@ -68,6 +77,7 @@ class GPTManager:
             api_key=self.api_key,
             base_url="https://api.openai.com/v1"
         )
+        self.whisper_client = OpenAI(api_key=self.api_key)
         
         self.temp_dir = Path(tempfile.gettempdir()) / "byteracer_scripts"
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -77,6 +87,81 @@ class GPTManager:
         self.is_processing = False
         self.gpt_command_cancelled = False
         self.current_response_id = None
+        
+        # Conversation mode properties
+        self.is_conversation_active = False
+        self.conversation_cancelled = False
+
+
+    # ────────────────────────────────────────────────────────────────────────
+    # 1) BLOCKING SPEECH→TEXT HELPER (lifted & inlined)
+    # ────────────────────────────────────────────────────────────────────────
+    def _listen_and_transcribe_blocking(self) -> str:
+        """
+        Record until silence, return the transcript.  If realtime=True, prints
+        partials as they arrive.
+        """
+        # 1) set up recognizer exactly as before
+        r = sr.Recognizer()
+        r.dynamic_energy_adjustment_damping = 0.16
+        r.dynamic_energy_ratio = 1.6
+        r.pause_threshold = 0.8
+        CHUNK = 8192
+
+        # 2) whisper call
+        def _whisper(audio: sr.AudioData) -> str:
+            client = self.whisper_client
+            wav = BytesIO(audio.get_wav_data()); wav.name = "speech.wav"
+            res = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=wav,
+                language=None,
+                prompt="this is the conversation between me and a robot"
+            )
+            return res.text.strip()
+
+        # 3B) blocking mode
+        with sr.Microphone(chunk_size=CHUNK) as src:
+            r.adjust_for_ambient_noise(src)
+            audio = r.listen(src)
+        return _whisper(audio)
+
+    # ────────────────────────────────────────────────────────────────────────
+    # 2) BLOCKING TEXT→SPEECH HELPER (lifted & inlined)
+    # ────────────────────────────────────────────────────────────────────────
+    def _synthesize_and_save_blocking(
+        self,
+        text: str,
+        voice: str = "echo",
+        volume_db: int = 3
+    ) -> str:
+        """
+        Use OpenAI TTS  sox gain. Returns absolute path to final WAV.
+        """
+        if not text.strip():
+            raise ValueError("Cannot synthesise empty text.")
+
+        tts_dir = self.temp_dir / "tts"
+        tts_dir.mkdir(exist_ok=True)
+        stamp = datetime.now().strftime("%y-%m-%d_%H-%M-%S")
+        raw = tts_dir / f"{stamp}_raw.wav"
+        out = tts_dir / f"{stamp}_{volume_db}dB.wav"
+
+        client = OpenAI(api_key=self.api_key)
+        with client.audio.speech.with_streaming_response.create(
+            model="gpt-4o-mini-tts",
+            voice=voice,
+            input=text,
+            response_format="wav",
+            speed=1,
+        ) as resp:
+            resp.stream_to_file(str(raw))
+
+        tfm = sox.Transformer()
+        tfm.vol(volume_db)
+        tfm.build(str(raw), str(out))
+        return str(out)
+    
     async def create_new_conversation(self, websocket=None):
         """
         Reset the conversation by clearing the current response ID.
@@ -102,8 +187,8 @@ class GPTManager:
             logger.error(f"Error creating new conversation: {e}")
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", f"Failed to create new conversation: {str(e)}")
-            return False
-    async def process_gpt_command(self, prompt: str, use_camera: bool = False, websocket = None, new_conversation=False) -> bool:
+            return False    
+    async def process_gpt_command(self, prompt: str, use_camera: bool = False, websocket = None, new_conversation=False, use_ai_voice: bool = False, conversation_mode: bool = False) -> bool:
         """
         Process a GPT command with optional camera feed inclusion.
         
@@ -112,10 +197,27 @@ class GPTManager:
             use_camera: Whether to include the camera feed.
             websocket: Optional websocket connection for status updates.
             new_conversation: Whether to start a new conversation (reset thread).
+            use_ai_voice: Whether to use AI-powered TTS voice for responses.
+            conversation_mode: Whether to start a continuous conversation mode.
             
         Returns:
             bool: Success status.
         """
+        if conversation_mode:
+            prompt = await asyncio.get_event_loop().run_in_executor(
+                None, self._listen_and_transcribe_blocking
+            )
+            self.is_conversation_active = True
+            logger.info(f"Recognized text for conversation mode: {prompt}")
+            if websocket:
+                await websocket.send(json.dumps({
+                    "name": "speech_recognition",
+                    "data": {
+                        "text": prompt,
+                        
+                    },
+                    "timestamp": time.time()
+                }))            
         if self.is_processing:
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", "Already processing a command")
@@ -152,7 +254,7 @@ class GPTManager:
                 # Check if camera is in RUNNING state
                 camera_status = self.camera_manager.get_status()
                 if camera_status["state"] == "RUNNING":
-                    image_data = await self._get_camera_image_for_apî()
+                    image_data = await self._get_camera_image_for_api()
                     if not image_data:
                         await self.tts_manager.say("Unable to access the camera feed. Processing without image.", priority=1)
                         if websocket:
@@ -708,6 +810,8 @@ def _build_script_with_environment(script_code: str) -> str:
    • rub_hands(): Makes the robot rub its front wheels
    • depressed(): Makes the robot appear depressed
 
+   Finally, if the user is telling you something that would "end the conversation" (like "bye" or "thank you"), you should call the function "end_conversation()"
+
 3. MOTOR SEQUENCES (action_type: "motor_sequence"):
    • Timeline-based motor control (timestamps in seconds)
    • For DC motors: only "set_speed" command
@@ -770,7 +874,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                                                 {"token_usage": token_usage}
                                             )
                                         
-                                        success = await self._process_actions(parsed_response, websocket)
+                                        success = await self._process_actions(parsed_response, websocket, use_ai_voice)
                                         
                                         if websocket:
                                             if success:
@@ -829,6 +933,22 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 await self._send_gpt_status_update(websocket, "error", f"Error: {str(e)}")
             return False        
         finally:
+            if conversation_mode and self.is_conversation_active and not self.conversation_cancelled:
+                # TODO FOR CHATGPT IF IN CONVERSATION MODE, UNTIL THE END OF THE CONVERSATION WE ARE NOT EXITING THE GPT COMMAND WE ARE GOING TO RE-INITIATE THE GPT COMMAND SO WE CAN HEAR AGAIN WHAT THE USER SAID
+                logger.info("Conversation mode active, waiting for next command...")
+                # re-invoke listening loop automatically
+                logger.info("Conversation mode active, listening for next turn…")
+                # spawn next round without exiting
+                asyncio.create_task(
+                    self.process_gpt_command(
+                        prompt="", 
+                        use_camera=use_camera,
+                        websocket=websocket,
+                        new_conversation=False,
+                        use_ai_voice=use_ai_voice,
+                        conversation_mode=True
+                    )
+                )                
             # Reset the processing flag and restore the previous robot state
             self.is_processing = False
 
@@ -1009,7 +1129,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         except Exception as e:
             logger.error(f"Error sending GPT status update: {str(e)}")    
     
-    async def cancel_gpt_command(self, websocket=None):
+    async def cancel_gpt_command(self, websocket=None, conversation_mode=False) -> bool:
         """
         Cancel the currently running GPT command and stop any running scripts or motor sequences.
         
@@ -1019,6 +1139,13 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         Returns:
             bool: True if a command was cancelled, False if no command was running.
         """
+        if conversation_mode and self.is_conversation_active:
+            # stop the continuous conversation loop
+            logger.info("Cancelling conversation mode")
+            self.conversation_cancelled = True
+            self.is_conversation_active = False
+            if websocket:
+                await self._send_gpt_status_update(websocket, "cancelled", "Conversation ended.")            
         if self.is_processing:
             logger.info("Cancelling GPT command")
             self.gpt_command_cancelled = True
@@ -1075,7 +1202,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             logger.error(f"Error getting camera image: {e}")
             return None    
     
-    async def _get_camera_image_for_apî(self) -> Optional[str]:
+    async def _get_camera_image_for_api(self) -> Optional[str]:
         try:
             import requests
             response = requests.get("http://127.0.0.1:9000/mjpg.jpg", timeout=2)
@@ -1093,7 +1220,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             logger.error(f"Error getting camera image: {e}")
             return None        
 
-    async def _process_actions(self, response: Dict[str, Any], websocket=None) -> bool:
+    async def _process_actions(self, response: Dict[str, Any], websocket=None, use_ai_voice: bool = False) -> bool:
         """
         Process actions from the GPT response. Handles action execution with robust validation
         and default values for missing fields.
@@ -1171,12 +1298,24 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         language = response.get("language", DEFAULT_LANGUAGE)
         if not language or language not in ["en-US", "en-GB", "de-DE", "es-ES", "fr-FR", "it-IT"]:
             language = DEFAULT_LANGUAGE
-            response["language"] = language
-
-                    # First speak the text if available
+            response["language"] = language                    # First speak the text if available
         if text_output:
-            # For python_script we need to wait until TTS is actually finished
-            await self.tts_manager.say(text_output, priority=1, blocking=True, lang=language)
+            if use_ai_voice:
+                try:
+                    audio_file = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        self._synthesize_and_save_blocking,
+                        text_output,
+                        "alloy",
+                        3
+                    )
+                except Exception as e:
+                    logger.error(f"TTS synthesis failed: {e}")
+                    audio_file = None
+                if audio_file:
+                    await self.sound_manager.play_file(audio_file)
+                else:
+                    await self.tts_manager.say(text_output, lang=language)
         
         # For python_script action type, ensure TTS completes before script execution
         if action_type == "python_script":
@@ -2208,6 +2347,18 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 except Exception as e:
                     logger.error(f"Error in keep_think: {e}")
                     return False
+                
+            elif function_name == "end_conversation":
+                # user asked to end the conversation
+                try:
+                    logger.info("Ending conversation mode")
+                    self.conversation_cancelled = True
+                    self.is_conversation_active = False
+                    return True
+                except Exception as e:
+                    logger.error(f"Error in end_conversation: {e}")
+                    return False
+
                     
             else:
                 logger.warning(f"Unknown predefined function: {function_name}")

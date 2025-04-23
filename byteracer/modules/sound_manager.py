@@ -275,6 +275,40 @@ class SoundManager:
         logger.warning("No available sound channels for voice stream")
         return None
     
+    def play_file(self, file_path):
+        """Play a specific sound file, volume and catergory are voice"""
+        if not self.enabled:
+            return None
+        
+        # Stop any currently playing voice stream
+        if self.current_voice_channel is not None:
+            if pygame.mixer.Channel(self.current_voice_channel).get_busy():
+                pygame.mixer.Channel(self.current_voice_channel).stop()
+        
+        with self._lock:
+            # Find an available channel with higher priority for voice
+            for channel_id in range(pygame.mixer.get_num_channels()):
+                if not pygame.mixer.Channel(channel_id).get_busy():
+                    # Load and play the sound
+                    try:
+                        sound = pygame.mixer.Sound(file_path)
+                        
+                        # Apply volume based on voice stream priority
+                        effective_volume = (self.volume / 100.0) * (self.voice_volume / 100.0)
+                        sound.set_volume(effective_volume)
+                        
+                        pygame.mixer.Channel(channel_id).play(sound)
+                        self.current_voice_channel = channel_id
+                        
+                        logger.debug(f"Playing file on channel {channel_id}")
+                        return channel_id
+                    except Exception as e:
+                        logger.error(f"Error playing file: {e}")
+                        return None
+        
+        logger.warning("No available sound channels for file")
+        return None
+    
     def set_voice_volume(self, volume):
         """Set volume for push-to-talk voice streams (0-100)"""
         self.voice_volume = max(0, min(100, volume))

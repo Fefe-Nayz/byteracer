@@ -20,6 +20,7 @@ export default function Listen() {
   const [connectionStatus, setConnectionStatus] = useState<string>("idle");
   const [toggleMode, setToggleMode] = useLocalStorage<boolean>("listen-toggleMode", false);
   const [audioEnabled, setAudioEnabled] = useState(true);
+  setAudioEnabled(true); // Set to true to enable audio by default
   const [isPushToTalkActive, setIsPushToTalkActive] = useState(false);
     // Access WebSocket context
   const { status, startListening: wsStartListening, stopListening: wsStopListening } = useWebSocket();

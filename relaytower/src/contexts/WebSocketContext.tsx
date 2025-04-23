@@ -31,7 +31,8 @@ export type WebSocketMessageType =
   | "network_update"
   | "audio_stream"
   | "python_status_request"
-  | "python_status";
+  | "python_status"
+  | "speech_recognition";
 // Define WebSocket connection status type
 export type WebSocketStatus = "connecting" | "connected" | "disconnected";
 
@@ -256,8 +257,8 @@ interface WebSocketContextValue {
   restartCameraFeed: () => void;
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
-sendGptCommand: (prompt: string, useCamera: boolean) => void;
-  cancelGptCommand: () => void;
+  sendGptCommand: (prompt: string, useCamera: boolean, useAiVoice?: boolean, conversationMode?: boolean) => void;
+  cancelGptCommand: (conversationMode?: boolean) => void;
   sendAudioStream: (audioData: string) => void;
   startListening: () => void;
   stopListening: () => void;
@@ -427,6 +428,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             const now = Date.now();
             const latency = now - event.data.sentAt;
             setPingTime(latency);
+            break;
+
+          case "speech_recognition":
+            // Handle speech recognition results
+            window.dispatchEvent(
+              new CustomEvent("speech:recognized", {
+                detail: { text: event.data.text },
+              })
+            );
             break;
 
           case "battery_info":
@@ -827,13 +837,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       });
     }
   }, [socket]);  // Function to send GPT command
-  const sendGptCommand = useCallback((prompt: string, useCamera: boolean) => {
+  const sendGptCommand = useCallback((prompt: string, useCamera: boolean, useAiVoice: boolean = false, conversationMode: boolean = false) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const gptData = {
         name: "gpt_command",
         data: {
           prompt,
           useCamera,
+          useAiVoice,
+          conversationMode,
           timestamp: Date.now(),
         },
         createdAt: Date.now(),
@@ -858,12 +870,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   // Function to cancel GPT command
-  const cancelGptCommand = useCallback(() => {
+  const cancelGptCommand = useCallback((conversationMode: boolean = false) => {
     if (socket && socket.readyState === WebSocket.OPEN) {
       const cancelData = {
         name: "cancel_gpt",
         data: {
           timestamp: Date.now(),
+          conversationMode,
         },
         createdAt: Date.now(),
       };

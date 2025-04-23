@@ -502,35 +502,38 @@ class ByteRacer:
                 await self.send_command_response({
                     "success": success,
                     "message": "TTS speech stopped"
-                })
+                })            
+            
             elif data["name"] == "gpt_command":
                 # Handle GPT command
-                if "prompt" in data["data"]:
-                    prompt = data["data"]["prompt"]
-                    use_camera = data["data"].get("useCamera", False)
-                    logging.info(f"Received GPT command: {prompt}, useCamera: {use_camera}")
+                prompt = data["data"].get("prompt", "")
+                use_camera = data["data"].get("useCamera", False)
+                use_ai_voice = data["data"].get("useAiVoice", False)
+                conversation_mode = data["data"].get("conversationMode", False)
+                
+                logging.info(f"Received GPT command: prompt='{prompt}', useCamera={use_camera}, useAiVoice={use_ai_voice}, conversationMode={conversation_mode}")
 
-                    old_state = self.sensor_manager.robot_state
-                    # stop aicamera_manager ai features
-                    self.aicamera_manager.stop_face_following()
-                    self.aicamera_manager.stop_color_control()
-                    self.aicamera_manager.stop_traffic_sign_detection()
+                old_state = self.sensor_manager.robot_state
+                # stop aicamera_manager ai features
+                self.aicamera_manager.stop_face_following()
+                self.aicamera_manager.stop_color_control()
+                self.aicamera_manager.stop_traffic_sign_detection()
 
-
-                    # Set robot state to GPT controlled
-                    self.sensor_manager.robot_state = RobotState.GPT_CONTROLLED
-                    
-                    # Send sensor data update immediately to update client UI with GPT_CONTROLLED state
-                    await self.send_sensor_data_to_client()
-                    
-                    # Process GPT command in a separate task to avoid blocking the WebSocket message handler
-                    asyncio.create_task(self._handle_gpt_command(prompt, use_camera))
+                # Set robot state to GPT controlled
+                self.sensor_manager.robot_state = RobotState.GPT_CONTROLLED
+                
+                # Send sensor data update immediately to update client UI with GPT_CONTROLLED state
+                await self.send_sensor_data_to_client()
+                
+                # Process GPT command in a separate task to avoid blocking the WebSocket message handler
+                asyncio.create_task(self._handle_gpt_command(prompt, use_camera, use_ai_voice, conversation_mode))
                     
 
             elif data["name"] == "cancel_gpt":
                 # Handle cancel GPT command
+                conversation_mode = data["data"].get("conversationMode", False)
                 logging.info("Received cancel GPT command")
-                success = await self.gpt_manager.cancel_gpt_command()
+                success = await self.gpt_manager.cancel_gpt_command(conversation_mode=conversation_mode)
                 await self.send_command_response({
                     "success": success,
                     "message": "GPT command cancelled"
@@ -1406,7 +1409,7 @@ class ByteRacer:
                 logging.error(f"Error in periodic tasks: {e}", exc_info=True)
                 await asyncio.sleep(2)  # Shorter sleep on error
 
-    async def _handle_gpt_command(self, prompt, use_camera):
+    async def _handle_gpt_command(self, prompt, use_camera, use_ai_voice, conversation_mode):
         """
         Handle GPT command processing in a separate task so it doesn't block the WebSocket message handler.
         This allows the robot to properly ignore input during GPT mode instead of queuing them.
@@ -1414,12 +1417,15 @@ class ByteRacer:
         Args:
             prompt: The user's prompt text
             use_camera: Whether to use the camera
-            old_state: The previous robot state to restore after processing
+            use_ai_voice: Whether to use AI voice for TTS
+            conversation_mode: Whether to use conversation mode
         """
         try:
             # Process the GPT command
             success = await self.gpt_manager.process_gpt_command(prompt, use_camera, 
-                                                                websocket=self.websocket)
+                                                                websocket=self.websocket,
+                                                                use_ai_voice=use_ai_voice,
+                                                                conversation_mode=conversation_mode)
             
             logging.info(f"GPT command processing completed with status: {success}")
             

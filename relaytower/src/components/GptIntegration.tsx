@@ -1,3 +1,4 @@
+// filepath: c:\Users\ferre\Codespace\Projects\byteracer\relaytower\src\components\GptIntegration.tsx
 import { useState, useEffect } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { useToast } from "@/hooks/use-toast";
@@ -9,7 +10,22 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { BrainCircuit, Camera, Code, Plus, Terminal, RotateCw, X, Loader2, AlertTriangle, CheckCircle2, Sparkles } from "lucide-react";
+import { 
+  BrainCircuit, 
+  Camera, 
+  Code, 
+  Plus, 
+  Terminal, 
+  RotateCw, 
+  X, 
+  Loader2, 
+  AlertTriangle, 
+  CheckCircle2, 
+  Sparkles,
+  Mic,
+  MicOff,
+  Volume2
+} from "lucide-react";
 
 interface GptStatusData {
   token_usage?: {
@@ -50,6 +66,7 @@ interface GptStatusData {
 export default function GptIntegration() {
   const [prompt, setPrompt] = useState("");
   const [useCamera, setUseCamera] = useState(false);
+  const [useAiVoice, setUseAiVoice] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [response, setResponse] = useState<string | null>(null);
   const [responseDetails, setResponseDetails] = useState<GptStatusData | null>(null);
@@ -57,12 +74,23 @@ export default function GptIntegration() {
   const [tokenUsage, setTokenUsage] = useState<{prompt_tokens: number, completion_tokens: number, total_tokens: number} | null>(null);
   const [executionProgress, setExecutionProgress] = useState<{current: number, total: number} | null>(null);
   const [executionHistory, setExecutionHistory] = useState<Array<{timestamp: number, message: string, status: string}>>([]);
-  const { status, sendGptCommand, cancelGptCommand, gptStatus, createNewThread } = useWebSocket();
-  const { toast } = useToast();
+  const [activeTab, setActiveTab] = useState<string>("text");
+  const [isConversationActive, setIsConversationActive] = useState(false);
+  const [recognizedText, setRecognizedText] = useState<string | null>(null);
 
   console.log(actionType)
   
-  // Listen for GPT responses
+  const { 
+    status, 
+    sendGptCommand, 
+    cancelGptCommand, 
+    gptStatus, 
+    createNewThread
+  } = useWebSocket();
+  
+  const { toast } = useToast();
+  
+  // Listen for GPT responses and speech recognition events
   useEffect(() => {
     const handleGptResponse = (event: CustomEvent) => {
       if (event.detail) {
@@ -77,10 +105,21 @@ export default function GptIntegration() {
       }
     };
     
-    // Add event listener
+    const handleSpeechRecognition = (event: CustomEvent) => {
+      if (event.detail && event.detail.text) {
+        setRecognizedText(event.detail.text);
+      }
+    };
+    
+    // Add event listeners
     window.addEventListener(
       "debug:gpt-response",
       handleGptResponse as EventListener
+    );
+    
+    window.addEventListener(
+      "speech:recognized",
+      handleSpeechRecognition as EventListener
     );
     
     // Clean up
@@ -89,8 +128,15 @@ export default function GptIntegration() {
         "debug:gpt-response",
         handleGptResponse as EventListener
       );
+      
+      window.removeEventListener(
+        "speech:recognized",
+        handleSpeechRecognition as EventListener
+      );
     };
-  }, []);      // Update processing state based on GPT status updates
+  }, [isConversationActive, toast]);
+  
+  // Update processing state based on GPT status updates
   useEffect(() => {
     if (gptStatus) {
       // Set processing state based on the status
@@ -180,11 +226,62 @@ export default function GptIntegration() {
     setTokenUsage(null);
     setExecutionProgress(null);
     setExecutionHistory([]);
-    sendGptCommand(prompt, useCamera);
+    
+    // Call sendGptCommand with useAiVoice parameter
+    try {
+      // Pass all parameters: prompt, useCamera, useAiVoice, and conversationMode=false
+      sendGptCommand(prompt, useCamera, useAiVoice, false);
+    } catch (err) {
+      console.error("Error sending GPT command:", err);
+    }
     
     toast({
       title: "Prompt sent to GPT",
       description: prompt,
+      variant: "default",
+    });
+  };
+  
+  const toggleConversation = () => {
+    if (!isConversationActive) {
+      startConversation();
+    } else {
+      stopConversation();
+    }
+  };
+  
+  const startConversation = () => {
+    setIsConversationActive(true);
+    
+    // Create a new thread for the conversation
+    createNewThread();
+    
+    // Start conversation mode with robot handling the recording and STT
+    // We pass an empty prompt since the robot will ignore it in conversation mode
+    try {
+      // Pass all parameters with conversationMode=true
+      sendGptCommand("", useCamera, useAiVoice, true);
+    } catch (err) {
+      console.error("Error starting conversation mode:", err);
+    }
+    
+    toast({
+      title: "Conversation Mode Started",
+      description: "Listening for your voice input...",
+      variant: "default",
+    });
+  };
+  
+  const stopConversation = () => {
+    setIsConversationActive(false);
+    setRecognizedText(null);
+    
+    // Cancel the conversation on the robot with conversationMode=true
+    cancelGptCommand(true);
+    
+    toast({
+      title: "Conversation Mode Ended",
+      description: "Voice conversation has been stopped",
       variant: "default",
     });
   };
@@ -290,7 +387,8 @@ export default function GptIntegration() {
         </Button>
       </div>
       
-      <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Input Settings Options */}
+      <div className="flex flex-col space-y-3 mb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Camera className="h-4 w-4" />
@@ -303,105 +401,192 @@ export default function GptIntegration() {
           />
         </div>
         
-        <Input
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Enter a prompt for the robot..."
-          disabled={status !== "connected" || isProcessing}
-          className="w-full"
-        />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Volume2 className="h-4 w-4" />
+            <span className="text-sm">Use AI voice</span>
+          </div>
+          <Switch 
+            checked={useAiVoice}
+            onCheckedChange={setUseAiVoice}
+            disabled={status !== "connected" || isProcessing}
+          />
+        </div>
+      </div>
+      
+      {/* Tab interface for text/conversation modes */}
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-2 mb-4">
+          <TabsTrigger value="text">Text Input</TabsTrigger>
+          <TabsTrigger value="conversation">Voice Conversation</TabsTrigger>
+        </TabsList>
         
-        {/* Status display area */}
-        {isProcessing && gptStatus && (
-          <div className="my-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                {gptStatus.status === "starting" || gptStatus.status === "progress" ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                ) : gptStatus.status === "warning" ? (
-                  <AlertTriangle className="h-4 w-4 text-amber-500" />
-                ) : gptStatus.status === "error" ? (
-                  <AlertTriangle className="h-4 w-4 text-red-500" />
-                ) : (
-                  <CheckCircle2 className="h-4 w-4 text-green-500" />
-                )}
-                <Badge variant={
-                  gptStatus.status === "starting" || gptStatus.status === "progress" 
-                    ? "default" 
-                    : gptStatus.status === "error" 
-                      ? "destructive" 
-                      : gptStatus.status === "warning" || gptStatus.status === "cancelled"
-                        ? "outline"
-                        : "secondary"
-                }>
-                  {gptStatus.status}
-                </Badge>
+        <TabsContent value="text">
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <Input
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Enter a prompt for the robot..."
+              disabled={status !== "connected" || isProcessing}
+              className="w-full"
+            />
+            
+            <Button 
+              type="submit" 
+              className="w-full"
+              disabled={status !== "connected" || !prompt.trim() || isProcessing}
+            >
+              {isProcessing ? (
+                <span className="flex items-center">
+                  <span className="animate-pulse mr-2">
+                    <Sparkles className="h-4 w-4" />
+                  </span>
+                  Processing...
+                </span>
+              ) : (
+                <span className="flex items-center">
+                  <Sparkles className="h-4 w-4 mr-2" />
+                  Send to GPT
+                </span>
+              )}
+            </Button>
+            
+            {/* Examples Section */}
+            <div className="mt-4">
+              <div className="text-xs font-medium mb-2">Examples:</div>
+              <div className="flex flex-wrap gap-2">
+                {examples.map((example) => (
+                  <Button
+                    key={example}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleUseExample(example)}
+                    disabled={isProcessing}
+                    className="text-xs"
+                  >
+                    {example}
+                  </Button>
+                ))}
               </div>
-              
-              {/* Cancel button */}
-              {(gptStatus.status === "starting" || gptStatus.status === "progress") && (
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  onClick={handleCancelRequest}
-                  className="h-7 px-2"
-                >
-                  <X className="h-3.5 w-3.5 mr-1" />
-                  Cancel
-                </Button>
+            </div>
+          </form>
+        </TabsContent>
+        
+        <TabsContent value="conversation">
+          <div className="space-y-4">
+            <div className="bg-muted rounded-md p-4 flex flex-col items-center justify-center min-h-[120px] text-center">
+              {isConversationActive ? (
+                <div className="flex flex-col items-center space-y-2">
+                  <div className="relative">
+                    <div className="absolute -inset-1 rounded-full bg-primary/20 animate-pulse"></div>
+                    <Mic className="h-12 w-12 text-primary relative z-10" />
+                  </div>
+                  <p className="text-sm font-medium">Listening...</p>
+                  {recognizedText && (
+                    <p className="text-sm text-muted-foreground mt-2 italic">&quot;{recognizedText}&quot;</p>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center space-y-2">
+                  <MicOff className="h-12 w-12 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Start a voice conversation with the robot</p>
+                </div>
               )}
             </div>
             
-            {/* Show progress based on execution status */}
-            {executionProgress ? (
-              <Progress 
-                value={(executionProgress.current / executionProgress.total) * 100} 
-                className="h-1.5" 
-              />
-            ) : (
-              <Progress value={
-                gptStatus.status === "starting" 
-                  ? 10 
-                  : gptStatus.status === "progress" 
-                    ? 50 
-                    : gptStatus.status === "completed" 
-                      ? 100 
-                      : 0
-              } className="h-1.5" />
-            )}
-            
-            <p className="text-xs text-muted-foreground">
-              {gptStatus.message}
-              {executionProgress && (
-                <span className="text-xs ml-1 opacity-75">
-                  (Step {executionProgress.current} of {executionProgress.total})
+            <Button
+              onClick={toggleConversation}
+              disabled={status !== "connected" || isProcessing}
+              variant={isConversationActive ? "destructive" : "default"}
+              className="w-full"
+            >
+              {isConversationActive ? (
+                <span className="flex items-center">
+                  <MicOff className="h-4 w-4 mr-2" />
+                  End Conversation
+                </span>
+              ) : (
+                <span className="flex items-center">
+                  <Mic className="h-4 w-4 mr-2" />
+                  Start Conversation
                 </span>
               )}
-            </p>
+            </Button>
           </div>
-        )}
-        
-        <Button 
-          type="submit" 
-          className="w-full"
-          disabled={status !== "connected" || !prompt.trim() || isProcessing}
-        >
-          {isProcessing ? (
-            <span className="flex items-center">
-              <span className="animate-pulse mr-2">
-                <Sparkles className="h-4 w-4" />
-              </span>
-              Processing...
-            </span>
+        </TabsContent>
+      </Tabs>
+      
+      {/* Status display area */}
+      {isProcessing && gptStatus && (
+        <div className="my-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              {gptStatus.status === "starting" || gptStatus.status === "progress" ? (
+                <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+              ) : gptStatus.status === "warning" ? (
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+              ) : gptStatus.status === "error" ? (
+                <AlertTriangle className="h-4 w-4 text-red-500" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+              )}
+              <Badge variant={
+                gptStatus.status === "starting" || gptStatus.status === "progress" 
+                  ? "default" 
+                  : gptStatus.status === "error" 
+                    ? "destructive" 
+                    : gptStatus.status === "warning" || gptStatus.status === "cancelled"
+                      ? "outline"
+                      : "secondary"
+              }>
+                {gptStatus.status}
+              </Badge>
+            </div>
+            
+            {/* Cancel button */}
+            {(gptStatus.status === "starting" || gptStatus.status === "progress") && (
+              <Button 
+                size="sm" 
+                variant="outline" 
+                onClick={handleCancelRequest}
+                className="h-7 px-2"
+              >
+                <X className="h-3.5 w-3.5 mr-1" />
+                Cancel
+              </Button>
+            )}
+          </div>
+          
+          {/* Show progress based on execution status */}
+          {executionProgress ? (
+            <Progress 
+              value={(executionProgress.current / executionProgress.total) * 100} 
+              className="h-1.5" 
+            />
           ) : (
-            <span className="flex items-center">
-              <Sparkles className="h-4 w-4 mr-2" />
-              Send to GPT
-            </span>
+            <Progress value={
+              gptStatus.status === "starting" 
+                ? 10 
+                : gptStatus.status === "progress" 
+                  ? 50 
+                  : gptStatus.status === "completed" 
+                    ? 100 
+                    : 0
+            } className="h-1.5" />
           )}
-        </Button>
-      </form>
-        {/* Enhanced response display */}
+          
+          <p className="text-xs text-muted-foreground">
+            {gptStatus.message}
+            {executionProgress && (
+              <span className="text-xs ml-1 opacity-75">
+                (Step {executionProgress.current} of {executionProgress.total})
+              </span>
+            )}
+          </p>
+        </div>
+      )}
+      
+      {/* Enhanced response display */}
       {(response || responseDetails) && !isProcessing && (
         <div className="mt-4">
           <Tabs defaultValue="response" className="w-full">
@@ -576,24 +761,6 @@ export default function GptIntegration() {
           </Tabs>
         </div>
       )}
-      
-      <div className="mt-4">
-        <div className="text-xs font-medium mb-2">Examples:</div>
-        <div className="flex flex-wrap gap-2">
-          {examples.map((example) => (
-            <Button
-              key={example}
-              variant="outline"
-              size="sm"
-              onClick={() => handleUseExample(example)}
-              disabled={isProcessing}
-              className="text-xs"
-            >
-              {example}
-            </Button>
-          ))}
-        </div>
-      </div>
       
       {status !== "connected" && (
         <p className="text-xs text-amber-600 mt-4">
