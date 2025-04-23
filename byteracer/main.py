@@ -533,7 +533,7 @@ class ByteRacer:
                 # Handle cancel GPT command
                 conversation_mode = data["data"].get("conversationMode", False)
                 logging.info("Received cancel GPT command")
-                success = await self.gpt_manager.cancel_gpt_command(conversation_mode=conversation_mode)
+                success = await self.gpt_manager.cancel_gpt_command(websocket=self.websocket, conversation_mode=conversation_mode)
                 await self.send_command_response({
                     "success": success,
                     "message": "GPT command cancelled"

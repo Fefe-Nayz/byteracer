@@ -92,10 +92,6 @@ class GPTManager:
         self.is_conversation_active = False
         self.conversation_cancelled = False
 
-
-    # ────────────────────────────────────────────────────────────────────────
-    # 1) BLOCKING SPEECH→TEXT HELPER (lifted & inlined)
-    # ────────────────────────────────────────────────────────────────────────
     def _listen_and_transcribe_blocking(self) -> str:
         """
         Record until silence, return the transcript.  If realtime=True, prints
@@ -126,9 +122,6 @@ class GPTManager:
             audio = r.listen(src)
         return _whisper(audio)
 
-    # ────────────────────────────────────────────────────────────────────────
-    # 2) BLOCKING TEXT→SPEECH HELPER (lifted & inlined)
-    # ────────────────────────────────────────────────────────────────────────
     def _synthesize_and_save_blocking(
         self,
         text: str,
@@ -180,7 +173,7 @@ class GPTManager:
             logger.info("Created new conversation (reset response ID)")
             
             if websocket:
-                await self._send_gpt_status_update(websocket, "completed", "Created new conversation thread.")
+                await self._send_gpt_status_update(websocket, "progress", "Created new conversation thread.")
             
             return True
         except Exception as e:
@@ -188,6 +181,7 @@ class GPTManager:
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", f"Failed to create new conversation: {str(e)}")
             return False    
+
     async def process_gpt_command(self, prompt: str, use_camera: bool = False, websocket = None, new_conversation=False, use_ai_voice: bool = False, conversation_mode: bool = False) -> bool:
         """
         Process a GPT command with optional camera feed inclusion.
@@ -208,6 +202,7 @@ class GPTManager:
                 None, self._listen_and_transcribe_blocking
             )
             self.is_conversation_active = True
+            self.conversation_cancelled = False
             logger.info(f"Recognized text for conversation mode: {prompt}")
             if websocket:
                 await websocket.send(json.dumps({
@@ -959,147 +954,6 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             # Make sure motors are stopped when command finishes
             self.px.forward(0)  # Stop all motors as a safety measure
 
-    async def _add_message_to_thread(self, thread_id: str, prompt: str, image_data: Optional[str] = None):
-        """
-        Add a message to the thread, with optional image.
-        
-        Args:
-            thread_id: The thread ID.
-            prompt: The user's prompt text.
-            image_data: Optional base64-encoded image data.
-        """
-        try:
-            # Prepare the message content
-            if image_data:
-                # Add message with text and image
-                content = [
-                    {"type": "text", "text": prompt},
-                ]
-                
-                # Add the image if available
-                if image_data:
-                    content.append({
-                        "type": "image_url", 
-                        "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
-                    })
-            else:
-                # Text-only message
-                content = prompt
-              # Add the message to the thread
-            self.client.beta.threads.messages.create(
-                thread_id=thread_id,
-                role="user",
-                content=content
-            )
-            logger.info(f"Added message to thread {thread_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error adding message to thread: {e}")
-            return False
-            
-    async def _run_assistant(self, thread_id: str, websocket=None) -> Optional[Dict[str, Any]]:
-        """
-        Run the assistant on the thread and retrieve the response.
-        
-        Args:
-            thread_id: The thread ID.
-            websocket: Optional websocket for status updates.
-            
-        Returns:
-            dict: The parsed JSON response, or None if an error occurs.
-        """
-        try:
-            # Run the assistant on the thread
-            run = self.client.beta.threads.runs.create(
-                thread_id=thread_id,
-                assistant_id=self.assistant_id
-            )
-            
-            # Poll for run completion
-            status_map = {
-                "queued": "Waiting in queue...",
-                "in_progress": "Assistant is processing...",
-                "requires_action": "Requires action",
-                "cancelling": "Cancelling...",
-                "cancelled": "Cancelled",
-                "failed": "Failed",
-                "completed": "Completed",
-                "expired": "Expired"
-            }
-            
-            while run.status in ["queued", "in_progress"]:
-                if self.gpt_command_cancelled:
-                    try:
-                        self.client.beta.threads.runs.cancel(
-                            thread_id=thread_id,
-                            run_id=run.id
-                        )
-                        logger.info(f"Cancelled run {run.id}")
-                    except Exception as cancel_e:
-                        logger.error(f"Error cancelling run: {cancel_e}")
-                    return None
-                
-                if websocket:
-                    await self._send_gpt_status_update(
-                        websocket, 
-                        "progress", 
-                        status_map.get(run.status, run.status)
-                    )
-                
-                await asyncio.sleep(1)
-                run = self.client.beta.threads.runs.get(
-                    thread_id=thread_id,
-                    run_id=run.id
-                )
-            
-            if run.status != "completed":
-                logger.error(f"Run failed with status: {run.status}")
-                if websocket:
-                    await self._send_gpt_status_update(
-                        websocket, 
-                        "error", 
-                        f"Assistant run failed: {status_map.get(run.status, run.status)}"
-                    )
-                return None
-            
-            # Retrieve the latest message from the assistant
-            messages = self.client.beta.threads.messages.list(
-                thread_id=thread_id
-            )
-            
-            # Find the most recent assistant message
-            for message in messages.data:
-                if message.role == "assistant":
-                    # Parse the JSON content
-                    try:
-                        content_text = message.content[0].text.value
-                        # Extract JSON from markdown code blocks if present
-                        if "```json" in content_text and "```" in content_text:
-                            # Extract JSON from markdown code block
-                            import re
-                            json_match = re.search(r'```json\n(.*?)\n```', content_text, re.DOTALL)
-                            if json_match:
-                                content_text = json_match.group(1)
-                        
-                        return json.loads(content_text)
-                    except (json.JSONDecodeError, AttributeError, IndexError) as e:
-                        logger.error(f"Error parsing assistant response: {e}")
-                        logger.error(f"Raw message content: {message.content}")
-                        if websocket:
-                            await self._send_gpt_status_update(
-                                websocket, 
-                                "error", 
-                                "Failed to parse assistant response"
-                            )
-                        return None
-            
-            logger.error("No assistant message found in thread")
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error running assistant: {e}")
-            return None
-
     async def _send_gpt_status_update(self, websocket, status, message, additional_data=None):
         """
         Send a status update to the connected websocket client with optional additional data.
@@ -1111,18 +965,22 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             additional_data: Optional dictionary with additional data to send.
         """
         try:
-            # Create the base update object
-            update = {
-                "name": "gpt_status_update",
+            # Create a data object that includes status and message
+            data = {
                 "status": status,
-                "message": message,
-                "timestamp": time.time()
+                "message": message
             }
             
             # Include additional data if provided
             if additional_data:
-                update["data"] = additional_data
-
+                data.update(additional_data)
+            
+            # Create the WebSocket message using the expected structure
+            update = {
+                "name": "gpt_status_update",
+                "data": data,
+                "createdAt": int(time.time() * 1000)  # Use milliseconds timestamp for JS compatibility
+            }
             logger.info(f"Sending GPT status update: {update}")    
             
             await websocket.send(json.dumps(update))
@@ -1371,7 +1229,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                         # Execute the function with proper parameter validation and defaults
                         await self.execute_predefined_function(
                             function_name, 
-                            parameters
+                            parameters,
+                            websocket=websocket,
                         )
                     return True
                 except Exception as e:
@@ -1474,6 +1333,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 logger.warning(f"set_angle command received for unknown servo motor id: {motor_id}")
         else:            
             logger.warning(f"Unknown motor command: {command}")      
+
     async def _stop_script(self, script_name: str, websocket=None) -> bool:
         if script_name in self.active_processes:
             process_info = self.active_processes[script_name]
@@ -1550,7 +1410,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             except Exception as e:
                 logger.error(f"Error removing temp file {file}: {e}")
     
-    async def execute_predefined_function(self, function_name: str, parameters: Dict[str, Any]) -> bool:
+    async def execute_predefined_function(self, function_name: str, parameters: Dict[str, Any], websocket=None,) -> bool:
         """
         Execute a predefined function with proper parameter validation.
         
@@ -2356,6 +2216,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     logger.info("Ending conversation mode")
                     self.conversation_cancelled = True
                     self.is_conversation_active = False
+                    await self._send_gpt_status_update(websocket, "cancelled", "Command cancelled successfully")
                     return True
                 except Exception as e:
                     logger.error(f"Error in end_conversation: {e}")
@@ -2369,18 +2230,6 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         except Exception as e:
             logger.error(f"Error executing function {function_name}: {e}")
             return False
-        
-    async def report_error(self, error_report):
-        """
-        Send an error or cancellation report to the websocket client in a consistent format.
-        error_report: dict with keys 'name', 'data' (should include 'error', 'traceback', 'timestamp')
-        """
-        websocket = getattr(self, 'websocket', None)
-        if websocket:
-            try:
-                await websocket.send(json.dumps(error_report))
-            except Exception as e:
-                logger.error(f"Failed to send error report to websocket: {e}")
 
     def restore_robot_state(self):
         """

@@ -1,4 +1,3 @@
-// filepath: c:\Users\ferre\Codespace\Projects\byteracer\relaytower\src\components\GptIntegration.tsx
 import { useState, useEffect } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { useToast } from "@/hooks/use-toast";
@@ -139,9 +138,16 @@ export default function GptIntegration() {
   // Update processing state based on GPT status updates
   useEffect(() => {
     if (gptStatus) {
+      console.log("GPT Status Update:", gptStatus);
       // Set processing state based on the status
       if (gptStatus.status === "completed" || gptStatus.status === "error" || gptStatus.status === "cancelled") {
         setIsProcessing(false);
+        
+        // End conversation mode if it's active and status is cancelled
+        if (gptStatus.status === "cancelled" && isConversationActive) {
+          setIsConversationActive(false);
+          setRecognizedText(null);
+        }
       } else {
         setIsProcessing(true);
       }
@@ -305,9 +311,9 @@ export default function GptIntegration() {
       variant: "default",
     });
   };
-  
-  const handleCancelRequest = () => {
-    cancelGptCommand();
+    const handleCancelRequest = () => {
+    // Pass true if in conversation mode, otherwise false
+    cancelGptCommand(isConversationActive);
     
     toast({
       title: "Cancelling GPT Command",
