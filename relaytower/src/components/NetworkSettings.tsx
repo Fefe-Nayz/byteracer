@@ -3,10 +3,11 @@ import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
-import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Wifi, Globe, Loader2, PlusCircle, Trash2, WifiOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "./ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type NetworkMode = "wifi" | "ap";
 type WifiNetwork = { ssid: string; password: string };
@@ -327,6 +328,26 @@ export default function NetworkSettings() {
           </div>
         </div>
       </div>
+
+        <Select
+          value={mode}
+          onValueChange={(value) => handleModeChange(value as NetworkMode)}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select Mode">
+              {mode === "wifi" ? "WiFi Client" : "Access Point"}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="wifi">WiFi Client</SelectItem>
+            <SelectItem value="ap">Access Point</SelectItem>
+          </SelectContent>
+        </Select>
+      
+      <TabsList>
+          <TabsTrigger value="wifi">WiFi Settings</TabsTrigger>
+          <TabsTrigger value="ap">Access Point Settings</TabsTrigger>
+      </TabsList>
       
       <Tabs defaultValue={mode} value={mode} className="w-full">
         <TabsContent value="wifi" className="mt-0">
