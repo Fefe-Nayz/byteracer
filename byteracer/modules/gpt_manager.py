@@ -101,7 +101,7 @@ class GPTManager:
         r = sr.Recognizer()
         r.dynamic_energy_adjustment_damping = 0.16
         r.dynamic_energy_ratio = 1.6
-        r.pause_threshold = 0.8
+        r.pause_threshold = 1.2
         CHUNK = 8192
 
         # 2) whisper call

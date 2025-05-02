@@ -32,6 +32,12 @@ export default function RobotSettings() {
       setLocalSettings(settings);
       console.log("Received settings:", settings);
     }
+    
+    if (saveStatus === "saving") {
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 2000);
+    }
+
   }, [settings]);
   
   // Request settings when component mounts or reconnects
@@ -83,11 +89,9 @@ export default function RobotSettings() {
     setSaveStatus("saving");
     updateSettings(localSettings);
     
-    // Simulate a response (in a real app, wait for a success/error response)
-    setTimeout(() => {
-      setSaveStatus("saved");
-      setTimeout(() => setSaveStatus("idle"), 2000);
-    }, 800);
+    // On settings save, the app will send the updated settings to the robot so we change the status to "saved" after receiving the new settings response
+
+
   };
   
   // Discard changes

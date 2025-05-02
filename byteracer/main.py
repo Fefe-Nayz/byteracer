@@ -1142,6 +1142,7 @@ class ByteRacer:
         
         # Save settings
         await self.save_config_settings()
+        await self.send_settings_to_client()
     
     async def execute_robot_command(self, command):
         """Handle system commands and provide feedback"""

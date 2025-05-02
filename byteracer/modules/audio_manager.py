@@ -7,8 +7,9 @@ import wave
 import io
 import base64
 import threading
-from queue import Queue, Empty
+from queue import Queue, Empty, Full               # ← added Full
 from typing import Optional, List, Dict, Any
+
 
 class AudioManager:
     """
@@ -29,15 +30,22 @@ class AudioManager:
         self.format = pyaudio.paInt16  # 16-bit audio
         self.channels = 1              # Mono
         # Try different sample rates - list them in order of preference
-        self.sample_rates = [8000, 16000, 44100, 48000]
+        self.sample_rates = [44100]
         self.rate = self.sample_rates[0]  # Start with the first rate
-        self.chunk_size = 1024         # Audio chunks
+        self.chunk_size = 12288           # Audio chunks (will be reset)
+        self.frame_ms = 20                # ← new: size of callback frame (ms)
+        self.chunk_ms = 250               # ← new: size of packet sent (ms)
+
         self.pyaudio = None
         self.stream = None
         self.worker_thread = None
         self.active_recording = False
-        self.device_index = None       # Will auto-detect input device
-        
+        self.device_index = None          # Will auto-detect input device
+
+        # New runtime helpers
+        self.capture_queue = None         # ← raw PCM from callback
+        self.encode_task = None           # ← assembles 250 ms chunks
+
         # Logging
         self.logger = logging.getLogger(__name__)
         self.logger.info("AudioManager initialized")
@@ -88,24 +96,36 @@ class AudioManager:
             # First look for specific input devices
             for i in range(num_devices):
                 device_info = p.get_device_info_by_index(i)
-                self.logger.info(f"Device {i}: {device_info['name']}, inputs: {device_info['maxInputChannels']}")
-                
-                # Look for USB or known audio devices first
-                if (device_info['maxInputChannels'] > 0 and 
-                    ('USB' in device_info['name'] or 
-                     'input' in device_info['name'].lower() or
-                     'mic' in device_info['name'].lower())):
+                self.logger.info(
+                    f"Device {i}: {device_info['name']}, "
+                    f"inputs: {device_info['maxInputChannels']}"
+                )
+
+                if (
+                    device_info["maxInputChannels"] > 0
+                    and (
+                        "USB" in device_info["name"]
+                        or "input" in device_info["name"].lower()
+                        or "mic" in device_info["name"].lower()
+                    )
+                ):
                     self.device_index = i
-                    self.logger.info(f"Selected preferred input device: {device_info['name']} (index {i})")
+                    self.logger.info(
+                        f"Selected preferred input device: "
+                        f"{device_info['name']} (index {i})"
+                    )
                     break
-            
+
             # If no preferred device found, use default input device
             if self.device_index is None:
                 for i in range(num_devices):
                     device_info = p.get_device_info_by_index(i)
-                    if device_info['maxInputChannels'] > 0:
+                    if device_info["maxInputChannels"] > 0:
                         self.device_index = i
-                        self.logger.info(f"Selected default input device: {device_info['name']} (index {i})")
+                        self.logger.info(
+                            f"Selected default input device: "
+                            f"{device_info['name']} (index {i})"
+                        )
                         break
             
             p.terminate()
@@ -127,8 +147,11 @@ class AudioManager:
         
         self.logger.info("Starting microphone recording")
         self.active_recording = True
-        
-        # Initialize PyAudio in the recording task to ensure it's in the correct thread
+
+        # Queue for raw PCM frames from callback
+        self.capture_queue = Queue(maxsize=100)
+
+        # Initialize PyAudio in the recording task
         self.recording_task = asyncio.create_task(self._record_audio())
         
     async def stop_recording(self):
@@ -140,13 +163,21 @@ class AudioManager:
         self.active_recording = False
         
         if self.recording_task:
-            # Wait for recording task to finish
             try:
                 await self.recording_task
             except asyncio.CancelledError:
                 pass
             self.recording_task = None
-        
+
+        # stop encode task (if still running)
+        if self.encode_task:
+            self.encode_task.cancel()
+            try:
+                await self.encode_task
+            except asyncio.CancelledError:
+                pass
+            self.encode_task = None
+
         # Close PyAudio stream and terminate PyAudio
         if self.stream:
             try:
@@ -163,30 +194,28 @@ class AudioManager:
                 self.logger.error(f"Error terminating PyAudio: {e}")
             self.pyaudio = None
             
-    async def _try_open_stream(self, p, rate):
+    async def _try_open_stream(self, p, rate, use_callback=False):
         """Try to open a stream with a specific sample rate"""
         try:
+            kwargs = dict(
+                format=self.format,
+                channels=self.channels,
+                rate=rate,
+                input=True,
+                frames_per_buffer=self.chunk_size,
+            )
+            if use_callback:
+                kwargs["stream_callback"] = self._pyaudio_callback
+
             if self.device_index is None:
-                # Use default device if no specific device found
-                stream = p.open(
-                    format=self.format,
-                    channels=self.channels,
-                    rate=rate,
-                    input=True,
-                    frames_per_buffer=self.chunk_size
-                )
+                stream = p.open(**kwargs)
             else:
-                # Use the specific device we found
-                stream = p.open(
-                    format=self.format,
-                    channels=self.channels,
-                    rate=rate,
-                    input=True,
-                    input_device_index=self.device_index,
-                    frames_per_buffer=self.chunk_size
-                )
-            
-            self.logger.info(f"Successfully opened audio stream with sample rate: {rate}Hz")
+                kwargs["input_device_index"] = self.device_index
+                stream = p.open(**kwargs)
+
+            self.logger.info(
+                f"Successfully opened audio stream with sample rate: {rate}Hz"
+            )
             return stream, rate
             
         except Exception as e:
@@ -204,7 +233,11 @@ class AudioManager:
             rate = None
             
             for sample_rate in self.sample_rates:
-                stream, rate = await self._try_open_stream(self.pyaudio, sample_rate)
+                # 20 ms of frames for this rate
+                self.chunk_size = int(sample_rate * self.frame_ms / 1000)
+                stream, rate = await self._try_open_stream(
+                    self.pyaudio, sample_rate, use_callback=True
+                )
                 if stream:
                     break
             
@@ -215,38 +248,31 @@ class AudioManager:
                 
             self.stream = stream
             self.rate = rate
-            
-            self.logger.info("Audio recording started")
-            
-            # Record audio in chunks while active
+            self.stream.start_stream()
+
+            # Start assembler / encoder
+            self.encode_task = asyncio.create_task(self._encode_pcm_loop())
+
+            self.logger.info("Audio recording started (callback mode)")
+
             while self.active_recording:
-                try:
-                    if self.stream.is_active():
-                        # Read audio chunk from microphone with exception handling
-                        try:
-                            data = self.stream.read(self.chunk_size, exception_on_overflow=False)
-                            
-                            # Put in queue for sending to client
-                            self._encode_and_queue(data)
-                        except OSError as e:
-                            self.logger.warning(f"Error reading from audio stream: {e}")
-                            await asyncio.sleep(0.1)
-                            continue
-                        
-                        # Small delay to prevent tight loop
-                        await asyncio.sleep(0.01)
-                    else:
-                        await asyncio.sleep(0.1)
-                except Exception as e:
-                    self.logger.error(f"Error in recording loop: {e}")
-                    await asyncio.sleep(0.1)
-                    
+                await asyncio.sleep(0.1)
+
         except Exception as e:
             self.logger.error(f"Error in audio recording: {e}")
             
         finally:
             # Make sure to clean up even if there's an error
             self.active_recording = False
+
+            if self.encode_task:
+                self.encode_task.cancel()
+                try:
+                    await self.encode_task
+                except asyncio.CancelledError:
+                    pass
+                self.encode_task = None
+
             if self.stream:
                 try:
                     self.stream.stop_stream()
@@ -263,7 +289,41 @@ class AudioManager:
                 self.pyaudio = None
             
             self.logger.info("Audio recording stopped")
-    
+
+    def _pyaudio_callback(self, in_data, frame_count, time_info, status):
+        """Runs in PortAudio thread: enqueue raw PCM quickly."""
+        if self.active_recording and self.capture_queue:
+            try:
+                self.capture_queue.put_nowait(in_data)
+            except Full:
+                pass  # drop if queue is full
+        return (None, pyaudio.paContinue)
+
+    async def _encode_pcm_loop(self):
+        pcm_per_ms = int(self.rate * 2 / 1000)          # 2 bytes per mono frame
+        target_bytes = pcm_per_ms * self.chunk_ms       # bytes in 250 ms
+        pcm_buffer = bytearray()
+        loop = asyncio.get_running_loop()
+
+        while self.active_recording or not self.capture_queue.empty():
+            data = await loop.run_in_executor(None, self._capture_get_blocking)
+            if data is None:
+                continue
+
+            pcm_buffer.extend(data)
+
+            while len(pcm_buffer) >= target_bytes:
+                chunk = bytes(pcm_buffer[:target_bytes])
+                del pcm_buffer[:target_bytes]
+                self._encode_and_queue(chunk)
+
+    def _capture_get_blocking(self):
+        """Blocking get for use in executor."""
+        try:
+            return self.capture_queue.get(timeout=0.5)
+        except Empty:
+            return None
+
     def _encode_and_queue(self, audio_data):
         """Convert audio chunk to WAV format and encode as base64 for sending"""
         try:
