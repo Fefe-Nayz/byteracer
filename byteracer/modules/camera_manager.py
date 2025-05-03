@@ -550,3 +550,75 @@ class CameraManager:
             result[f'{obj_type}_detected'] = False
 
         return result
+
+    def display_yolo_detections_on_vilib(self, detections, labels, confidence_threshold=0.5):
+        """
+        Display YOLO detections on the vilib camera feed.
+        
+        Args:
+            detections: YOLO detections from model results
+            labels: List of class labels
+            confidence_threshold: Minimum confidence to display
+        """
+        try:
+            # Clear previous drawings
+            Vilib.clear_drawings()
+            
+            # Enable drawing if not already enabled
+            if not Vilib.drawing_enabled:
+                Vilib.enable_drawing()
+            
+            # Process each detection
+            for i in range(len(detections)):
+                try:
+                    # Get bounding box coordinates (convert from tensor)
+                    xyxy_tensor = detections[i].xyxy.cpu()
+                    xyxy = xyxy_tensor.numpy().squeeze()
+                    xmin, ymin, xmax, ymax = xyxy.astype(int)
+                    
+                    # Get class info
+                    classidx = int(detections[i].cls.item())
+                    classname = labels[classidx]
+                    conf = detections[i].conf.item()
+                    
+                    # Skip if below threshold
+                    if conf < confidence_threshold:
+                        continue
+                    
+                    # Determine color (BGR format)
+                    if classname == "red":
+                        color = (0, 0, 255)  # Red color in BGR
+                    elif classname == "green":
+                        color = (0, 255, 0)  # Green color in BGR
+                    else:
+                        # Default to blue for other objects
+                        color = (255, 0, 0)
+                    # Calculate dimensions
+                    width = xmax - xmin
+                    height = ymax - ymin
+                    
+                    # Create label with confidence
+                    label = f'{classname}: {int(conf*100)}%'
+                    
+                    # Add rectangle with integrated label to vilib
+                    Vilib.draw_rectangle(
+                        xmin, ymin, width, height, 
+                        color=color, thickness=2,
+                        label=label, label_color=color,
+                        font_scale=0.5, label_thickness=1,
+                        label_position='top'
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error processing detection: {e}")
+                    continue
+            
+        except Exception as e:
+            logger.error(f"Error displaying YOLO detections: {e}")
+
+    def disable_vilib_drawing(self):
+        """
+        Disable vilib drawing.
+        """
+        Vilib.disable_drawing()
+        logger.info("Vilib drawing disabled")

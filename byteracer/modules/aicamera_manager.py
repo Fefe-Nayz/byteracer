@@ -7,7 +7,7 @@ import sys
 import numpy as np
 import cv2
 from ultralytics import YOLO
-
+import asyncio
 logger = logging.getLogger(__name__)
 
 class AICameraCameraManager:
@@ -97,7 +97,7 @@ class AICameraCameraManager:
         self.traffic_light_state = None  # Can be "red", "green", or None
         self.traffic_light_detected = False
         self.waiting_for_green = False  # Flag to track if we're waiting for green after seeing red
-        self.traffic_light_distance_threshold = 0.1  # Object must be at least this fraction of the frame size to be considered "close enough"
+        self.traffic_light_distance_threshold = 0.02  # Object must be at least this fraction of the frame size to be considered "close enough"
         
         # TTS Manager reference for announcements
 
@@ -544,11 +544,20 @@ class AICameraCameraManager:
         
         # Start the detection thread
         self.yolo_detection_thread = threading.Thread(
-            target=self._yolo_detection_loop,
+            target=self._run_async_detection_loop,
             daemon=True
         )
         self.yolo_detection_thread.start()
         return True
+    
+    def _run_async_detection_loop(self):
+        """Run the async detection loop in its own event loop"""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._yolo_detection_loop())
+        finally:
+            loop.close()
     
     def stop_yolo_detection(self):
         """
@@ -567,8 +576,16 @@ class AICameraCameraManager:
         self.yolo_detection_thread = None
         self.yolo_results = []
         self.yolo_object_count = 0
+
+        # Disable drawing overlays
+        try:
+            self.camera_manager.disable_vilib_drawing()
+        except Exception as e:
+            logger.error(f"Error disabling vilib drawing: {e}")
+
+        self.px.forward(0)  # Stop the robot
     
-    def _yolo_detection_loop(self):
+    async def _yolo_detection_loop(self):
         """
         Main loop for YOLO object detection.
         Continuously gets frames from camera, processes with YOLO model,
@@ -598,7 +615,7 @@ class AICameraCameraManager:
                 # Skip if no frame is available
                 if frame is None:
                     logger.warning("No frame available from camera.")
-                    time.sleep(0.1)
+                    await asyncio.sleep(0.1)
                     continue
                 
                 # Convert frame format if needed
@@ -614,7 +631,11 @@ class AICameraCameraManager:
                 
                 # Reset object count
                 self.yolo_object_count = 0
-                  # Find the most prominent object to track (highest confidence)
+                
+                # Display detections on vilib camera feed for web/local display
+                self.camera_manager.display_yolo_detections_on_vilib(detections, self.yolo_labels, self.yolo_min_confidence)
+                
+                # Find the most prominent object to track (highest confidence)
                 best_object = None
                 best_confidence = 0
                 traffic_light_object = None
@@ -659,13 +680,13 @@ class AICameraCameraManager:
                 
                 # Handle traffic light detection and behavior
                 if traffic_light_object:
-                    self._handle_traffic_light(traffic_light_object['class'], traffic_light_object)
+                    await self._handle_traffic_light(traffic_light_object['class'], traffic_light_object)
                     # Traffic lights take priority for tracking
                     best_object = traffic_light_object
                 elif not self.waiting_for_green:
                     # If no traffic light is detected and we're not waiting for a green light,
                     # move forward at default speed
-                    self.px.forward(10)  # 10% speed
+                    self.px.forward(1)  # 1% speed
                 
                 # Track the best detected object with the camera
                 if best_object:
@@ -696,12 +717,9 @@ class AICameraCameraManager:
                 
                 logger.info(f"YOLO detection: {self.yolo_object_count} objects, FPS: {avg_frame_rate:.1f}")
                 
-                # Sleep to avoid consuming too much CPU
-                time.sleep(0.01)
-                
             except Exception as e:
                 logger.error(f"Error in YOLO detection loop: {e}")
-                time.sleep(0.1)
+                await asyncio.sleep(0.1)
         
         logger.info("YOLO detection loop stopped.")
     
@@ -960,7 +978,7 @@ class AICameraCameraManager:
         }
     
 
-    def _handle_traffic_light(self, class_name, object_info):
+    async def _handle_traffic_light(self, class_name, object_info):
         """
         Handle traffic light detection and corresponding robot behavior.
         
@@ -1005,31 +1023,31 @@ class AICameraCameraManager:
                 
                 # Announce if TTS manager is available
                 if self.tts_manager:
-                    self.tts_manager.say("feu rouge détecté", priority=1)
+                    await self.tts_manager.say("Red light detected", priority=1)
                 
                 logger.info("RED LIGHT - Stopping robot")
                 
             elif class_name == "green":
                 if self.waiting_for_green:
                     # We were waiting for green after seeing red, now proceed
-                    self.px.forward(10)  # 10% speed
+                    self.px.forward(1)  # 10% speed
                     self.waiting_for_green = False
                     
                     # Announce if TTS manager is available
                     if self.tts_manager:
-                        self.tts_manager.say("feu vert détecté", priority=1)
+                        await self.tts_manager.say("Green light detected", priority=1)
                     
                     logger.info("GREEN LIGHT after RED - Proceeding at 10% speed")
                 elif prev_state != "green":
                     # Green light from no previous light detected
-                    self.px.forward(10)  # 10% speed
+                    self.px.forward(1)  # 10% speed
                     
                     # Announce if TTS manager is available
                     if self.tts_manager:
-                        self.tts_manager.say("feu vert détecté", priority=1)
+                        await self.tts_manager.say("Green light detected", priority=1)
 
                     logger.info("GREEN LIGHT - Proceeding at 10% speed")
         elif not self.waiting_for_green:
             # If not close enough and not waiting for green after red, move forward
-            self.px.forward(10)  # 10% speed
+            self.px.forward(1)  # 10% speed
             logger.info("Traffic light detected but not close enough, proceeding at 10% speed")
