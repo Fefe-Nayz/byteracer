@@ -2,6 +2,11 @@ import time
 import logging
 import threading
 import math
+import os
+import sys
+import numpy as np
+import cv2
+from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
@@ -12,8 +17,8 @@ class AICameraCameraManager:
       2) Face detection + following (forward/back & turn).
       3) Pose detection.
       4) Traffic-sign detection.
-    """
-
+      5) YOLO object detection using camera feed.
+    """    
     def __init__(self, px, sensor_manager, camera_manager):
         # Robot control/hardware
         self.px = px
@@ -36,11 +41,35 @@ class AICameraCameraManager:
 
         # Pose detection
         self.pose_detection_thread = None
-        self.pose_detection_active = False
-
-        # Traffic-sign detection
+        self.pose_detection_active = False        # Traffic-sign detection
         self.traffic_sign_detection_thread = None
         self.traffic_sign_detection_active = False
+        
+        # YOLO object detection
+        self.yolo_model = None
+        self.yolo_detection_thread = None
+        self.yolo_detection_active = False
+        self.yolo_min_confidence = 0.5
+        self.yolo_results = []
+        self.yolo_object_count = 0
+        self.camera_width = 640
+        self.camera_height = 480
+        
+        # Auto-load YOLO model if available in modules directory
+        self.model_path = os.path.join(os.path.dirname(__file__), 'model.pt')
+        if os.path.exists(self.model_path):
+            try:
+                # Try to load the model during initialization but don't block if it fails
+                threading.Thread(target=self.load_yolo_model, args=(self.model_path,), daemon=True).start()
+                logger.info(f"Started auto-loading YOLO model from {self.model_path}")
+            except Exception as e:
+                logger.warning(f"Auto-loading YOLO model failed: {e}")
+        else:
+            logger.warning(f"YOLO model not found at {self.model_path}")
+        
+        # Bounding box colors (Tableau 10 color scheme)
+        self.bbox_colors = [(164,120,87), (68,148,228), (93,97,209), (178,182,133), (88,159,106), 
+                           (96,202,231), (159,124,168), (169,162,241), (98,118,150), (172,176,184)]
 
         # ---------------------------------------------------------
         # Face following parameters (adjust for your system)
@@ -305,108 +334,577 @@ class AICameraCameraManager:
     # ------------------------------------------------------------------
     # Traffic-Sign Detection
     # ------------------------------------------------------------------    
-    def start_traffic_sign_detection(self):
-        """
-        Spawns a background thread to do traffic sign detection.
-        """
-        if hasattr(self, 'traffic_sign_detection_active') and self.traffic_sign_detection_active:
-            logger.warning("Traffic sign detection is already running!")
-            return
+    # def start_traffic_sign_detection(self):
+    #     """
+    #     Spawns a background thread to do traffic sign detection.
+    #     """
+    #     if hasattr(self, 'traffic_sign_detection_active') and self.traffic_sign_detection_active:
+    #         logger.warning("Traffic sign detection is already running!")
+    #         return
 
-        logger.info("Starting traffic sign detection ...")
-        self.traffic_sign_detection_active = True
+    #     logger.info("Starting traffic sign detection ...")
+    #     self.traffic_sign_detection_active = True
+        
+    #     # Reset camera angles
+    #     self.x_angle = 0
+    #     self.y_angle = 0
+
+    #     # Enable traffic sign detection in camera_manager
+    #     self.camera_manager.switch_trafic_sign_detect(True)
+
+    #     # Start thread
+    #     self.traffic_sign_detection_thread = threading.Thread(
+    #         target=self._traffic_sign_detection_loop,
+    #         daemon=True
+    #     )
+    #     self.traffic_sign_detection_thread.start()
+
+    # def stop_traffic_sign_detection(self):
+    #     """
+    #     Signals the traffic-sign-detection loop to stop and waits for thread to end.
+    #     """
+    #     if not hasattr(self, 'traffic_sign_detection_active') or not self.traffic_sign_detection_active:
+    #         logger.warning("Traffic sign detection not currently running!")
+    #         return
+
+    #     logger.info("Stopping traffic sign detection ...")
+    #     self.traffic_sign_detection_active = False
+
+    #     if self.traffic_sign_detection_thread and self.traffic_sign_detection_thread.is_alive():
+    #         self.traffic_sign_detection_thread.join(timeout=2.0)
+
+    #     self.traffic_sign_detection_thread = None
+
+    #     # Optionally disable traffic sign detection
+    #     self.camera_manager.switch_trafic_sign_detect(False)    
+    # def _traffic_sign_detection_loop(self):
+    #     """
+    #     Continuously checks for traffic sign data from camera_manager.
+    #     Locks camera onto detected signs by adjusting pan/tilt servos.
+    #     Adjust as needed to act on 'stop', 'left', 'right', etc.
+    #     """
+    #     logger.info("Traffic sign detection loop started.")
+        
+    #     # Suppose your camera resolution is 640 x 480 (match with face following)
+    #     camera_width = 640
+    #     camera_height = 480
+
+    #     while self.traffic_sign_detection_active:
+    #         # Expecting something like:
+    #         # {
+    #         #    'traffic_sign_n': ...,
+    #         #    'x': ...,
+    #         #    'y': ...,
+    #         #    'w': ...,
+    #         #    'h': ...,
+    #         #    't': 'stop'/'left'/'right'/'forward'/'none', 
+    #         #    'acc': ...
+    #         # }
+    #         detection = self.camera_manager.detect_obj_parameter('traffic_sign')
+    #         # Implement how your camera_manager returns these fields
+
+    #         if detection.get('traffic_sign_detected', False):
+    #             sign_type = detection.get('traffic_sign_type', 'none')
+    #             x = detection.get('x', 0)
+    #             y = detection.get('y', 0)
+    #             acc = detection.get('acc', 0)
+    #             w = detection.get('w', 0)
+    #             h = detection.get('h', 0)
+                
+    #             # ---------------------------------------------
+    #             # Camera lock-on to center sign in frame
+    #             # ---------------------------------------------
+    #             x_offset_ratio = (x / camera_width) - 0.5
+    #             target_x_angle = x_offset_ratio * 180  # scale up to ±90
+
+    #             dx = target_x_angle - self.x_angle
+    #             self.x_angle += 0.2 * dx  # Smooth movement factor
+    #             self.x_angle = self.clamp_number(self.x_angle, self.PAN_MIN_ANGLE, self.PAN_MAX_ANGLE)
+    #             self.px.set_cam_pan_angle(int(self.x_angle))
+
+    #             y_offset_ratio = 0.5 - (y / camera_height)
+    #             target_y_angle = y_offset_ratio * 130  # Scale to tilt range
+
+    #             dy = target_y_angle - self.y_angle
+    #             self.y_angle += 0.2 * dy  # Smooth movement factor
+    #             self.y_angle = self.clamp_number(self.y_angle, self.TILT_MIN_ANGLE, self.TILT_MAX_ANGLE)
+    #             self.px.set_cam_tilt_angle(int(self.y_angle))
+                
+    #             logger.debug(f"Traffic Sign => type={sign_type}, confidence={acc}, center=({x},{y}), size=({w},{h}), " + 
+    #                          f"camera pan={self.x_angle:.1f}, tilt={self.y_angle:.1f}")
+                
+    #             # If you want to do something special on "stop", "left", etc.
+    #             # e.g. if sign_type == 'stop': self.px.forward(0)
+            
+    #         time.sleep(0.05)
+
+    #     logger.info("Traffic sign detection loop stopped.")
+    
+    # ------------------------------------------------------------------
+    # YOLO Object Detection
+    # ------------------------------------------------------------------    
+    def load_yolo_model(self, model_path=None):
+        """
+        Load the YOLO model from the specified path.
+        
+        Args:
+            model_path (str, optional): Path to the YOLO model file (.pt)
+                                       If None, uses the default model in modules directory
+        
+        Returns:
+            bool: True if model loaded successfully, False otherwise
+        """
+        try:
+            # Use provided path or default to model.pt in modules directory
+            if model_path is None:
+                model_path = self.model_path
+                
+            if not os.path.exists(model_path):
+                logger.error(f"Model path is invalid or model not found: {model_path}")
+                return False
+                
+            # Import here to prevent errors if modules aren't available
+            try:
+                import cv2
+                from ultralytics import YOLO
+            except ImportError as e:
+                logger.error(f"Required modules not installed: {e}")
+                logger.error("Please install with: pip install ultralytics opencv-python")
+                return False
+                
+            # Load the model
+            self.yolo_model = YOLO(model_path, task='detect')
+            logger.info(f"YOLO model loaded successfully from {model_path}")
+            
+            # Get the label map
+            self.yolo_labels = self.yolo_model.names
+            logger.info(f"Detected {len(self.yolo_labels)} classes in model")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading YOLO model: {e}")
+            return False
+    
+
+    def start_traffic_sign_detection(self):
+        self.start_yolo_detection()
+    
+    def stop_traffic_sign_detection(self):
+        self.stop_yolo_detection()
+
+    def set_confidence_threshold(self, threshold):
+        """
+        Set the confidence threshold for displaying detected objects.
+        
+        Args:
+            threshold (float): Value between 0.0 and 1.0
+        """
+        if 0.0 <= threshold <= 1.0:
+            self.yolo_min_confidence = threshold
+            logger.info(f"Object detection confidence threshold set to {threshold}")
+        else:
+            logger.warning(f"Invalid confidence threshold: {threshold}. Must be between 0.0 and 1.0")
+    def start_yolo_detection(self, model_path=None):
+        """
+        Starts YOLO object detection using the camera feed.
+        
+        Args:
+            model_path (str, optional): Path to the YOLO model file. 
+                                       If None, uses already loaded model or the default model.
+        """
+        if self.yolo_detection_active:
+            logger.warning("YOLO object detection is already running!")
+            return False
+        
+        # Load model if not already loaded
+        if self.yolo_model is None:
+            # Use provided path or auto-load default
+            if not self.load_yolo_model(model_path):
+                logger.error("Failed to load YOLO model. Cannot start detection.")
+                return False
+        
+        logger.info("Starting YOLO object detection...")
+        self.yolo_detection_active = True
         
         # Reset camera angles
         self.x_angle = 0
         self.y_angle = 0
-
-        # Enable traffic sign detection in camera_manager
-        self.camera_manager.switch_trafic_sign_detect(True)
-
-        # Start thread
-        self.traffic_sign_detection_thread = threading.Thread(
-            target=self._traffic_sign_detection_loop,
+        
+        # Start the detection thread
+        self.yolo_detection_thread = threading.Thread(
+            target=self._yolo_detection_loop,
             daemon=True
         )
-        self.traffic_sign_detection_thread.start()
-
-    def stop_traffic_sign_detection(self):
+        self.yolo_detection_thread.start()
+        return True
+    
+    def stop_yolo_detection(self):
         """
-        Signals the traffic-sign-detection loop to stop and waits for thread to end.
+        Stops YOLO object detection.
         """
-        if not hasattr(self, 'traffic_sign_detection_active') or not self.traffic_sign_detection_active:
-            logger.warning("Traffic sign detection not currently running!")
+        if not self.yolo_detection_active:
+            logger.warning("YOLO object detection is not currently running!")
             return
-
-        logger.info("Stopping traffic sign detection ...")
-        self.traffic_sign_detection_active = False
-
-        if self.traffic_sign_detection_thread and self.traffic_sign_detection_thread.is_alive():
-            self.traffic_sign_detection_thread.join(timeout=2.0)
-
-        self.traffic_sign_detection_thread = None
-
-        # Optionally disable traffic sign detection
-        self.camera_manager.switch_trafic_sign_detect(False)    
-    def _traffic_sign_detection_loop(self):
-        """
-        Continuously checks for traffic sign data from camera_manager.
-        Locks camera onto detected signs by adjusting pan/tilt servos.
-        Adjust as needed to act on 'stop', 'left', 'right', etc.
-        """
-        logger.info("Traffic sign detection loop started.")
         
-        # Suppose your camera resolution is 640 x 480 (match with face following)
-        camera_width = 640
-        camera_height = 480
-
-        while self.traffic_sign_detection_active:
-            # Expecting something like:
-            # {
-            #    'traffic_sign_n': ...,
-            #    'x': ...,
-            #    'y': ...,
-            #    'w': ...,
-            #    'h': ...,
-            #    't': 'stop'/'left'/'right'/'forward'/'none', 
-            #    'acc': ...
-            # }
-            detection = self.camera_manager.detect_obj_parameter('traffic_sign')
-            # Implement how your camera_manager returns these fields
-
-            if detection.get('traffic_sign_detected', False):
-                sign_type = detection.get('traffic_sign_type', 'none')
-                x = detection.get('x', 0)
-                y = detection.get('y', 0)
-                acc = detection.get('acc', 0)
-                w = detection.get('w', 0)
-                h = detection.get('h', 0)
+        logger.info("Stopping YOLO object detection...")
+        self.yolo_detection_active = False
+        
+        if self.yolo_detection_thread and self.yolo_detection_thread.is_alive():
+            self.yolo_detection_thread.join(timeout=2.0)
+        
+        self.yolo_detection_thread = None
+        self.yolo_results = []
+        self.yolo_object_count = 0
+    
+    def _yolo_detection_loop(self):
+        """
+        Main loop for YOLO object detection.
+        Continuously gets frames from camera, processes with YOLO model,
+        and tracks detected objects.
+        """
+        logger.info("YOLO detection loop started.")
+        
+        try:
+            import cv2
+            import numpy as np
+        except ImportError as e:
+            logger.error(f"Required modules not installed: {e}")
+            self.yolo_detection_active = False
+            return
+        
+        frame_rate_buffer = []
+        fps_avg_len = 30
+        avg_frame_rate = 0
+        
+        while self.yolo_detection_active:
+            try:
+                t_start = time.perf_counter()
                 
-                # ---------------------------------------------
-                # Camera lock-on to center sign in frame
-                # ---------------------------------------------
-                x_offset_ratio = (x / camera_width) - 0.5
-                target_x_angle = x_offset_ratio * 180  # scale up to ±90
-
-                dx = target_x_angle - self.x_angle
-                self.x_angle += 0.2 * dx  # Smooth movement factor
-                self.x_angle = self.clamp_number(self.x_angle, self.PAN_MIN_ANGLE, self.PAN_MAX_ANGLE)
-                self.px.set_cam_pan_angle(int(self.x_angle))
-
-                y_offset_ratio = 0.5 - (y / camera_height)
-                target_y_angle = y_offset_ratio * 130  # Scale to tilt range
-
-                dy = target_y_angle - self.y_angle
-                self.y_angle += 0.2 * dy  # Smooth movement factor
-                self.y_angle = self.clamp_number(self.y_angle, self.TILT_MIN_ANGLE, self.TILT_MAX_ANGLE)
-                self.px.set_cam_tilt_angle(int(self.y_angle))
+                # Get current frame from camera via camera_manager
+                frame = self._get_camera_frame()
                 
-                logger.debug(f"Traffic Sign => type={sign_type}, confidence={acc}, center=({x},{y}), size=({w},{h}), " + 
-                             f"camera pan={self.x_angle:.1f}, tilt={self.y_angle:.1f}")
+                # Skip if no frame is available
+                if frame is None:
+                    logger.warning("No frame available from camera.")
+                    time.sleep(0.1)
+                    continue
                 
-                # If you want to do something special on "stop", "left", etc.
-                # e.g. if sign_type == 'stop': self.px.forward(0)
+                # Convert frame format if needed
+                if len(frame.shape) == 2:  # If grayscale
+                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                
+                # Run inference on frame
+                results = self.yolo_model(frame, verbose=False)
+                
+                # Extract results
+                detections = results[0].boxes
+                self.yolo_results = results  # Store for external access
+                
+                # Reset object count
+                self.yolo_object_count = 0
+                
+                # Find the most prominent object to track (highest confidence)
+                best_object = None
+                best_confidence = 0
+                
+                # Process each detection
+                for i in range(len(detections)):
+                    # Get bounding box coordinates (convert from tensor)
+                    xyxy_tensor = detections[i].xyxy.cpu()
+                    xyxy = xyxy_tensor.numpy().squeeze()
+                    xmin, ymin, xmax, ymax = xyxy.astype(int)
+                    
+                    # Get class ID, name and confidence
+                    classidx = int(detections[i].cls.item())
+                    classname = self.yolo_labels[classidx]
+                    conf = detections[i].conf.item()
+                    
+                    # Count objects above confidence threshold
+                    if conf > self.yolo_min_confidence:
+                        self.yolo_object_count += 1
+                        
+                        # Track the object with highest confidence
+                        if conf > best_confidence:
+                            best_confidence = conf
+                            # Calculate center of bounding box
+                            center_x = (xmin + xmax) // 2
+                            center_y = (ymin + ymax) // 2
+                            best_object = {
+                                'class': classname,
+                                'confidence': conf,
+                                'x': center_x,
+                                'y': center_y,
+                                'width': xmax - xmin,
+                                'height': ymax - ymin
+                            }
+                
+                # Track the best detected object with the camera
+                if best_object:
+                    self._track_detected_object(best_object)
+                
+                # Calculate FPS
+                t_stop = time.perf_counter()
+                frame_rate_calc = 1 / (t_stop - t_start)
+                
+                # Update FPS buffer for average calculation
+                if len(frame_rate_buffer) >= fps_avg_len:
+                    frame_rate_buffer.pop(0)
+                frame_rate_buffer.append(frame_rate_calc)
+                
+                # Calculate average FPS
+                avg_frame_rate = np.mean(frame_rate_buffer)
+                
+                logger.debug(f"YOLO detection: {self.yolo_object_count} objects, FPS: {avg_frame_rate:.1f}")
+                
+                # Sleep to avoid consuming too much CPU
+                time.sleep(0.01)
+                
+            except Exception as e:
+                logger.error(f"Error in YOLO detection loop: {e}")
+                time.sleep(0.1)
+        
+        logger.info("YOLO detection loop stopped.")
+    
+    def _get_camera_frame(self):
+        """
+        Get the current frame from the camera via vilib.
+        
+        Returns:
+            numpy.ndarray: The current camera frame or None if not available
+        """
+        try:
+            # First try to use camera_manager's method if available
+            if hasattr(self.camera_manager, '_get_current_frame'):
+                return self.camera_manager._get_current_frame()
             
-            time.sleep(0.05)
-
-        logger.info("Traffic sign detection loop stopped.")
+            # Fallback to direct vilib access
+            try:
+                from vilib import Vilib
+                if hasattr(Vilib, 'img') and Vilib.img is not None:
+                    import numpy as np
+                    return np.array(Vilib.img).copy()
+            except (ImportError, Exception) as e:
+                logger.error(f"Error accessing vilib: {e}")
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting camera frame: {e}")
+            return None
+    
+    def _track_detected_object(self, object_info):
+        """
+        Track a detected object by adjusting camera pan/tilt.
+        
+        Args:
+            object_info (dict): Object detection info including x, y coordinates
+        """
+        x, y = object_info['x'], object_info['y']
+        
+        # Calculate offset from center of frame
+        x_offset_ratio = (x / self.camera_width) - 0.5
+        target_x_angle = x_offset_ratio * 180  # Scale to ±90°
+        
+        dx = target_x_angle - self.x_angle
+        self.x_angle += 0.2 * dx  # Smooth movement factor
+        self.x_angle = self.clamp_number(self.x_angle, self.PAN_MIN_ANGLE, self.PAN_MAX_ANGLE)
+        self.px.set_cam_pan_angle(int(self.x_angle))
+        
+        y_offset_ratio = 0.5 - (y / self.camera_height)
+        target_y_angle = y_offset_ratio * 130  # Scale to tilt range
+        
+        dy = target_y_angle - self.y_angle
+        self.y_angle += 0.2 * dy  # Smooth movement factor
+        self.y_angle = self.clamp_number(self.y_angle, self.TILT_MIN_ANGLE, self.TILT_MAX_ANGLE)
+        self.px.set_cam_tilt_angle(int(self.y_angle))
+        
+        logger.debug(
+            f"Tracking {object_info['class']} at ({x},{y}), "
+            f"confidence: {object_info['confidence']:.2f}, "
+            f"camera pan={self.x_angle:.1f}, tilt={self.y_angle:.1f}"
+        )
+    
+    def get_yolo_results(self):
+        """
+        Get the latest YOLO detection results.
+        
+        Returns:
+            list: YOLO detection results
+        """
+        return self.yolo_results
+    
+    def get_yolo_object_count(self):
+        """
+        Get the number of objects detected above the confidence threshold.
+        
+        Returns:
+            int: Number of detected objects
+        """
+        return self.yolo_object_count
+    
+    def process_single_frame(self, frame=None):
+        """
+        Process a single frame with the YOLO model and return results.
+        This method doesn't affect ongoing detection in the background thread.
+        
+        Args:
+            frame (numpy.ndarray, optional): Frame to process. If None, get current camera frame.
+        
+        Returns:
+            tuple: (processed_frame, num_objects, detections)
+        """
+        if self.yolo_model is None:
+            logger.error("YOLO model not loaded. Call load_yolo_model() first.")
+            return None, 0, []
+        
+        try:
+            import cv2
+        except ImportError:
+            logger.error("cv2 not installed. Cannot process frame.")
+            return None, 0, []
+        
+        # Get frame if not provided
+        if frame is None:
+            frame = self._get_camera_frame()
+            if frame is None:
+                return None, 0, []
+        
+        # Convert frame format if needed
+        if len(frame.shape) == 2:  # If grayscale
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+        
+        # Make a copy to draw on
+        output_frame = frame.copy()
+        
+        # Run inference
+        results = self.yolo_model(frame, verbose=False)
+        detections = results[0].boxes
+        
+        # Count objects above threshold
+        object_count = 0
+        
+        # Process each detection
+        for i in range(len(detections)):
+            # Get bounding box coordinates
+            xyxy_tensor = detections[i].xyxy.cpu()
+            xyxy = xyxy_tensor.numpy().squeeze()
+            xmin, ymin, xmax, ymax = xyxy.astype(int)
+            
+            # Get class info
+            classidx = int(detections[i].cls.item())
+            classname = self.yolo_labels[classidx]
+            conf = detections[i].conf.item()
+            
+            # Draw if above threshold
+            if conf > self.yolo_min_confidence:
+                color = self.bbox_colors[classidx % 10]
+                cv2.rectangle(output_frame, (xmin, ymin), (xmax, ymax), color, 2)
+                
+                # Add label
+                label = f'{classname}: {int(conf*100)}%'
+                labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                label_ymin = max(ymin, labelSize[1] + 10)
+                cv2.rectangle(output_frame, (xmin, label_ymin-labelSize[1]-10), 
+                             (xmin+labelSize[0], label_ymin+baseLine-10), color, cv2.FILLED)
+                cv2.putText(output_frame, label, (xmin, label_ymin-7), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                
+                object_count += 1
+        
+        # Add object count to image
+        cv2.putText(output_frame, f'Objects: {object_count}', (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        
+        return output_frame, object_count, detections
+    
+    def run_object_detection_on_camera(self, duration=None, display=False):
+        """
+        Run object detection on the camera feed for the specified duration.
+        This is a simple demonstration method that doesn't require setting up threads.
+        
+        Args:
+            duration (float, optional): How many seconds to run detection. If None, runs until user interrupts.
+            display (bool): Whether to display the results in a window (requires cv2 and running with display).
+            
+        Returns:
+            dict: Summary of detection statistics
+        """
+        # Make sure the model is loaded
+        if self.yolo_model is None:
+            if not self.load_yolo_model():
+                return {"error": "Failed to load model"}
+        
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return {"error": "OpenCV not installed"}
+            
+        start_time = time.time()
+        frame_count = 0
+        detection_counts = {}
+        
+        try:
+            # Set up display window if requested
+            if display:
+                cv2.namedWindow("Object Detection", cv2.WINDOW_NORMAL)
+                
+            while True:
+                # Check if we've exceeded the specified duration
+                if duration and (time.time() - start_time) > duration:
+                    break
+                    
+                # Get frame from camera
+                frame = self._get_camera_frame()
+                if frame is None:
+                    logger.warning("No frame available")
+                    time.sleep(0.1)
+                    continue
+                
+                # Process the frame with YOLO
+                output_frame, obj_count, detections = self.process_single_frame(frame)
+                frame_count += 1
+                
+                # Count objects by class
+                for i in range(len(detections)):
+                    conf = detections[i].conf.item()
+                    if conf > self.yolo_min_confidence:
+                        class_id = int(detections[i].cls.item())
+                        class_name = self.yolo_labels[class_id]
+                        
+                        if class_name in detection_counts:
+                            detection_counts[class_name] += 1
+                        else:
+                            detection_counts[class_name] = 1
+                
+                # Display the frame if requested
+                if display and output_frame is not None:
+                    cv2.imshow("Object Detection", output_frame)
+                    
+                    # Exit if 'q' is pressed
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+                        
+                # Short sleep to avoid consuming all CPU
+                time.sleep(0.01)
+                
+        except KeyboardInterrupt:
+            logger.info("Detection interrupted by user")
+        except Exception as e:
+            logger.error(f"Error in detection demo: {e}")
+        finally:
+            if display:
+                cv2.destroyAllWindows()
+                
+        # Calculate statistics
+        elapsed_time = time.time() - start_time
+        fps = frame_count / elapsed_time if elapsed_time > 0 else 0
+                
+        # Return detection summary
+        return {
+            "elapsed_time": elapsed_time,
+            "frames_processed": frame_count,
+            "fps": fps,
+            "detections": detection_counts
+        }

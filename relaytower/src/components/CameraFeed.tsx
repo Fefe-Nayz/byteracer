@@ -309,7 +309,7 @@ export default function CameraFeed() {
             key={key}
             src={streamUrl}
             alt="Camera Feed"
-            className="h-screen"
+            className="h-screen max-h-max"
             onLoad={handleImageLoad}
             onError={handleImageError}
           />
