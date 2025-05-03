@@ -19,11 +19,12 @@ class AICameraCameraManager:
       4) Traffic-sign detection.
       5) YOLO object detection using camera feed.
     """    
-    def __init__(self, px, sensor_manager, camera_manager):
+    def __init__(self, px, sensor_manager, camera_manager, tts_manager):
         # Robot control/hardware
         self.px = px
         self.sensor_manager = sensor_manager
         self.camera_manager = camera_manager
+        self.tts_manager = tts_manager
 
         logger.info("AI CAMERA INITIALIZED")
 
@@ -91,6 +92,14 @@ class AICameraCameraManager:
         # Steering servo limit => ±35° (change if physically only ±30°)
         self.STEER_MIN_ANGLE = -35
         self.STEER_MAX_ANGLE =  35
+
+        # Traffic light state
+        self.traffic_light_state = None  # Can be "red", "green", or None
+        self.traffic_light_detected = False
+        self.waiting_for_green = False  # Flag to track if we're waiting for green after seeing red
+        self.traffic_light_distance_threshold = 0.1  # Object must be at least this fraction of the frame size to be considered "close enough"
+        
+        # TTS Manager reference for announcements
 
     def clamp_number(self, num, lower_bound, upper_bound):
         """Clamp 'num' between 'lower_bound' and 'upper_bound'."""
@@ -255,43 +264,45 @@ class AICameraCameraManager:
         Spawns a background thread to do traffic-light color detection 
         and speed control (red => stop, orange => 50, green => 100).
         """
-        if self.color_control_active:
-            logger.warning("Traffic-light color detect is already running!")
-            return
+        # if self.color_control_active:
+        #     logger.warning("Traffic-light color detect is already running!")
+        #     return
 
-        logger.info("Starting color control (red/green/orange) ...")
-        self.color_control_active = True
+        # logger.info("Starting color control (red/green/orange) ...")
+        # self.color_control_active = True
 
-        # Enable detection of red, green, orange in camera_manager
-        self.camera_manager.color_detect(["red", "green", "orange"])
+        # # Enable detection of red, green, orange in camera_manager
+        # self.camera_manager.color_detect(["red", "green", "orange"])
 
-        # Start thread
-        self.color_control_thread = threading.Thread(
-            target=self._color_control_loop,
-            daemon=True
-        )
-        self.color_control_thread.start()
+        # # Start thread
+        # self.color_control_thread = threading.Thread(
+        #     target=self._color_control_loop,
+        #     daemon=True
+        # )
+        # self.color_control_thread.start()
+        return
 
     def stop_color_control(self):
         """
         Signals the color-control loop to stop and waits for thread to end.
         """
-        if not self.color_control_active:
-            logger.warning("Traffic-light color detect not currently running!")
-            return
+        # if not self.color_control_active:
+        #     logger.warning("Traffic-light color detect not currently running!")
+        #     return
 
-        logger.info("Stopping color control loop ...")
-        self.color_control_active = False
+        # logger.info("Stopping color control loop ...")
+        # self.color_control_active = False
 
-        if self.color_control_thread and self.color_control_thread.is_alive():
-            self.color_control_thread.join(timeout=2.0)
+        # if self.color_control_thread and self.color_control_thread.is_alive():
+        #     self.color_control_thread.join(timeout=2.0)
 
-        self.color_control_thread = None
+        # self.color_control_thread = None
 
-        # Optionally disable color detection
-        self.camera_manager.switch_color_detect(False)
-        # Stop the robot
-        self.px.forward(0)
+        # # Optionally disable color detection
+        # self.camera_manager.switch_color_detect(False)
+        # # Stop the robot
+        # self.px.forward(0)
+        return
 
     def _color_control_loop(self):
         """
@@ -603,10 +614,10 @@ class AICameraCameraManager:
                 
                 # Reset object count
                 self.yolo_object_count = 0
-                
-                # Find the most prominent object to track (highest confidence)
+                  # Find the most prominent object to track (highest confidence)
                 best_object = None
                 best_confidence = 0
+                traffic_light_object = None
                 
                 # Process each detection
                 for i in range(len(detections)):
@@ -624,20 +635,37 @@ class AICameraCameraManager:
                     if conf > self.yolo_min_confidence:
                         self.yolo_object_count += 1
                         
-                        # Track the object with highest confidence
+                        # Create object info dictionary
+                        object_info = {
+                            'class': classname,
+                            'confidence': conf,
+                            'x': (xmin + xmax) // 2,
+                            'y': (ymin + ymax) // 2,
+                            'width': xmax - xmin,
+                            'height': ymax - ymin
+                        }
+                        
+                        # Check if this is a traffic light (red or green)
+                        if classname in ["red", "green"]:
+                            # For traffic lights, we always keep the most confident one
+                            if traffic_light_object is None or conf > traffic_light_object['confidence']:
+                                traffic_light_object = object_info
+                                logger.info(f"Detected traffic light: {classname} with confidence {conf:.2f}")
+                        
+                        # For general object tracking, track the highest confidence object
                         if conf > best_confidence:
                             best_confidence = conf
-                            # Calculate center of bounding box
-                            center_x = (xmin + xmax) // 2
-                            center_y = (ymin + ymax) // 2
-                            best_object = {
-                                'class': classname,
-                                'confidence': conf,
-                                'x': center_x,
-                                'y': center_y,
-                                'width': xmax - xmin,
-                                'height': ymax - ymin
-                            }
+                            best_object = object_info
+                
+                # Handle traffic light detection and behavior
+                if traffic_light_object:
+                    self._handle_traffic_light(traffic_light_object['class'], traffic_light_object)
+                    # Traffic lights take priority for tracking
+                    best_object = traffic_light_object
+                elif not self.waiting_for_green:
+                    # If no traffic light is detected and we're not waiting for a green light,
+                    # move forward at default speed
+                    self.px.forward(10)  # 10% speed
                 
                 # Track the best detected object with the camera
                 if best_object:
@@ -651,11 +679,22 @@ class AICameraCameraManager:
                 if len(frame_rate_buffer) >= fps_avg_len:
                     frame_rate_buffer.pop(0)
                 frame_rate_buffer.append(frame_rate_calc)
-                
-                # Calculate average FPS
+                  # Calculate average FPS
                 avg_frame_rate = np.mean(frame_rate_buffer)
                 
-                logger.debug(f"YOLO detection: {self.yolo_object_count} objects, FPS: {avg_frame_rate:.1f}")
+                # Print detected objects to standard output
+                if self.yolo_object_count > 0:
+                    objects_info = []
+                    for i in range(len(detections)):
+                        conf = detections[i].conf.item()
+                        if conf > self.yolo_min_confidence:
+                            classidx = int(detections[i].cls.item())
+                            classname = self.yolo_labels[classidx]
+                            objects_info.append(f"{classname} ({conf:.2f})")
+                    
+                    logger.info(f"Detected objects: {', '.join(objects_info)}")
+                
+                logger.info(f"YOLO detection: {self.yolo_object_count} objects, FPS: {avg_frame_rate:.1f}")
                 
                 # Sleep to avoid consuming too much CPU
                 time.sleep(0.01)
@@ -811,10 +850,21 @@ class AICameraCameraManager:
                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
                 
                 object_count += 1
-        
-        # Add object count to image
+          # Add object count to image
         cv2.putText(output_frame, f'Objects: {object_count}', (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        
+        # Print detected objects
+        if object_count > 0:
+            objects_info = []
+            for i in range(len(detections)):
+                conf = detections[i].conf.item()
+                if conf > self.yolo_min_confidence:
+                    classidx = int(detections[i].cls.item())
+                    classname = self.yolo_labels[classidx]
+                    objects_info.append(f"{classname} ({conf:.2f})")
+            
+            print(f"Detected objects: {', '.join(objects_info)}")
         
         return output_frame, object_count, detections
     
@@ -908,3 +958,78 @@ class AICameraCameraManager:
             "fps": fps,
             "detections": detection_counts
         }
+    
+
+    def _handle_traffic_light(self, class_name, object_info):
+        """
+        Handle traffic light detection and corresponding robot behavior.
+        
+        Args:
+            class_name (str): The detected class name ("red" or "green")
+            object_info (dict): Object information with coordinates, size, etc.
+        """
+        # If it's not a traffic light, reset if we were previously tracking one
+        if class_name not in ["red", "green"]:
+            if self.traffic_light_detected:
+                logger.info("Lost track of traffic light")
+                self.traffic_light_detected = False
+                self.traffic_light_state = None
+            return
+        
+        # Get object dimensions
+        width = object_info['width']
+        height = object_info['height']
+        
+        # Calculate object size relative to frame
+        relative_size = (width * height) / (self.camera_width * self.camera_height)
+        is_close_enough = relative_size > self.traffic_light_distance_threshold
+        
+        # Update traffic light state
+        prev_state = self.traffic_light_state
+        self.traffic_light_state = class_name
+        self.traffic_light_detected = True
+        
+        # Log detection
+        if is_close_enough:
+            logger.info(f"Traffic light {class_name} detected and is close enough (size: {relative_size:.2f})")
+        else:
+            logger.info(f"Traffic light {class_name} detected but not close enough yet (size: {relative_size:.2f})")
+        
+        # Handle traffic light behavior
+        if is_close_enough:
+            # Only announce state changes to avoid repetition
+            if class_name == "red" and (prev_state != "red" or not self.waiting_for_green):
+                # Red light - stop and announce
+                self.px.forward(0)
+                self.waiting_for_green = True
+                
+                # Announce if TTS manager is available
+                if self.tts_manager:
+                    self.tts_manager.say("feu rouge détecté", priority=1)
+                
+                logger.info("RED LIGHT - Stopping robot")
+                
+            elif class_name == "green":
+                if self.waiting_for_green:
+                    # We were waiting for green after seeing red, now proceed
+                    self.px.forward(10)  # 10% speed
+                    self.waiting_for_green = False
+                    
+                    # Announce if TTS manager is available
+                    if self.tts_manager:
+                        self.tts_manager.say("feu vert détecté", priority=1)
+                    
+                    logger.info("GREEN LIGHT after RED - Proceeding at 10% speed")
+                elif prev_state != "green":
+                    # Green light from no previous light detected
+                    self.px.forward(10)  # 10% speed
+                    
+                    # Announce if TTS manager is available
+                    if self.tts_manager:
+                        self.tts_manager.say("feu vert détecté", priority=1)
+
+                    logger.info("GREEN LIGHT - Proceeding at 10% speed")
+        elif not self.waiting_for_green:
+            # If not close enough and not waiting for green after red, move forward
+            self.px.forward(10)  # 10% speed
+            logger.info("Traffic light detected but not close enough, proceeding at 10% speed")

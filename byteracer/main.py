@@ -64,7 +64,7 @@ class ByteRacer:
             camera_size=camera_size
         )
 
-        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager)
+        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager)
         self.network_manager = NetworkManager()
         self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager)
         
