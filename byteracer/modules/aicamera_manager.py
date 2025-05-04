@@ -592,7 +592,7 @@ class AICameraCameraManager:
             loop.run_until_complete(self._yolo_detection_loop())
         finally:
             loop.close()
-      def stop_yolo_detection(self):
+    def stop_yolo_detection(self):
         """
         Stops YOLO object detection.
         """
