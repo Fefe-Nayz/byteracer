@@ -61,7 +61,10 @@ type WebSocketEventName =
   | "stop_listening"       // For stopping audio listening
   | "python_status_request" // For requesting Python connection status
   | "log_message"
-  | "speech_recognition";
+  | "speech_recognition"
+  | "start_calibration"
+  | "stop_calibration"
+  | "test_calibration";
 
 type WebSocketEvent = {
   name: WebSocketEventName;
@@ -404,6 +407,24 @@ const wsHandlers = {
           console.log("Speech recognition data received");
           // Forward speech recognition data to all controllers
           broadcastToType(message, "controller", ws);
+          break;
+
+        case "start_calibration":
+          console.log("Start calibration command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "stop_calibration":
+          console.log("Stop calibration command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "test_calibration":
+          console.log("Test calibration command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
           break;
 
         default:

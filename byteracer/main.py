@@ -205,6 +205,10 @@ class ByteRacer:
         self.sensor_manager.edge_detection_threshold = settings["safety"]["edge_threshold"]
         self.sensor_manager.client_timeout = settings["safety"]["client_timeout"]
 
+        # Apply AI settings
+        self.gpt_manager.set_pause_threshold(settings["ai"]["pause_threshold"])
+        self.aicamera_manager.set_distance_threshold(settings["ai"]["distance_threshold"])
+        self.aicamera_manager.set_turn_time(settings["ai"]["turn_time"])
         
         logging.info("Applied settings from configuration")
     
@@ -606,6 +610,33 @@ class ByteRacer:
                 await self.send_command_response({
                     "success": True,
                     "message": "Stopped listening"
+                })
+
+            elif data["name"] == "start_calibration":
+                # Handle start calibration request
+                logging.info("Received start calibration request")
+                await self.aicamera_manager.calibrate_right_turn_interactive(command="start")
+                await self.send_command_response({
+                    "success": True,
+                    "message": "Started calibration"
+                })
+
+            elif data["name"] == "stop_calibration":
+                # Handle stop calibration request
+                logging.info("Received stop calibration request")
+                await self.aicamera_manager.calibrate_right_turn_interactive(command="stop")
+                await self.send_command_response({
+                    "success": True,
+                    "message": "Stopped calibration"
+                })
+
+            elif data["name"] == "test_calibration":
+                # Handle test calibration request
+                logging.info("Received test calibration request")
+                await self.aicamera_manager.calibrate_right_turn_interactive(command="test")
+                await self.send_command_response({
+                    "success": True,
+                    "message": "Test calibration started"
                 })
 
             elif data["name"] == "audio_stream":
@@ -1107,6 +1138,18 @@ class ByteRacer:
                 if hasattr(self, 'gpt_manager'):
                     self.gpt_manager.api_key = api["openai_api_key"]
                     logging.info("Updated GPT manager with new API key")
+
+        if "ai" in settings:
+            ai = settings["ai"]
+            if "speak_pause_threshold" in ai:
+                self.config_manager.set("ai.speak_pause_threshold", ai["speak_pause_threshold"])
+                self.gpt_manager.set_pause_threshold(ai["speak_pause_threshold"])
+            if "distance_threshold" in ai:
+                self.config_manager.set("ai.distance_threshold", ai["distance_threshold"])
+                self.aicamera_manager.set_distance_threshold(ai["distance_threshold"])
+            if "turn_time" in ai:
+                self.config_manager.set("ai.turn_time", ai["turn_time"])
+                self.aicamera_manager.set_turn_time(ai["turn_time"])
 
         if "camera" in settings:
             camera = settings["camera"]

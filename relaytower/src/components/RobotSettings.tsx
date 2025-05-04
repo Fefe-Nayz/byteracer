@@ -7,39 +7,43 @@ import { Switch } from "./ui/switch";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { 
+import {
   Volume2, Megaphone, Camera, AlertTriangle,
   PersonStanding, TrafficCone, BarChart, Gamepad2,
   Repeat, GitBranch, BrainCircuit
 } from "lucide-react";
 
 export default function RobotSettings() {
-  const { 
-    status, 
-    settings, 
-    updateSettings, 
+  const {
+    status,
+    settings,
+    updateSettings,
     requestSettings,
-    resetSettings 
+    resetSettings,
+    startCalibration,
+    stopCalibration,
+    testCalibration,
   } = useWebSocket();
-  
+
   // Local state for settings (to avoid constant updates)
   const [localSettings, setLocalSettings] = useState<RobotSettingsType | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  
+  const [isCalibrating, setIsCalibrating] = useState(false);
+
   // Update local settings when we get them from the server
   useEffect(() => {
     if (settings) {
       setLocalSettings(settings);
       console.log("Received settings:", settings);
     }
-    
+
     if (saveStatus === "saving") {
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 2000);
     }
 
   }, [settings]);
-  
+
   // Request settings when component mounts or reconnects
   useEffect(() => {
     if (status === "connected") {
@@ -53,47 +57,47 @@ export default function RobotSettings() {
       <Card className="p-4">
         <h3 className="font-bold mb-3">Robot Settings</h3>
         <div className="text-sm text-gray-500 italic">
-          {status === "connected" 
-            ? "Loading settings..." 
+          {status === "connected"
+            ? "Loading settings..."
             : "Connect to robot to view settings"}
         </div>
       </Card>
     );
   }
-  
+
   // Update a specific setting
   const updateSetting = (
-    category: keyof RobotSettingsType, 
-    key: string, 
+    category: keyof RobotSettingsType,
+    key: string,
     value: unknown
   ) => {
     setLocalSettings(prev => {
       if (!prev) return prev;
-      
+
       // Create deep copy of the settings
       const updated = JSON.parse(JSON.stringify(prev));
-      
+
       // Update the specific setting
       updated[category][key] = value;
 
       console.log("Updated settings:", updated);
-      
+
       return updated;
     });
   };
-  
+
   // Save settings to the robot
   const saveSettings = () => {
     if (!localSettings) return;
-    
+
     setSaveStatus("saving");
     updateSettings(localSettings);
-    
+
     // On settings save, the app will send the updated settings to the robot so we change the status to "saved" after receiving the new settings response
 
 
   };
-  
+
   // Discard changes
   const discardChanges = () => {
     if (settings) {
@@ -106,7 +110,7 @@ export default function RobotSettings() {
       {/* Sound settings */}
       <Card className="p-4">
         <h3 className="font-bold mb-4">Sound Settings</h3>
-        
+
         <div className="space-y-6">
           {/* Master volume */}
           <div className="space-y-4">
@@ -115,124 +119,124 @@ export default function RobotSettings() {
                 <Volume2 className="h-4 w-4" />
                 <span className="text-sm font-medium">Master Volume</span>
               </div>
-              <Switch 
+              <Switch
                 checked={localSettings.sound.enabled}
-                onCheckedChange={(checked) => 
+                onCheckedChange={(checked) =>
                   updateSetting("sound", "enabled", checked)
                 }
               />
             </div>
-            
+
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span>Master Volume</span>
                 <span>{localSettings.sound.volume}%</span>
               </div>
-              <Slider 
+              <Slider
                 value={[localSettings.sound.volume]}
                 min={0}
                 max={100}
                 step={1}
                 disabled={!localSettings.sound.enabled}
-                onValueChange={(value) => 
+                onValueChange={(value) =>
                   updateSetting("sound", "volume", value[0])
                 }
               />
             </div>
           </div>
-          
+
           {/* Sound effects section */}
           <div className="pt-4 border-t space-y-4">
             <div className="text-sm font-medium mb-2">Sound Effects</div>
-            
+
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span>Effects Master Volume</span>
                 <span>{localSettings.sound.sound_volume !== undefined ? localSettings.sound.sound_volume : 80}%</span>
               </div>
-              <Slider 
+              <Slider
                 value={[localSettings.sound.sound_volume !== undefined ? localSettings.sound.sound_volume : 80]}
                 min={0}
                 max={100}
                 step={1}
                 disabled={!localSettings.sound.enabled}
-                onValueChange={(value) => 
+                onValueChange={(value) =>
                   updateSetting("sound", "sound_volume", value[0])
                 }
               />
             </div>
-            
+
             <div className="pl-4 pt-2 space-y-3">
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Driving Sounds</span>
                   <span>{localSettings.sound.driving_volume !== undefined ? localSettings.sound.driving_volume : 80}%</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.driving_volume !== undefined ? localSettings.sound.driving_volume : 80]}
                   min={0}
                   max={100}
                   step={1}
                   disabled={!localSettings.sound.enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "driving_volume", value[0])
                   }
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Alert Sounds</span>
                   <span>{localSettings.sound.alert_volume !== undefined ? localSettings.sound.alert_volume : 90}%</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.alert_volume !== undefined ? localSettings.sound.alert_volume : 90]}
                   min={0}
                   max={100}
                   step={1}
                   disabled={!localSettings.sound.enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "alert_volume", value[0])
                   }
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Custom Sounds</span>
                   <span>{localSettings.sound.custom_volume !== undefined ? localSettings.sound.custom_volume : 80}%</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.custom_volume !== undefined ? localSettings.sound.custom_volume : 80]}
                   min={0}
                   max={100}
                   step={1}
                   disabled={!localSettings.sound.enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "custom_volume", value[0])
                   }
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Push-to-Talk Voice</span>
                   <span>{localSettings.sound.voice_volume !== undefined ? localSettings.sound.voice_volume : 95}%</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.voice_volume !== undefined ? localSettings.sound.voice_volume : 95]}
                   min={0}
                   max={100}
                   step={1}
                   disabled={!localSettings.sound.enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "voice_volume", value[0])
                   }
                 />
               </div>
             </div>
           </div>
-          
+
           {/* TTS settings */}
           <div className="pt-4 border-t space-y-4">
             <div className="flex items-center justify-between">
@@ -240,78 +244,78 @@ export default function RobotSettings() {
                 <Megaphone className="h-4 w-4" />
                 <span className="text-sm font-medium">Text-to-Speech</span>
               </div>
-              <Switch 
+              <Switch
                 checked={localSettings.sound.tts_enabled}
-                onCheckedChange={(checked) => 
+                onCheckedChange={(checked) =>
                   updateSetting("sound", "tts_enabled", checked)
                 }
               />
             </div>
-            
+
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span>TTS Master Volume</span>
                 <span>{localSettings.sound.tts_volume}%</span>
               </div>
-              <Slider 
+              <Slider
                 value={[localSettings.sound.tts_volume]}
                 min={0}
                 max={100}
                 step={1}
                 disabled={!localSettings.sound.tts_enabled}
-                onValueChange={(value) => 
+                onValueChange={(value) =>
                   updateSetting("sound", "tts_volume", value[0])
                 }
               />
             </div>
-            
+
             <div className="pl-4 pt-2 space-y-3">
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>User TTS</span>
                   <span>{localSettings.sound.user_tts_volume !== undefined ? localSettings.sound.user_tts_volume : 80}%</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.user_tts_volume !== undefined ? localSettings.sound.user_tts_volume : 80]}
                   min={0}
                   max={100}
                   step={1}
                   disabled={!localSettings.sound.tts_enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "user_tts_volume", value[0])
                   }
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>System TTS</span>
                   <span>{localSettings.sound.system_tts_volume !== undefined ? localSettings.sound.system_tts_volume : 90}%</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.system_tts_volume !== undefined ? localSettings.sound.system_tts_volume : 90]}
                   min={0}
                   max={100}
                   step={1}
                   disabled={!localSettings.sound.tts_enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "system_tts_volume", value[0])
                   }
                 />
               </div>
-              
+
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Emergency TTS</span>
                   <span>{localSettings.sound.emergency_tts_volume !== undefined ? localSettings.sound.emergency_tts_volume : 95}%</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.emergency_tts_volume !== undefined ? localSettings.sound.emergency_tts_volume : 95]}
                   min={0}
                   max={100}
                   step={1}
                   disabled={!localSettings.sound.tts_enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "emergency_tts_volume", value[0])
                   }
                 />
@@ -322,13 +326,13 @@ export default function RobotSettings() {
                   <span>TTS Audio Gain (dB)</span>
                   <span>{localSettings.sound.tts_audio_gain !== undefined ? localSettings.sound.tts_audio_gain : 6}</span>
                 </div>
-                <Slider 
+                <Slider
                   value={[localSettings.sound.tts_audio_gain !== undefined ? localSettings.sound.tts_audio_gain : 6]}
                   min={0}
                   max={15}
                   step={1}
                   disabled={!localSettings.sound.tts_enabled}
-                  onValueChange={(value) => 
+                  onValueChange={(value) =>
                     updateSetting("sound", "tts_audio_gain", value[0])
                   }
                 />
@@ -337,12 +341,12 @@ export default function RobotSettings() {
                 </div>
               </div>
             </div>
-            
+
             <div>
               <div className="mb-1 text-xs">TTS Language</div>
-              <Select 
-                value={localSettings.sound.tts_language} 
-                onValueChange={(value) => 
+              <Select
+                value={localSettings.sound.tts_language}
+                onValueChange={(value) =>
                   updateSetting("sound", "tts_language", value)
                 }
                 disabled={!localSettings.sound.tts_enabled}
@@ -363,291 +367,380 @@ export default function RobotSettings() {
           </div>
         </div>
       </Card>
-      
-      {/* Camera settings */}
-      <Card className="p-4">
-        <h3 className="font-bold mb-4">Camera Settings</h3>
-        
-        <div className="space-y-6">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Camera className="h-4 w-4" />
-                <span className="text-sm">Vertical Flip</span>
+
+      <div className="gap-6 grid ">
+        {/* Camera settings */}
+        <Card className="p-4">
+          <h3 className="font-bold mb-4">Camera Settings</h3>
+
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Camera className="h-4 w-4" />
+                  <span className="text-sm">Vertical Flip</span>
+                </div>
+                <Switch
+                  checked={localSettings.camera.vflip}
+                  onCheckedChange={(checked) =>
+                    updateSetting("camera", "vflip", checked)
+                  }
+                />
               </div>
-              <Switch 
-                checked={localSettings.camera.vflip}
-                onCheckedChange={(checked) => 
-                  updateSetting("camera", "vflip", checked)
-                }
-              />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Camera className="h-4 w-4" />
-                <span className="text-sm">Horizontal Flip</span>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Camera className="h-4 w-4" />
+                  <span className="text-sm">Horizontal Flip</span>
+                </div>
+                <Switch
+                  checked={localSettings.camera.hflip}
+                  onCheckedChange={(checked) =>
+                    updateSetting("camera", "hflip", checked)
+                  }
+                />
               </div>
-              <Switch 
-                checked={localSettings.camera.hflip}
-                onCheckedChange={(checked) => 
-                  updateSetting("camera", "hflip", checked)
-                }
-              />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Camera className="h-4 w-4" />
-                <span className="text-sm">Local Display</span>
-                <span className="text-xs text-gray-500">(if connected)</span>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Camera className="h-4 w-4" />
+                  <span className="text-sm">Local Display</span>
+                  <span className="text-xs text-gray-500">(if connected)</span>
+                </div>
+                <Switch
+                  checked={localSettings.camera.local_display}
+                  onCheckedChange={(checked) =>
+                    updateSetting("camera", "local_display", checked)
+                  }
+                />
               </div>
-              <Switch 
-                checked={localSettings.camera.local_display}
-                onCheckedChange={(checked) => 
-                  updateSetting("camera", "local_display", checked)
-                }
-              />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Camera className="h-4 w-4" />
-                <span className="text-sm">Web Display</span>
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Camera className="h-4 w-4" />
+                  <span className="text-sm">Web Display</span>
+                </div>
+                <Switch
+                  checked={localSettings.camera.web_display}
+                  onCheckedChange={(checked) =>
+                    updateSetting("camera", "web_display", checked)
+                  }
+                />
               </div>
-              <Switch 
-                checked={localSettings.camera.web_display}
-                onCheckedChange={(checked) => 
-                  updateSetting("camera", "web_display", checked)
-                }
-              />
-            </div>
-            
-            <div className="pt-2">
-              <div className="mb-1 text-xs">Camera Resolution</div>
-              <Select
-                value={Array.isArray(localSettings.camera.camera_size) ? 
-                  `${localSettings.camera.camera_size[0]}x${localSettings.camera.camera_size[1]}` : 
-                  "1920x1080"}
-                onValueChange={(value) => {
-                  const [width, height] = value.split('x').map(Number);
-                  updateSetting("camera", "camera_size", [width, height]);
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select resolution" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="640x480">640 x 480 (SD)</SelectItem>
-                  <SelectItem value="1280x720">1280 x 720 (HD)</SelectItem>
-                  <SelectItem value="1920x1080">1920 x 1080 (Full HD)</SelectItem>
-                </SelectContent>
-              </Select>
-              <div className="mt-1 text-xs text-gray-500">
-                Higher resolution provides better image quality but may affect performance.
+
+              <div className="pt-2">
+                <div className="mb-1 text-xs">Camera Resolution</div>
+                <Select
+                  value={Array.isArray(localSettings.camera.camera_size) ?
+                    `${localSettings.camera.camera_size[0]}x${localSettings.camera.camera_size[1]}` :
+                    "1920x1080"}
+                  onValueChange={(value) => {
+                    const [width, height] = value.split('x').map(Number);
+                    updateSetting("camera", "camera_size", [width, height]);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select resolution" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="640x480">640 x 480 (SD)</SelectItem>
+                    <SelectItem value="1280x720">1280 x 720 (HD)</SelectItem>
+                    <SelectItem value="1920x1080">1920 x 1080 (Full HD)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="mt-1 text-xs text-gray-500">
+                  Higher resolution provides better image quality but may affect performance.
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      </Card>
-      
+        </Card>
+
+        {/* AI settings */}
+        <Card className="p-4">
+          <h3 className="font-bold mb-4">AI Settings</h3>
+
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Speak Pause Threshold</span>
+                  <span>{localSettings.ai.speak_pause_threshold}</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.speak_pause_threshold]}
+                  min={0.1}
+                  max={5}
+                  step={0.01}
+                  disabled={!localSettings.ai.speak_pause_threshold}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "speak_pause_threshold", value[0])
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Distance Threshold <span className="text-xs text-gray-500">(Bigger is less sensitive)</span></span>
+                  <span>{localSettings.ai.distance_threshold}</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.distance_threshold]}
+                  min={0.01}
+                  max={1}
+                  step={0.001}
+                  disabled={!localSettings.ai.distance_threshold}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "distance_threshold", value[0])
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Turn Time </span>
+                  <span>{localSettings.ai.turn_time}</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.turn_time]}
+                  min={0.5}
+                  max={10}
+                  step={0.1}
+                  disabled={!localSettings.ai.turn_time}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "turn_time", value[0])
+                  }
+                />
+                {/* Toggle button for starting/stopping calibration. The state is only local (no localSettings) */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm">Calibration</span>
+                  </div>
+                  <Button
+                    variant={isCalibrating ? "destructive" : "default"}
+                    onClick={() => {
+                      if (isCalibrating) {
+                        stopCalibration();
+                        setIsCalibrating(false);
+                      } else {
+                        startCalibration();
+                        setIsCalibrating(true);
+                      }
+                    }}
+                  >
+                    {isCalibrating ? "Stop" : "Start"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      testCalibration();
+                    }}
+                  >
+                    Test Calibration
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
       {/* Safety settings */}
       <Card className="p-4">
         <h3 className="font-bold mb-4">Safety Settings</h3>
-        
+
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <AlertTriangle className="h-4 w-4" />
               <span className="text-sm">Collision Avoidance</span>
             </div>
-            <Switch 
+            <Switch
               checked={localSettings.safety.collision_avoidance}
-              onCheckedChange={(checked) => 
+              onCheckedChange={(checked) =>
                 updateSetting("safety", "collision_avoidance", checked)
               }
             />
           </div>
-          
+
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
               <span>Collision Threshold (cm)</span>
               <span>{localSettings.safety.collision_threshold}</span>
             </div>
-            <Slider 
+            <Slider
               value={[localSettings.safety.collision_threshold]}
               min={10}
               max={100}
               step={5}
               disabled={!localSettings.safety.collision_avoidance}
-              onValueChange={(value) => 
+              onValueChange={(value) =>
                 updateSetting("safety", "collision_threshold", value[0])
               }
             />
           </div>
-          
+
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <AlertTriangle className="h-4 w-4" />
               <span className="text-sm">Edge Detection</span>
             </div>
-            <Switch 
+            <Switch
               checked={localSettings.safety.edge_detection}
-              onCheckedChange={(checked) => 
+              onCheckedChange={(checked) =>
                 updateSetting("safety", "edge_detection", checked)
               }
             />
           </div>
-          
+
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
               <span>Edge Detection Threshold <span className="text-xs text-gray-500">(Lower is less sensitive)</span></span>
               <span>{localSettings.safety.edge_threshold}</span>
             </div>
-            <Slider 
+            <Slider
               value={[localSettings.safety.edge_threshold]}
               min={0.1}
               max={0.9}
               step={0.05}
               disabled={!localSettings.safety.edge_detection}
-              onValueChange={(value) => 
+              onValueChange={(value) =>
                 updateSetting("safety", "edge_threshold", value[0])
               }
             />
           </div>
-          
+
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <AlertTriangle className="h-4 w-4" />
               <span className="text-sm">Auto-Stop on Timeout</span>
             </div>
-            <Switch 
+            <Switch
               checked={localSettings.safety.auto_stop}
-              onCheckedChange={(checked) => 
+              onCheckedChange={(checked) =>
                 updateSetting("safety", "auto_stop", checked)
               }
             />
           </div>
-          
+
           <div className="space-y-2">
             <div className="flex justify-between text-xs">
               <span>Client Timeout (seconds)</span>
               <span>{localSettings.safety.client_timeout}</span>
             </div>
-            <Slider 
+            <Slider
               value={[localSettings.safety.client_timeout]}
               min={1}
               max={30}
               step={1}
               disabled={!localSettings.safety.auto_stop}
-              onValueChange={(value) => 
+              onValueChange={(value) =>
                 updateSetting("safety", "client_timeout", value[0])
               }
             />
           </div>
         </div>
       </Card>
-      
+
       {/* Drive & Mode settings */}
       <Card className="p-4">
         <div className="mb-6">
           <h3 className="font-bold mb-4">Drive Settings</h3>
-          
+
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span>Max Speed (%)</span>
                 <span>{localSettings.drive.max_speed}</span>
               </div>
-              <Slider 
+              <Slider
                 value={[localSettings.drive.max_speed]}
                 min={10}
                 max={100}
                 step={5}
-                onValueChange={(value) => 
+                onValueChange={(value) =>
                   updateSetting("drive", "max_speed", value[0])
                 }
               />
             </div>
-            
+
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span>Max Turn Angle (%)</span>
                 <span>{localSettings.drive.max_turn_angle}</span>
               </div>
-              <Slider 
+              <Slider
                 value={[localSettings.drive.max_turn_angle]}
                 min={10}
                 max={100}
                 step={5}
-                onValueChange={(value) => 
+                onValueChange={(value) =>
                   updateSetting("drive", "max_turn_angle", value[0])
                 }
               />
             </div>
-            
+
             <div className="space-y-2">
               <div className="flex justify-between text-xs">
                 <span>Acceleration Factor</span>
                 <span>{localSettings.drive.acceleration_factor}</span>
               </div>
-              <Slider 
+              <Slider
                 value={[localSettings.drive.acceleration_factor]}
                 min={0.1}
                 max={1.0}
                 step={0.05}
-                onValueChange={(value) => 
+                onValueChange={(value) =>
                   updateSetting("drive", "acceleration_factor", value[0])
                 }
               />
             </div>
-            
+
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <span className="text-sm">Enhanced Turning</span>
                 <span className="text-xs text-gray-500">(differential steering)</span>
               </div>
-              <Switch 
+              <Switch
                 checked={localSettings.drive.enhanced_turning}
-                onCheckedChange={(checked) => 
+                onCheckedChange={(checked) =>
                   updateSetting("drive", "enhanced_turning", checked)
                 }
               />
             </div>
-            
+
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <span className="text-sm">Turn in Place</span>
                 <span className="text-xs text-gray-500">(rotate on spot when stationary)</span>
               </div>
-              <Switch 
+              <Switch
                 checked={localSettings.drive.turn_in_place}
-                onCheckedChange={(checked) => 
+                onCheckedChange={(checked) =>
                   updateSetting("drive", "turn_in_place", checked)
                 }
               />
             </div>
           </div>
         </div>
-        
+
         <div>
           <h3 className="font-bold mb-4">Mode Settings</h3>
-          
+
           <div className="space-y-4">
             <div className="space-y-2">
               <div className="flex items-center space-x-2 mb-2">
                 <span className="text-sm font-medium">Operation Mode</span>
                 <span className="text-xs text-gray-500">(select one)</span>
               </div>
-              
-              <Select 
+
+              <Select
                 value={
                   localSettings.modes.normal_mode_enabled ? "normal" :
-                  localSettings.modes.tracking_enabled ? "tracking" :
-                  localSettings.modes.circuit_mode_enabled ? "circuit" :
-                  localSettings.modes.demo_mode_enabled ? "demo" :
-                  "normal" // Default fallback
-                } 
+                    localSettings.modes.tracking_enabled ? "tracking" :
+                      localSettings.modes.circuit_mode_enabled ? "circuit" :
+                        localSettings.modes.demo_mode_enabled ? "demo" :
+                          "normal" // Default fallback
+                }
                 onValueChange={(value) => {
                   // Update all mode settings based on selection
                   updateSetting("modes", "normal_mode_enabled", value === "normal");
@@ -690,7 +783,7 @@ export default function RobotSettings() {
           </div>
         </div>
       </Card>
-      
+
       {/* GitHub & System Settings - NEW CARD */}
       <Card className="p-4 md:col-span-2">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -701,41 +794,41 @@ export default function RobotSettings() {
               <GitBranch className="h-4 w-4" />
               <span className="text-sm font-medium">GitHub Repository Settings</span>
             </div>
-            
+
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <div className="mb-1 text-xs">Repository URL</div>
-                <Input 
+                <Input
                   value={localSettings.github?.repo_url || "https://github.com/nayzflux/byteracer.git"}
                   onChange={(e) => updateSetting("github", "repo_url", e.target.value)}
                   placeholder="https://github.com/user/repo.git"
                 />
               </div>
-              
+
               <div>
                 <div className="mb-1 text-xs">Branch Name</div>
-                <Input 
+                <Input
                   value={localSettings.github?.branch || "working-2"}
                   onChange={(e) => updateSetting("github", "branch", e.target.value)}
                   placeholder="main"
                 />
               </div>
             </div>
-            
+
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Repeat className="h-4 w-4" />
                 <span className="text-sm">Auto Update on Boot</span>
               </div>
-              <Switch 
+              <Switch
                 checked={localSettings.github?.auto_update !== false}
-                onCheckedChange={(checked) => 
+                onCheckedChange={(checked) =>
                   updateSetting("github", "auto_update", checked)
                 }
               />
             </div>
           </div>
-          
+
           {/* API Settings */}
           <div className="space-y-4">
             <h3 className="font-bold mb-4">API Settings</h3>
@@ -743,11 +836,11 @@ export default function RobotSettings() {
               <BrainCircuit className="h-4 w-4" />
               <span className="text-sm font-medium">OpenAI Integration</span>
             </div>
-            
+
             <div className="grid grid-cols-1 gap-4">
               <div>
                 <div className="mb-1 text-xs">API Key</div>
-                <Input 
+                <Input
                   type="password"
                   value={localSettings.api?.openai_api_key || ""}
                   onChange={(e) => updateSetting("api", "openai_api_key", e.target.value)}
@@ -761,27 +854,27 @@ export default function RobotSettings() {
           </div>
         </div>
       </Card>
-      
+
       {/* Save buttons */}
       <div className="md:col-span-2 flex justify-end space-x-4">
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           onClick={discardChanges}
         >
           Discard Changes
         </Button>
-        
-        <Button 
+
+        <Button
           variant="destructive"
           onClick={() => {
-              resetSettings();
-              setSaveStatus("idle");
+            resetSettings();
+            setSaveStatus("idle");
           }}
         >
           Reset to Defaults
         </Button>
-        
-        <Button 
+
+        <Button
           onClick={saveSettings}
           disabled={saveStatus === "saving"}
           className="min-w-[100px]"

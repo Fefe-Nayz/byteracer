@@ -168,6 +168,11 @@ export interface RobotSettings {
   };
   api: {
     openai_api_key: string;
+  },
+  ai: {
+    speak_pause_threshold: number;
+    distance_threshold: number;
+    turn_time: number;
   }
 }
 
@@ -260,6 +265,9 @@ interface WebSocketContextValue {
   sendAudioStream: (audioData: string) => void;
   startListening: () => void;
   stopListening: () => void;
+  startCalibration: () => void;
+  stopCalibration: () => void;
+  testCalibration: () => void;
 }
 
 // Create context with default values
@@ -1014,6 +1022,71 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  const startCalibration = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const startCalibrationData = {
+        name: "start_calibration",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(startCalibrationData));
+      trackWsMessage("sent", startCalibrationData);
+      console.log("Start calibration request sent to robot");
+    } else {
+      logError("Cannot send start calibration request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }
+  , [socket]);
+
+  const stopCalibration = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const stopCalibrationData = {
+        name: "stop_calibration",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(stopCalibrationData));
+      trackWsMessage("sent", stopCalibrationData);
+      console.log("Stop calibration request sent to robot");
+    } else {
+      logError("Cannot send stop calibration request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  const testCalibration = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const testCalibrationData = {
+        name: "test_calibration",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(testCalibrationData));
+      trackWsMessage("sent", testCalibrationData);
+      console.log("Test calibration request sent to robot");
+    } else {
+      logError("Cannot send test calibration request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+
   // Combine all values and functions for the context
   const contextValue: WebSocketContextValue = {
     // Connection
@@ -1058,6 +1131,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     sendAudioStream,
     startListening,
     stopListening,
+    startCalibration,
+    stopCalibration,
+    testCalibration,
   };
 
   return (

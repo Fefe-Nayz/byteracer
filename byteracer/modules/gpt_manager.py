@@ -91,6 +91,7 @@ class GPTManager:
         # Conversation mode properties
         self.is_conversation_active = False
         self.conversation_cancelled = False
+        self.pause_threshold = 1.2
 
     def _listen_and_transcribe_blocking(self) -> str:
         """
@@ -101,7 +102,7 @@ class GPTManager:
         r = sr.Recognizer()
         r.dynamic_energy_adjustment_damping = 0.16
         r.dynamic_energy_ratio = 1.6
-        r.pause_threshold = 1.2
+        r.pause_threshold = self.pause_threshold
         CHUNK = 8192
 
         # 2) whisper call
@@ -2299,3 +2300,16 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         else:
             self.aicamera_manager.stop_color_control()
             self.aicamera_manager.stop_traffic_sign_detection()
+
+    def set_pause_threshold(self, threshold):
+        """
+        Set the pause threshold for the robot.
+        """
+        if not isinstance(threshold, (int, float)) or threshold <= 0:
+            logger.warning(f"Invalid pause threshold: {threshold}. Must be a positive number.")
+            return False
+        
+        self.config_manager.set("ai.speak_pause_threshold", threshold)
+        self.pause_threshold = threshold
+        logger.info(f"Pause threshold set to {threshold}")
+        return True

@@ -95,6 +95,11 @@ class ConfigManager:
             "api": {
                 "openai_api_key": ""
             },
+            "ai": {
+                "speak_pause_threshold": 1.2,
+                "distance_threshold": 0.02,
+                "turn_time": 2,
+            },
         }
         
         # Lock for thread safety
@@ -401,8 +406,13 @@ class ConfigManager:
             "api": {
                 "openai_api_key": ""
             },
+            "ai": {
+                "speak_pause_threshold": 1.2,
+                "distance_threshold": 0.02,
+                "turn_time": 2,
+            },
         }
-        
+
         with self._lock:
             if section is None:
                 # Reset everything except network settings
