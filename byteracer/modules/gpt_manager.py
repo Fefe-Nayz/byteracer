@@ -325,9 +325,10 @@ class GPTManager:
                 "width": {"type": ["number", "null"], "description": "Width dimension"},
                 "height": {"type": ["number", "null"], "description": "Height dimension"},
                 "local_display": {"type": ["boolean", "null"], "description": "Local display setting"},                
-                "web_display": {"type": ["boolean", "null"], "description": "Web display setting"}
+                "web_display": {"type": ["boolean", "null"], "description": "Web display setting"},
+                "mode": {"type": ["string", "null"], "description": "Mode for the robot. Available modes: 'normal', 'tracking', 'circuit', 'demo'."},
               },
-              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display"],
+              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode"],
               "additionalProperties": False
             }
           },
@@ -781,6 +782,8 @@ def _build_script_with_environment(script_code: str) -> str:
    • set_camera_flip(vflip: boolean, hflip: boolean): Camera orientation
    • set_camera_size(width: number, height: number): Resolution control
    • set_camera_display(local_display: boolean, web_display: boolean): Display settings
+     Robot State:
+   • change_mode(mode: string): Changes robot mode. Available modes: "normal" (gamepad control), "tracking" (follows person), "circuit" (follow traffic light) and "demo" (demo mode)
      System Commands:
    • restart_robot(): Reboots entire system
    • shutdown_robot(): Powers down system
@@ -1979,6 +1982,50 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     asyncio.create_task(self.camera_manager.restart())
                 logger.info(f"Camera size updated to {width}x{height}")
                 return True
+            
+            elif function_name == "change_mode":
+                # this function is used to change the mode of the robot, we should end the conversation if it is active, end gpt mode and set the mode to either: demo, circuit, or normal controller mode
+                # we should update the settings and change the robot state
+
+                # End the conversation if active
+                try:
+                    self.conversation_cancelled = True
+                    self.is_conversation_active = False
+                    await self._send_gpt_status_update(websocket, "cancelled", "Command cancelled successfully")
+                    # Apply mode changes
+                    logger.info(f"Changing mode to {parameters['mode']}")
+
+                    self.config_manager.set("modes.demo_mode_enabled", parameters["mode"] == "demo")
+                    self.sensor_manager.set_demo_mode(parameters["mode"] == "demo")
+                    if parameters["mode"] == "demo":
+                        self.sensor_manager.robot_state = RobotState.DEMO_MODE
+                    
+                    self.config_manager.set("modes.circuit_mode_enabled", parameters["mode"] == "circuit")
+                    self.sensor_manager.set_circuit_mode(parameters["mode"] == "circuit")
+                    if parameters["mode"] == "circuit":
+                        self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
+                        self.aicamera_manager.start_color_control()
+                        self.aicamera_manager.start_traffic_sign_detection()
+                    else:
+                        self.aicamera_manager.stop_color_control()
+                        self.aicamera_manager.stop_traffic_sign_detection()
+                    
+                    self.config_manager.set("modes.tracking_enabled", parameters["mode"] == "tracking")
+                    self.sensor_manager.set_tracking(parameters["mode"] == "tracking")
+                    if parameters["mode"] == "tracking":
+                        self.sensor_manager.robot_state = RobotState.TRACKING_MODE
+                        self.aicamera_manager.start_face_following()
+                    else:
+                        self.aicamera_manager.stop_face_following()
+
+                    self.config_manager.set("modes.normal_mode_enabled", parameters["mode"] == "normal")
+                    self.sensor_manager.set_normal_mode(parameters["mode"] == "normal")
+                    if parameters["mode"] == "normal":
+                        self.sensor_manager.robot_state = RobotState.STANDBY
+                    return True
+                except Exception as e:
+                    logger.error(f"Error in change_mode: {e}")
+                    return False
 
             # SYSTEM FUNCTIONS
             elif function_name == "restart_robot":
@@ -2239,6 +2286,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         self.sensor_manager.set_tracking(settings["modes"]["tracking_enabled"])
         self.sensor_manager.set_circuit_mode(settings["modes"]["circuit_mode_enabled"])
         self.sensor_manager.set_normal_mode(settings["modes"]["normal_mode_enabled"])
+        self.sensor_manager.set_demo_mode(settings["modes"]["demo_mode_enabled"])
 
         if settings["modes"]["tracking_enabled"]:
             self.aicamera_manager.start_face_following()

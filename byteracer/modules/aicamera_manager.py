@@ -13,11 +13,18 @@ logger = logging.getLogger(__name__)
 class AICameraCameraManager:
     """
     Manages higher-level AI camera capabilities, specifically:
-      1) Traffic light color detection and speed control (red, green, orange).
+      1) Traffic light color detection and speed control (red, yellow, green).
       2) Face detection + following (forward/back & turn).
       3) Pose detection.
-      4) Traffic-sign detection.
+      4) Traffic-sign detection (stop signs, turn right signs).
       5) YOLO object detection using camera feed.
+      
+    Supported traffic signs and behaviors:
+    - Red light: Robot stops and waits for green
+    - Yellow light: Robot stops and waits for green
+    - Green light: Robot proceeds at low speed
+    - Stop sign: Robot stops for 2 seconds then proceeds
+    - Right turn sign: Robot turns right after a 2-second delay
     """    
     def __init__(self, px, sensor_manager, camera_manager, tts_manager):
         # Robot control/hardware
@@ -56,6 +63,22 @@ class AICameraCameraManager:
         self.camera_width = 640
         self.camera_height = 480
         
+        # Traffic sign state variables
+        self.traffic_light_state = None  # Can be "red", "green", "yellow" or None
+        self.traffic_light_detected = False
+        self.waiting_for_green = False  # Flag to track if we're waiting for green after seeing red
+        self.traffic_light_distance_threshold = 0.02  # Object must be at least this fraction of the frame size
+        
+        # Stop sign state variables
+        self.stop_sign_detected = False
+        self.stop_sign_timer = None  # For tracking the 2-second stop duration
+        self.waiting_at_stop_sign = False
+        
+        # Right turn sign state variables 
+        self.right_turn_sign_detected = False
+        self.right_turn_timer = None  # For tracking the 2-second delay before turning
+        self.executing_right_turn = False
+        
         # Auto-load YOLO model if available in modules directory
         self.model_path = os.path.join(os.path.dirname(__file__), 'model.pt')
         if os.path.exists(self.model_path):
@@ -92,14 +115,6 @@ class AICameraCameraManager:
         # Steering servo limit => ±35° (change if physically only ±30°)
         self.STEER_MIN_ANGLE = -35
         self.STEER_MAX_ANGLE =  35
-
-        # Traffic light state
-        self.traffic_light_state = None  # Can be "red", "green", or None
-        self.traffic_light_detected = False
-        self.waiting_for_green = False  # Flag to track if we're waiting for green after seeing red
-        self.traffic_light_distance_threshold = 0.02  # Object must be at least this fraction of the frame size to be considered "close enough"
-        
-        # TTS Manager reference for announcements
 
     def clamp_number(self, num, lower_bound, upper_bound):
         """Clamp 'num' between 'lower_bound' and 'upper_bound'."""
@@ -270,7 +285,6 @@ class AICameraCameraManager:
 
         # logger.info("Starting color control (red/green/orange) ...")
         # self.color_control_active = True
-
         # # Enable detection of red, green, orange in camera_manager
         # self.camera_manager.color_detect(["red", "green", "orange"])
 
@@ -576,6 +590,19 @@ class AICameraCameraManager:
         self.yolo_detection_thread = None
         self.yolo_results = []
         self.yolo_object_count = 0
+        
+        # Reset all state variables
+        self.traffic_light_state = None
+        self.traffic_light_detected = False
+        self.waiting_for_green = False
+        
+        self.stop_sign_detected = False
+        self.stop_sign_timer = None
+        self.waiting_at_stop_sign = False
+        
+        self.right_turn_sign_detected = False
+        self.right_turn_timer = None
+        self.executing_right_turn = False
 
         # Disable drawing overlays
         try:
@@ -635,10 +662,12 @@ class AICameraCameraManager:
                 # Display detections on vilib camera feed for web/local display
                 self.camera_manager.display_yolo_detections_on_vilib(detections, self.yolo_labels, self.yolo_min_confidence)
                 
-                # Find the most prominent object to track (highest confidence)
+                # Find objects to track
                 best_object = None
                 best_confidence = 0
                 traffic_light_object = None
+                stop_sign_object = None
+                right_turn_object = None
                 
                 # Process each detection
                 for i in range(len(detections)):
@@ -666,26 +695,49 @@ class AICameraCameraManager:
                             'height': ymax - ymin
                         }
                         
-                        # Check if this is a traffic light (red or green)
-                        if classname in ["red", "green"]:
+                        # Check for different types of objects we're interested in
+                        if classname in ["red", "green", "yellow"]:
                             # For traffic lights, we always keep the most confident one
                             if traffic_light_object is None or conf > traffic_light_object['confidence']:
                                 traffic_light_object = object_info
                                 logger.info(f"Detected traffic light: {classname} with confidence {conf:.2f}")
+                        elif classname == "stop":
+                            # For stop signs, keep the most confident one
+                            if stop_sign_object is None or conf > stop_sign_object['confidence']:
+                                stop_sign_object = object_info
+                                logger.info(f"Detected stop sign with confidence {conf:.2f}")
+                        elif classname == "right":
+                            # For right turn signs, keep the most confident one
+                            if right_turn_object is None or conf > right_turn_object['confidence']:
+                                right_turn_object = object_info
+                                logger.info(f"Detected right turn sign with confidence {conf:.2f}")
                         
                         # For general object tracking, track the highest confidence object
                         if conf > best_confidence:
                             best_confidence = conf
                             best_object = object_info
                 
+                # Priority of handling:
+                # 1. Traffic lights (highest priority)
+                # 2. Stop signs
+                # 3. Right turn signs
+                
                 # Handle traffic light detection and behavior
                 if traffic_light_object:
                     await self._handle_traffic_light(traffic_light_object['class'], traffic_light_object)
                     # Traffic lights take priority for tracking
                     best_object = traffic_light_object
-                elif not self.waiting_for_green:
-                    # If no traffic light is detected and we're not waiting for a green light,
-                    # move forward at default speed
+                # Handle stop sign if detected and not currently waiting for green at a traffic light
+                elif stop_sign_object and not self.waiting_for_green:
+                    await self._handle_stop_sign(stop_sign_object)
+                    best_object = stop_sign_object
+                # Handle right turn sign if detected and not handling traffic light or stop sign
+                elif right_turn_object and not self.waiting_for_green and not self.waiting_at_stop_sign:
+                    await self._handle_right_turn_sign(right_turn_object)
+                    best_object = right_turn_object
+                # If no priority objects detected and we're not waiting for anything
+                elif not (self.waiting_for_green or self.waiting_at_stop_sign or self.executing_right_turn):
+                    # Move forward at default speed
                     self.px.forward(1)  # 1% speed
                 
                 # Track the best detected object with the camera
@@ -782,212 +834,16 @@ class AICameraCameraManager:
             f"camera pan={self.x_angle:.1f}, tilt={self.y_angle:.1f}"
         )
     
-    def get_yolo_results(self):
-        """
-        Get the latest YOLO detection results.
-        
-        Returns:
-            list: YOLO detection results
-        """
-        return self.yolo_results
-    
-    def get_yolo_object_count(self):
-        """
-        Get the number of objects detected above the confidence threshold.
-        
-        Returns:
-            int: Number of detected objects
-        """
-        return self.yolo_object_count
-    
-    def process_single_frame(self, frame=None):
-        """
-        Process a single frame with the YOLO model and return results.
-        This method doesn't affect ongoing detection in the background thread.
-        
-        Args:
-            frame (numpy.ndarray, optional): Frame to process. If None, get current camera frame.
-        
-        Returns:
-            tuple: (processed_frame, num_objects, detections)
-        """
-        if self.yolo_model is None:
-            logger.error("YOLO model not loaded. Call load_yolo_model() first.")
-            return None, 0, []
-        
-        try:
-            import cv2
-        except ImportError:
-            logger.error("cv2 not installed. Cannot process frame.")
-            return None, 0, []
-        
-        # Get frame if not provided
-        if frame is None:
-            frame = self._get_camera_frame()
-            if frame is None:
-                return None, 0, []
-        
-        # Convert frame format if needed
-        if len(frame.shape) == 2:  # If grayscale
-            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-        
-        # Make a copy to draw on
-        output_frame = frame.copy()
-        
-        # Run inference
-        results = self.yolo_model(frame, verbose=False)
-        detections = results[0].boxes
-        
-        # Count objects above threshold
-        object_count = 0
-        
-        # Process each detection
-        for i in range(len(detections)):
-            # Get bounding box coordinates
-            xyxy_tensor = detections[i].xyxy.cpu()
-            xyxy = xyxy_tensor.numpy().squeeze()
-            xmin, ymin, xmax, ymax = xyxy.astype(int)
-            
-            # Get class info
-            classidx = int(detections[i].cls.item())
-            classname = self.yolo_labels[classidx]
-            conf = detections[i].conf.item()
-            
-            # Draw if above threshold
-            if conf > self.yolo_min_confidence:
-                color = self.bbox_colors[classidx % 10]
-                cv2.rectangle(output_frame, (xmin, ymin), (xmax, ymax), color, 2)
-                
-                # Add label
-                label = f'{classname}: {int(conf*100)}%'
-                labelSize, baseLine = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-                label_ymin = max(ymin, labelSize[1] + 10)
-                cv2.rectangle(output_frame, (xmin, label_ymin-labelSize[1]-10), 
-                             (xmin+labelSize[0], label_ymin+baseLine-10), color, cv2.FILLED)
-                cv2.putText(output_frame, label, (xmin, label_ymin-7), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
-                
-                object_count += 1
-          # Add object count to image
-        cv2.putText(output_frame, f'Objects: {object_count}', (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        
-        # Print detected objects
-        if object_count > 0:
-            objects_info = []
-            for i in range(len(detections)):
-                conf = detections[i].conf.item()
-                if conf > self.yolo_min_confidence:
-                    classidx = int(detections[i].cls.item())
-                    classname = self.yolo_labels[classidx]
-                    objects_info.append(f"{classname} ({conf:.2f})")
-            
-            print(f"Detected objects: {', '.join(objects_info)}")
-        
-        return output_frame, object_count, detections
-    
-    def run_object_detection_on_camera(self, duration=None, display=False):
-        """
-        Run object detection on the camera feed for the specified duration.
-        This is a simple demonstration method that doesn't require setting up threads.
-        
-        Args:
-            duration (float, optional): How many seconds to run detection. If None, runs until user interrupts.
-            display (bool): Whether to display the results in a window (requires cv2 and running with display).
-            
-        Returns:
-            dict: Summary of detection statistics
-        """
-        # Make sure the model is loaded
-        if self.yolo_model is None:
-            if not self.load_yolo_model():
-                return {"error": "Failed to load model"}
-        
-        try:
-            import cv2
-            import numpy as np
-        except ImportError:
-            return {"error": "OpenCV not installed"}
-            
-        start_time = time.time()
-        frame_count = 0
-        detection_counts = {}
-        
-        try:
-            # Set up display window if requested
-            if display:
-                cv2.namedWindow("Object Detection", cv2.WINDOW_NORMAL)
-                
-            while True:
-                # Check if we've exceeded the specified duration
-                if duration and (time.time() - start_time) > duration:
-                    break
-                    
-                # Get frame from camera
-                frame = self._get_camera_frame()
-                if frame is None:
-                    logger.warning("No frame available")
-                    time.sleep(0.1)
-                    continue
-                
-                # Process the frame with YOLO
-                output_frame, obj_count, detections = self.process_single_frame(frame)
-                frame_count += 1
-                
-                # Count objects by class
-                for i in range(len(detections)):
-                    conf = detections[i].conf.item()
-                    if conf > self.yolo_min_confidence:
-                        class_id = int(detections[i].cls.item())
-                        class_name = self.yolo_labels[class_id]
-                        
-                        if class_name in detection_counts:
-                            detection_counts[class_name] += 1
-                        else:
-                            detection_counts[class_name] = 1
-                
-                # Display the frame if requested
-                if display and output_frame is not None:
-                    cv2.imshow("Object Detection", output_frame)
-                    
-                    # Exit if 'q' is pressed
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
-                        
-                # Short sleep to avoid consuming all CPU
-                time.sleep(0.01)
-                
-        except KeyboardInterrupt:
-            logger.info("Detection interrupted by user")
-        except Exception as e:
-            logger.error(f"Error in detection demo: {e}")
-        finally:
-            if display:
-                cv2.destroyAllWindows()
-                
-        # Calculate statistics
-        elapsed_time = time.time() - start_time
-        fps = frame_count / elapsed_time if elapsed_time > 0 else 0
-                
-        # Return detection summary
-        return {
-            "elapsed_time": elapsed_time,
-            "frames_processed": frame_count,
-            "fps": fps,
-            "detections": detection_counts
-        }
-    
-
     async def _handle_traffic_light(self, class_name, object_info):
         """
         Handle traffic light detection and corresponding robot behavior.
         
         Args:
-            class_name (str): The detected class name ("red" or "green")
+            class_name (str): The detected class name ("red", "green", or "yellow")
             object_info (dict): Object information with coordinates, size, etc.
         """
         # If it's not a traffic light, reset if we were previously tracking one
-        if class_name not in ["red", "green"]:
+        if class_name not in ["red", "green", "yellow"]:
             if self.traffic_light_detected:
                 logger.info("Lost track of traffic light")
                 self.traffic_light_detected = False
@@ -1015,21 +871,21 @@ class AICameraCameraManager:
         
         # Handle traffic light behavior
         if is_close_enough:
-            # Only announce state changes to avoid repetition
-            if class_name == "red" and (prev_state != "red" or not self.waiting_for_green):
-                # Red light - stop and announce
+            # Handle red and yellow lights (both require stopping)
+            if class_name in ["red", "yellow"] and (prev_state not in ["red", "yellow"] or not self.waiting_for_green):
+                # Red or Yellow light - stop and announce
                 self.px.forward(0)
                 self.waiting_for_green = True
                 
                 # Announce if TTS manager is available
                 if self.tts_manager:
-                    await self.tts_manager.say("Red light detected", priority=1)
+                    await self.tts_manager.say(f"{class_name.capitalize()} light detected", priority=1)
                 
-                logger.info("RED LIGHT - Stopping robot")
+                logger.info(f"{class_name.upper()} LIGHT - Stopping robot")
                 
             elif class_name == "green":
                 if self.waiting_for_green:
-                    # We were waiting for green after seeing red, now proceed
+                    # We were waiting for green after seeing red/yellow, now proceed
                     self.px.forward(1)  # 10% speed
                     self.waiting_for_green = False
                     
@@ -1037,7 +893,7 @@ class AICameraCameraManager:
                     if self.tts_manager:
                         await self.tts_manager.say("Green light detected", priority=1)
                     
-                    logger.info("GREEN LIGHT after RED - Proceeding at 10% speed")
+                    logger.info("GREEN LIGHT after stopping - Proceeding at 10% speed")
                 elif prev_state != "green":
                     # Green light from no previous light detected
                     self.px.forward(1)  # 10% speed
@@ -1048,6 +904,137 @@ class AICameraCameraManager:
 
                     logger.info("GREEN LIGHT - Proceeding at 10% speed")
         elif not self.waiting_for_green:
-            # If not close enough and not waiting for green after red, move forward
+            # If not close enough and not waiting for green after red/yellow, move forward
             self.px.forward(1)  # 10% speed
-            logger.info("Traffic light detected but not close enough, proceeding at 10% speed")
+            logger.info("GREEN LIGHT - Proceeding at 10% speed")
+            
+    async def _handle_stop_sign(self, object_info):
+        """
+        Handle stop sign detection and corresponding robot behavior.
+        
+        Args:
+            object_info (dict): Object information with coordinates, size, etc.
+        """
+        # Get object dimensions
+        width = object_info['width']
+        height = object_info['height']
+        
+        # Calculate object size relative to frame
+        relative_size = (width * height) / (self.camera_width * self.camera_height)
+        is_close_enough = relative_size > self.traffic_light_distance_threshold
+        
+        # Update stop sign state
+        self.stop_sign_detected = True
+        
+        # Log detection
+        if is_close_enough:
+            logger.info(f"Stop sign detected and is close enough (size: {relative_size:.2f})")
+        else:
+            logger.info(f"Stop sign detected but not close enough yet (size: {relative_size:.2f})")
+        
+        # Handle stop sign behavior
+        if is_close_enough and not self.waiting_at_stop_sign:
+            # Stop sign is close enough - stop for 2 seconds
+            self.px.forward(0)
+            self.waiting_at_stop_sign = True
+            
+            # Announce if TTS manager is available
+            if self.tts_manager:
+                await self.tts_manager.say("Stop sign detected", priority=1)
+            
+            logger.info("STOP SIGN - Stopping robot for 2 seconds")
+            
+            # Start timer to resume after 2 seconds
+            self.stop_sign_timer = time.time()
+            
+        elif self.waiting_at_stop_sign:
+            # Check if we've waited long enough (2 seconds)
+            if time.time() - self.stop_sign_timer >= 2.0:
+                # Resume movement
+                self.px.forward(1)  # 10% speed
+                self.waiting_at_stop_sign = False
+                
+                # Announce if TTS manager is available
+                if self.tts_manager:
+                    await self.tts_manager.say("Proceeding after stop", priority=1)
+                
+                logger.info("STOP SIGN - Waited 2 seconds, now proceeding at 10% speed")
+        elif not self.waiting_at_stop_sign:
+            # Not close enough yet, continue moving forward
+            self.px.forward(1)  # 10% speed
+            logger.info("Stop sign detected but not close enough, proceeding at 10% speed")
+    
+    async def _handle_right_turn_sign(self, object_info):
+        """
+        Handle right turn sign detection and corresponding robot behavior.
+        
+        Args:
+            object_info (dict): Object information with coordinates, size, etc.
+        """
+        # Get object dimensions
+        width = object_info['width']
+        height = object_info['height']
+        
+        # Calculate object size relative to frame
+        relative_size = (width * height) / (self.camera_width * self.camera_height)
+        is_close_enough = relative_size > self.traffic_light_distance_threshold
+        
+        # Update right turn sign state
+        self.right_turn_sign_detected = True
+        
+        # Log detection
+        if is_close_enough:
+            logger.info(f"Right turn sign detected and is close enough (size: {relative_size:.2f})")
+        else:
+            logger.info(f"Right turn sign detected but not close enough yet (size: {relative_size:.2f})")
+        
+        # Handle right turn sign behavior
+        if is_close_enough and not self.executing_right_turn and self.right_turn_timer is None:
+            # Right turn sign is close enough - prepare to turn in 2 seconds
+            logger.info("RIGHT TURN SIGN - Will turn right in 2 seconds")
+            
+            # Announce if TTS manager is available
+            if self.tts_manager:
+                await self.tts_manager.say("Right turn ahead", priority=1)
+            
+            # Start timer to execute turn after 2 seconds
+            self.right_turn_timer = time.time()
+            
+        elif self.right_turn_timer is not None and not self.executing_right_turn:
+            # Check if it's time to turn (2 seconds after detection)
+            if time.time() - self.right_turn_timer >= 2.0:
+                # Execute right turn
+                self.executing_right_turn = True
+                
+                # Announce the turn
+                if self.tts_manager:
+                    await self.tts_manager.say("Turning right", priority=1)
+                
+                logger.info("RIGHT TURN SIGN - Executing right turn now")
+                
+                # Stop forward movement before turning
+                self.px.forward(0)
+                
+                # Turn right (adjust angle as needed for your robot)
+                self.px.set_dir_servo_angle(35)  # Maximum right turn
+                
+                # Start moving forward with the turn
+                self.px.forward(1)  # 10% speed
+                
+                # Wait a moment to complete the turn
+                await asyncio.sleep(1.0)
+                
+                # Reset direction after turn
+                self.px.set_dir_servo_angle(0)
+                
+                # Reset turn state
+                self.right_turn_timer = None
+                self.executing_right_turn = False
+                self.right_turn_sign_detected = False
+                
+                logger.info("RIGHT TURN SIGN - Turn completed, continuing forward")
+        
+        elif not is_close_enough and not self.executing_right_turn:
+            # Not close enough yet, continue moving forward
+            self.px.forward(1)  # 10% speed
+            logger.info("Right turn sign detected but not close enough, proceeding at 10% speed")
