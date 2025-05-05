@@ -29,6 +29,7 @@ export default function RobotSettings() {
   const [localSettings, setLocalSettings] = useState<RobotSettingsType | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const [lastCalibClick, setLastCalibClick] = useState<number | null>(null);
 
   // Update local settings when we get them from the server
   useEffect(() => {
@@ -518,6 +519,15 @@ export default function RobotSettings() {
                   <Button
                     variant={isCalibrating ? "destructive" : "default"}
                     onClick={() => {
+                      const now = Date.now();
+                      if (lastCalibClick && localSettings) {
+                        const diffSeconds = ((now - lastCalibClick) / 1000).toFixed(2);
+                        // Update the turn_time slider
+                        updateSetting("ai", "turn_time", parseFloat(diffSeconds));
+                        setLastCalibClick(null);
+                      } else {
+                        setLastCalibClick(now);
+                      }
                       if (isCalibrating) {
                         stopCalibration();
                         setIsCalibrating(false);

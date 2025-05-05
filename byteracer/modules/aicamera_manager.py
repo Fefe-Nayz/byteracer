@@ -1312,7 +1312,7 @@ class AICameraCameraManager:
         logger.info("Continuous turn stopped")
         return True
     
-    def calibrate_right_turn_interactive(self, command="start", turn_time=None, speed=None):
+    async def calibrate_right_turn_interactive(self, command="start", turn_time=None, speed=None):
         """
         Interactive calibration for the right turn.
         This function can be used to start/stop turns and adjust parameters.
@@ -1344,13 +1344,10 @@ class AICameraCameraManager:
                 # Default speed if not provided
                 if speed is None:
                     speed = 0.1
-                    
+
                 # Start a continuous turn
-                turn_started = asyncio.run_coroutine_threadsafe(
-                    self.start_continuous_right_turn(speed_value=speed), 
-                    asyncio.get_event_loop()
-                ).result()
-                
+                turn_started = await self.start_continuous_right_turn(speed_value=speed)
+
                 result["action"] = "Started continuous turn"
                 result["continuous_turning"] = turn_started
                 
@@ -1385,10 +1382,7 @@ class AICameraCameraManager:
                     if hasattr(self, 'continuous_turning') and self.continuous_turning:
                         self.stop_continuous_turn()
                         # Start with new speed
-                        turn_started = asyncio.run_coroutine_threadsafe(
-                            self.start_continuous_right_turn(speed_value=speed), 
-                            asyncio.get_event_loop()
-                        ).result()
+                        turn_started = await self.start_continuous_right_turn(speed_value=speed)
                         result["continuous_turning"] = turn_started
                 else:
                     result["status"] = "error"
