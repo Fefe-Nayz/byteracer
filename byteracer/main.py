@@ -29,7 +29,7 @@ from modules.aicamera_manager import AICameraCameraManager
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
 SERVER_HOST = "127.0.0.1:3001"  # Default WebSocket server address
 
-pin = Pin("D0")
+pin = Pin("D1")
 pin.value(1)
 
 class ByteRacer:
