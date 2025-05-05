@@ -13,7 +13,6 @@ import logging
 
 # Import PicarX hardware interface
 from picarx import Picarx
-from robot_hat import Pin
 # Import the custom modules
 from modules.tts_manager import TTSManager
 from modules.sound_manager import SoundManager
@@ -24,13 +23,11 @@ from modules.log_manager import LogManager
 from modules.gpt_manager import GPTManager
 from modules.network_manager import NetworkManager
 from modules.aicamera_manager import AICameraCameraManager
+from modules.led_manager import LEDManager
 
 # Define project directory
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
 SERVER_HOST = "127.0.0.1:3001"  # Default WebSocket server address
-
-pin = Pin("D1")
-pin.value(1)
 
 class ByteRacer:
     """Main ByteRacer class that integrates all modules"""
@@ -52,6 +49,8 @@ class ByteRacer:
         local_display = camera_config.get("local_display", False)
         web_display = camera_config.get("web_display", True)
         camera_size = tuple(camera_config.get("camera_size", [1920, 1080]))
+
+        self.led_manager = LEDManager(pin="D1")  # Initialize LED manager with a pin
         
         # Initialize managers - order matters for dependencies
         self.sound_manager = SoundManager()  # Initialize sound manager first
@@ -67,7 +66,7 @@ class ByteRacer:
             camera_size=camera_size
         )
 
-        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager)
+        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager)
         self.network_manager = NetworkManager()
         self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager)
         
@@ -1179,6 +1178,7 @@ class ByteRacer:
             if "camera_size" in camera:
                 self.config_manager.set("camera.camera_size", camera["camera_size"])
                 camera_changes['camera_size'] = camera["camera_size"]
+                self.aicamera_manager.change_camera_resolution(width=camera["camera_size"][0], height=camera["camera_size"][1])
             
             # Only update and restart if there are actual changes
             if camera_changes:

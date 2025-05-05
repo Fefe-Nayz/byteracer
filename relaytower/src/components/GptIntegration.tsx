@@ -42,6 +42,7 @@ interface GptStatusData {
   details?: string;
   traceback?: string;
   error_details?: string;
+  mic_status?: string;
   response_content?: {
     action_type: string;
     text: string;
@@ -76,7 +77,7 @@ export default function GptIntegration() {
   const [activeTab, setActiveTab] = useState<string>("text");
   const [isConversationActive, setIsConversationActive] = useState(false);
   const [recognizedText, setRecognizedText] = useState<string | null>(null);
-  
+  const [isMicReady, setIsMicReady] = useState(false);
   const { 
     status, 
     sendGptCommand, 
@@ -137,7 +138,7 @@ export default function GptIntegration() {
   useEffect(() => {
     if (gptStatus) {
       console.log("GPT Status Update:", gptStatus, actionType);
-      // Set processing state based on the status
+      // Set processing state based on the status      
       if (gptStatus.status === "completed" || gptStatus.status === "error" || gptStatus.status === "cancelled") {
         setIsProcessing(false);
         
@@ -145,9 +146,15 @@ export default function GptIntegration() {
         if (gptStatus.status === "cancelled" && isConversationActive) {
           setIsConversationActive(false);
           setRecognizedText(null);
+          setIsMicReady(false);
         }
       } else {
         setIsProcessing(true);
+        
+        // Check if this is a mic ready notification
+        if (gptStatus.status === "progress" && gptStatus.mic_status === "ready") {
+          setIsMicReady(true);
+        }
       }
       
       // Add to execution history
@@ -478,14 +485,17 @@ export default function GptIntegration() {
         
         <TabsContent value="conversation">
           <div className="space-y-4">
-            <div className="bg-muted rounded-md p-4 flex flex-col items-center justify-center min-h-[120px] text-center">
-              {isConversationActive ? (
+            <div className="bg-muted rounded-md p-4 flex flex-col items-center justify-center min-h-[120px] text-center">              {isConversationActive ? (
                 <div className="flex flex-col items-center space-y-2">
                   <div className="relative">
                     <div className="absolute -inset-1 rounded-full bg-primary/20 animate-pulse"></div>
                     <Mic className="h-12 w-12 text-primary relative z-10" />
                   </div>
-                  <p className="text-sm font-medium">Listening...</p>
+                  {gptStatus && gptStatus.mic_status === "ready" ? (
+                    <p className="text-sm font-medium">Listening for your voice...</p>
+                  ) : (
+                    <p className="text-sm font-medium">Initializing microphone...</p>
+                  )}
                   {recognizedText && (
                     <p className="text-sm text-muted-foreground mt-2 italic">&quot;{recognizedText}&quot;</p>
                   )}

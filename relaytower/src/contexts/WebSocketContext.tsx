@@ -215,6 +215,7 @@ export interface GptStatusUpdate {
     type: string;
     summary: string;
   };
+  mic_status?: string;
   error_details?: string;
   current_step?: number;
   total_steps?: number;

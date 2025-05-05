@@ -100,6 +100,9 @@ class ConfigManager:
                 "distance_threshold": 0.02,
                 "turn_time": 2,
             },
+            "led": {
+                "enabled": True,
+            },
         }
         
         # Lock for thread safety
@@ -410,6 +413,9 @@ class ConfigManager:
                 "speak_pause_threshold": 1.2,
                 "distance_threshold": 0.02,
                 "turn_time": 2,
+            },
+            "led": {
+                "enabled": True,
             },
         }
 

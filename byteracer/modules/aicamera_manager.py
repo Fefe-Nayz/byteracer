@@ -25,13 +25,14 @@ class AICameraCameraManager:
     - Green light: Robot proceeds at low speed
     - Stop sign: Robot stops for 2 seconds then proceeds
     - Right turn sign: Robot turns right after a 2-second delay
-    """    
-    def __init__(self, px, sensor_manager, camera_manager, tts_manager):
+    """
+    def __init__(self, px, sensor_manager, camera_manager, tts_manager, config_manager):
         # Robot control/hardware
         self.px = px
         self.sensor_manager = sensor_manager
         self.camera_manager = camera_manager
         self.tts_manager = tts_manager
+        self.config_manager = config_manager
 
         logger.info("AI CAMERA INITIALIZED")
 
@@ -62,9 +63,11 @@ class AICameraCameraManager:
         self.yolo_min_confidence = 0.5
         self.yolo_results = []
         self.yolo_object_count = 0
-        self.camera_width = 640
-        self.camera_height = 480
-        
+        # Extract camera width and height from config
+        camera_size = self.config_manager.get("camera.camera_size", [640, 480])
+        self.camera_width = camera_size[0]  # First element is width
+        self.camera_height = camera_size[1]  # Second element is height
+
         # Traffic sign state variables
         self.traffic_light_state = None  # Can be "red", "green", "yellow" or None
         self.traffic_light_detected = False
@@ -189,8 +192,8 @@ class AICameraCameraManager:
             return factor * sign(x_offset) * abs(x_offset**2)
 
         # Suppose your camera resolution is 640 x 480 (change if needed)
-        camera_width = 640
-        camera_height = 480
+        camera_width = self.camera_width
+        camera_height = self.camera_height
 
         while self.face_follow_active:
             detection = self.camera_manager.detect_obj_parameter('human')
@@ -1403,3 +1406,14 @@ class AICameraCameraManager:
                     "continuous_turning": hasattr(self, 'continuous_turning') and self.continuous_turning
                 }
             }
+        
+    def change_camera_resolution(self, width, height):
+        """
+        Change the camera resolution.
+        
+        Args:
+            width (int): New width for the camera
+            height (int): New height for the camera
+        """
+        self.camera_width = width
+        self.camera_height = height
