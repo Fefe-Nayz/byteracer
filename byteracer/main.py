@@ -13,7 +13,7 @@ import logging
 
 # Import PicarX hardware interface
 from picarx import Picarx
-
+from robot_hat import Pin
 # Import the custom modules
 from modules.tts_manager import TTSManager
 from modules.sound_manager import SoundManager
@@ -28,6 +28,9 @@ from modules.aicamera_manager import AICameraCameraManager
 # Define project directory
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
 SERVER_HOST = "127.0.0.1:3001"  # Default WebSocket server address
+
+pin = Pin("D0")
+pin.value(1)
 
 class ByteRacer:
     """Main ByteRacer class that integrates all modules"""
@@ -206,7 +209,7 @@ class ByteRacer:
         self.sensor_manager.client_timeout = settings["safety"]["client_timeout"]
 
         # Apply AI settings
-        self.gpt_manager.set_pause_threshold(settings["ai"]["pause_threshold"])
+        self.gpt_manager.set_pause_threshold(settings["ai"]["speak_pause_threshold"])
         self.aicamera_manager.set_distance_threshold(settings["ai"]["distance_threshold"])
         self.aicamera_manager.set_turn_time(settings["ai"]["turn_time"])
         
@@ -1436,7 +1439,7 @@ class ByteRacer:
                 # Send sensor data every second if client is connected
 
                 try:
-                    await self.send_sensor_data_to_client()
+                    await self.send_sensor_data_to_client()                                                           
                     logging.debug("Periodic sensor data sent")
                 except Exception as e:
                     logging.error(f"Error sending periodic sensor data: {e}")
