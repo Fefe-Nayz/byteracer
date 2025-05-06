@@ -493,7 +493,7 @@ export default function GptIntegration() {
                     <div className="absolute -inset-1 rounded-full bg-primary/20 animate-pulse"></div>
                     <Mic className="h-12 w-12 text-primary relative z-10" />
                   </div>
-                  {gptStatus && isMicReady (
+                  {gptStatus && isMicReady ? (
                     <p className="text-sm font-medium">Listening for your voice...</p>
                   ) : (
                     <p className="text-sm font-medium">Initializing microphone...</p>
