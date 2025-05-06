@@ -64,7 +64,7 @@ class AICameraCameraManager:
         self.yolo_results = []
         self.yolo_object_count = 0
         # Extract camera width and height from config
-        camera_size = self.config_manager.get("camera.camera_size", [640, 480])
+        camera_size = self.config_manager.get("camera.camera_size")
         self.camera_width = camera_size[0]  # First element is width
         self.camera_height = camera_size[1]  # Second element is height
 
