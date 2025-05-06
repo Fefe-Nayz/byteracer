@@ -140,14 +140,17 @@ export default function GptIntegration() {
   useEffect(() => {
     if (gptStatus) {
       console.log("GPT Status Update:", gptStatus, actionType);
-      // Set processing state based on the status        
+      // Set processing state based on the status          
       if (gptStatus.status === "completed" || gptStatus.status === "error" || gptStatus.status === "cancelled") {
         setIsProcessing(false);
         
         // End conversation mode if it's active and status is cancelled
-        if (gptStatus.status === "cancelled" && isConversationActive) {
-          setIsConversationActive(false);
-          setRecognizedText(null);
+        if (gptStatus.status === "cancelled") {
+          if (isConversationActive) {
+            setIsConversationActive(false);
+            setRecognizedText(null);
+          }
+          // Always reset mic ready status on any cancel event
           setIsMicReady(false);
         }
       } else {
@@ -289,10 +292,10 @@ export default function GptIntegration() {
       variant: "default",
     });
   };
-  
-  const stopConversation = () => {
+    const stopConversation = () => {
     setIsConversationActive(false);
     setRecognizedText(null);
+    setIsMicReady(false);
     
     // Cancel the conversation on the robot with conversationMode=true
     cancelGptCommand(true);
@@ -323,7 +326,13 @@ export default function GptIntegration() {
       variant: "default",
     });
   };
-    const handleCancelRequest = () => {
+  const handleCancelRequest = () => {
+    // If we're in conversation mode, reset microphone state
+    if (isConversationActive) {
+      setRecognizedText(null);
+      setIsMicReady(false);
+    }
+    
     // Pass true if in conversation mode, otherwise false
     cancelGptCommand(isConversationActive);
     

@@ -50,7 +50,7 @@ class ByteRacer:
         web_display = camera_config.get("web_display", True)
         camera_size = tuple(camera_config.get("camera_size", [1920, 1080]))
 
-        self.led_manager = LEDManager(pin="D1")  # Initialize LED manager with a pin
+        self.led_manager = LEDManager(pin="D1", config_manager=self.config_manager)  # Initialize LED manager with a pin
         
         # Initialize managers - order matters for dependencies
         self.sound_manager = SoundManager()  # Initialize sound manager first
@@ -66,9 +66,9 @@ class ByteRacer:
             camera_size=camera_size
         )
 
-        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager)
+        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager, self.led_manager)
         self.network_manager = NetworkManager()
-        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager)
+        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager, self.led_manager)
         
         # Initialize audio manager for microphone streaming
         from modules.audio_manager import AudioManager
@@ -949,6 +949,8 @@ class ByteRacer:
         """Handle emergency situations"""
         logging.warning(f"Emergency callback triggered: {emergency.name}")
 
+        self.led_manager.blink(3, 0.25)  # Blink LED 3 times with 0.5s interval
+
         # Clear TTS queue and stop any ongoing speech
         self.tts_manager.clear_queue()
         await self.tts_manager.stop_speech()  # Fixed: properly await the async call
@@ -1152,6 +1154,13 @@ class ByteRacer:
             if "turn_time" in ai:
                 self.config_manager.set("ai.turn_time", ai["turn_time"])
                 self.aicamera_manager.set_turn_time(ai["turn_time"])
+
+        if "led" in settings:
+            led = settings["led"]
+            
+            if "enabled" in led:
+                self.config_manager.set("led.enabled", led["enabled"])
+                self.led_manager.set_enabled(led["enabled"])
 
         if "camera" in settings:
             camera = settings["camera"]

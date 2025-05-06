@@ -42,7 +42,7 @@ class GPTManager:
       - Running custom scripts
     """
     
-    def __init__(self, px, camera_manager, tts_manager, sound_manager, sensor_manager, config_manager, aicamera_manager):
+    def __init__(self, px, camera_manager, tts_manager, sound_manager, sensor_manager, config_manager, aicamera_manager, led_manager):
         """
         Initialize the GPT manager with references to other system components.
         
@@ -62,6 +62,7 @@ class GPTManager:
         self.sensor_manager = sensor_manager
         self.config_manager = config_manager
         self.aicamera_manager = aicamera_manager
+        self.led_manager = led_manager
 
         self.robot_state_enum = RobotState
         
@@ -142,11 +143,15 @@ class GPTManager:
             if self.conversation_cancelled:
                 logger.info("Listening cancelled before it started, returning empty string")
                 return ""
-                
-            logger.info("Listening for speech...")
-            audio = r.listen(src)
-            
-        return _whisper(audio)
+            logger.info("Listening for speech... (5 second timeout if no speech detected)")
+            try:
+                # Add a 5-second timeout for initial speech detection
+                self.led_manager.start_blinking(0.5)
+                audio = r.listen(src, timeout=5)
+                return _whisper(audio)
+            except sr.WaitTimeoutError:
+                logger.info("No speech detected within timeout period")
+                return ""
 
     def _synthesize_and_save_blocking(
         self,
@@ -248,6 +253,7 @@ class GPTManager:
                 None, 
                 lambda: self._listen_and_transcribe_blocking(lambda: mic_ready_callback(loop))
             )
+            self.led_manager.stop_blinking()
             
             # Check if the conversation was cancelled during recording
             if self.conversation_cancelled:
@@ -394,9 +400,11 @@ class GPTManager:
                 "web_display": {"type": ["boolean", "null"], "description": "Web display setting"},
                 "mode": {"type": ["string", "null"], "description": "Mode for the robot. Available modes: 'normal', 'tracking', 'circuit', 'demo'."},
                 "text": {"type": ["string", "null"], "description": "Text for TTS output. only use it if you want to say something between actions not directly to respond to the user"},
+                "interval": {"type": ["number", "null"], "description": "Interval for led blinking in seconds"},
+                "times": {"type": ["number", "null"], "description": "Number of times to blink"},
                 "language": {"type": ["string", "null"], "description": "Language for TTS output. Available languages: 'en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'it-IT'."}
               },
-              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode", "text", "language"],
+              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode", "text", "language", "interval", "times"],
               "additionalProperties": False
             }
           },
@@ -545,6 +553,13 @@ AVAILABLE ACTIONS:
    For sound effects:
    • sound.play_sound("custom", sound_name): Plays a specific sound effect
      - Available sounds: "alarm", "aurores", "bruh", etc. (see full list above)
+    
+   For LED control:
+    • led_manager.turn_on(): Turns on the LED
+    • led_manager.turn_off(): Turns off the LED
+    • led_manager.blink(times, interval): Blinks the LED a specified number of times with a given interval
+    • led_manager.start_blinking(interval): Starts continuous LED blinking in a separate thread (non-blocking)
+    • led_manager.stop_blinking(): Stops the LED blinking thread (if running)
    
    For timing (always use await for sleep):
    • await asyncio.sleep(seconds): Asynchronous sleep, pauses execution
@@ -598,6 +613,7 @@ async def run_script_in_isolated_environment(
     get_camera_image,
     tts_manager,
     sound_manager,
+    led_manager,
     gpt_manager,
     websocket=None,
     run_in_background=False
@@ -612,6 +628,7 @@ async def run_script_in_isolated_environment(
         get_camera_image: Function to get camera image
         tts_manager: TTS manager for text-to-speech
         sound_manager: Sound manager for audio playback
+        led_manager: LED manager for LED control
         gpt_manager: GPT manager reference for cancellation checks
         websocket: Optional websocket for error reporting
         run_in_background: Whether to run the script in background
@@ -648,7 +665,7 @@ async def run_script_in_isolated_environment(
                 result_queue.put({"error": "Script compilation failed"})
                 return
             loop.run_until_complete(
-                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue)
+                user_script(px, get_camera_image, logging.getLogger("script_runner"), tts_manager, sound_manager, gpt_manager, result_queue, led_manager)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:
@@ -755,7 +772,7 @@ def _build_script_with_environment(script_code: str) -> str:
         "import json\n"
         "import cv2\n"
         "import numpy as np\n\n"
-        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue):\n"
+        "async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue, led_manager):\n"
         "    # Set up cancellation detection\n"
         "    cancel_event = threading.Event()\n\n"
         "    async def check_cancellation():\n"
@@ -851,8 +868,13 @@ def _build_script_with_environment(script_code: str) -> str:
    • set_camera_flip(vflip: boolean, hflip: boolean): Camera orientation
    • set_camera_size(width: number, height: number): Resolution control
    • set_camera_display(local_display: boolean, web_display: boolean): Display settings
+     Misc settings:
+   • enable_led(enabled: boolean): LED toggle
      Robot State:
    • change_mode(mode: string): Changes robot mode. Available modes: "normal" (gamepad control), "tracking" (follows person), "circuit" (follow traffic light) and "demo" (demo mode)
+   • led_on(): Turns on the LED
+   • led_off(): Turns off the LED
+   • led_blink(times: number, interval: number): Blinks the LED a specified number of times with a given interval
      System Commands:
    • restart_robot(): Reboots entire system
    • shutdown_robot(): Powers down system
@@ -1293,6 +1315,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     self._get_camera_image,
                     self.tts_manager,
                     self.sound_manager,
+                    self.led_manager,
                     self,
                     websocket,
                     run_in_background=False
@@ -2172,13 +2195,27 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 self.aicamera_manager.set_turn_time(turn_time)
                 logger.info(f"AI voice settings updated: turn_time={turn_time}")
                 return True
+            
+            elif function_name == "enable_led":
+                led_enabled = parameters.get("led_enabled", False)
+                self.config_manager.set("ai.led_enabled", led_enabled)
+                self.aicamera_manager.set_enabled(led_enabled)
+                logger.info(f"AI voice settings updated: led_enabled={led_enabled}")
+                return True
+            
+            elif function_name == "led_on":
+                self.led_manager.turn_on()
+                return True
 
-            # elif function_name == "led_control":
-            #     led_state = parameters.get("led_state", "off")
-            #     self.config_manager.set("ai.led_state", led_state)
-            #     self.aicamera_manager.set_led_state(led_state)
-            #     logger.info(f"AI voice settings updated: led_state={led_state}")
-            #     return True
+            elif function_name == "led_off":
+                self.led_manager.turn_off()
+                return True
+            
+            elif function_name == "led_blink":
+               times = parameters.get("times", False)
+               interval = parameters.get("interval", 0.5)
+               self.led_manager.blink(times, interval)
+               return True
 
             # SYSTEM FUNCTIONS
             elif function_name == "restart_robot":
@@ -2429,8 +2466,20 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 except Exception as e:
                     logger.error(f"Error in end_conversation: {e}")
                     return False
+            
+            elif function_name == "stop_recording":
+                # Stop any active recording
+                try:
+                    logger.info("Manual stop recording requested")
+                    # Use the existing cancel_conversation method to stop recording
+                    self.cancel_conversation()
+                    if websocket:
+                        await self._send_gpt_status_update(websocket, "cancelled", "Recording stopped by user.")
+                    return True
+                except Exception as e:
+                    logger.error(f"Error in stop_recording: {e}")
+                    return False
 
-                    
             else:
                 logger.warning(f"Unknown predefined function: {function_name}")
                 return False
@@ -2473,3 +2522,13 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         self.pause_threshold = threshold
         logger.info(f"Pause threshold set to {threshold}")
         return True
+
+    def cancel_conversation(self):
+        """Manually cancel any ongoing conversation or recording"""
+        logger.info("Manually cancelling conversation/recording")
+        self.conversation_cancelled = True
+        
+        # If using background listening, this will stop it
+        if hasattr(self, '_stop_listening') and self._stop_listening:
+            self._stop_listening(wait_for_stop=False)
+            self._stop_listening = None

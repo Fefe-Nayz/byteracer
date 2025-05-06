@@ -173,6 +173,9 @@ export interface RobotSettings {
     speak_pause_threshold: number;
     distance_threshold: number;
     turn_time: number;
+  },
+  led: {
+    enabled: boolean;
   }
 }
 

@@ -111,7 +111,7 @@ def _build_script_with_environment(script_code: str) -> str:
 
     script_wrapper = f"""
 # Generated script wrapper
-async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue):
+async def user_script(px, get_camera_image, logger, tts, sound, gpt_manager, result_queue, led_manager):
     try:
         # Start user code
 {indented_script}
@@ -136,6 +136,7 @@ async def run_script_in_isolated_environment(
     get_camera_image,
     tts_manager,
     sound_manager,
+    led_manager,
     gpt_manager,
     websocket=None,
     run_in_background=False
@@ -211,7 +212,7 @@ async def run_script_in_isolated_environment(
                 return
             loop.run_until_complete(
                 user_script(px, get_camera_image, logging.getLogger("script_runner"),
-                          tts_proxy, sound_proxy, gpt_manager, result_queue)
+                          tts_proxy, sound_proxy, gpt_manager, result_queue, led_manager)
             )
             result_queue.put({"success": True})
         except ScriptCancelledException as e:

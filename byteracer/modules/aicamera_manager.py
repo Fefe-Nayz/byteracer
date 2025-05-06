@@ -26,13 +26,14 @@ class AICameraCameraManager:
     - Stop sign: Robot stops for 2 seconds then proceeds
     - Right turn sign: Robot turns right after a 2-second delay
     """
-    def __init__(self, px, sensor_manager, camera_manager, tts_manager, config_manager):
+    def __init__(self, px, sensor_manager, camera_manager, tts_manager, config_manager, led_manager):
         # Robot control/hardware
         self.px = px
         self.sensor_manager = sensor_manager
         self.camera_manager = camera_manager
         self.tts_manager = tts_manager
         self.config_manager = config_manager
+        self.led_manager = led_manager
 
         logger.info("AI CAMERA INITIALIZED")
 
@@ -55,6 +56,9 @@ class AICameraCameraManager:
         # Traffic-sign detection
         self.traffic_sign_detection_thread = None
         self.traffic_sign_detection_active = False
+        
+        # LED blinking state
+        self.led_blink_pattern = None
         
         # YOLO object detection
         self.yolo_model = None
@@ -147,6 +151,9 @@ class AICameraCameraManager:
         self.x_angle = 0
         self.y_angle = 0
         self.dir_angle = 0
+        
+        # Start LED tracking pattern
+        self.start_tracking_pulse()
 
         # Start thread
         self.face_follow_thread = threading.Thread(
@@ -168,6 +175,10 @@ class AICameraCameraManager:
 
         self.face_follow_thread = None
         self.camera_manager.switch_face_detect(False)
+        
+        # Stop LED tracking pattern
+        self.stop_all_led_patterns()
+        
         # Stop robot
         self.px.forward(0)
 
@@ -415,7 +426,7 @@ class AICameraCameraManager:
     #     """
     #     Continuously checks for traffic sign data from camera_manager.
     #     Locks camera onto detected signs by adjusting pan/tilt servos.
-    #     Adjust as needed to act on 'stop', 'left', 'right', etc.
+    #     Adjust as needed to act on 'stop', 'left', 'right', 'forward'/'none', 
     #     """
     #     logger.info("Traffic sign detection loop started.")
         
@@ -601,7 +612,7 @@ class AICameraCameraManager:
         """
         if not self.yolo_detection_active:
             logger.warning("YOLO object detection is not currently running!")
-            return
+            return False
         
         logger.info("Stopping YOLO object detection...")
         self.yolo_detection_active = False
@@ -626,6 +637,9 @@ class AICameraCameraManager:
         self.right_turn_timer = None
         self.executing_right_turn = False
 
+        # Stop any LED patterns
+        self.stop_all_led_patterns()
+
         # Stop any continuous turn if it's active
         if hasattr(self, 'continuous_turning') and self.continuous_turning:
             self.stop_continuous_turn()
@@ -637,6 +651,7 @@ class AICameraCameraManager:
             logger.error(f"Error disabling vilib drawing: {e}")
 
         self.px.forward(0)  # Stop the robot
+        return True
     
     async def _yolo_detection_loop(self):
         """
@@ -903,6 +918,9 @@ class AICameraCameraManager:
                 self.px.forward(0)
                 self.waiting_for_green = True
                 
+                # Turn on LED for stop
+                self.start_stop_light()
+                
                 # Announce if TTS manager is available
                 if self.tts_manager:
                     await self.tts_manager.say(f"{class_name.capitalize()} light detected", priority=1)
@@ -915,6 +933,9 @@ class AICameraCameraManager:
                     self.px.forward(1)  # 10% speed
                     self.waiting_for_green = False
                     
+                    # Turn off stop light
+                    self.stop_all_led_patterns()
+                    
                     # Announce if TTS manager is available
                     if self.tts_manager:
                         await self.tts_manager.say("Green light detected", priority=1)
@@ -923,6 +944,9 @@ class AICameraCameraManager:
                 elif prev_state != "green":
                     # Green light from no previous light detected
                     self.px.forward(1)  # 10% speed
+                    
+                    # Turn off any LED patterns
+                    self.stop_all_led_patterns()
                     
                     # Announce if TTS manager is available
                     if self.tts_manager:
@@ -964,6 +988,9 @@ class AICameraCameraManager:
             self.px.forward(0)
             self.waiting_at_stop_sign = True
             
+            # Turn on LED for stop
+            self.start_stop_light()
+            
             # Announce if TTS manager is available
             if self.tts_manager:
                 await self.tts_manager.say("Stop sign detected", priority=1)
@@ -979,6 +1006,9 @@ class AICameraCameraManager:
                 # Resume movement
                 self.px.forward(1)  # 10% speed
                 self.waiting_at_stop_sign = False
+                
+                # Turn off stop light
+                self.stop_all_led_patterns()
                 
                 # Announce if TTS manager is available
                 if self.tts_manager:
@@ -1031,12 +1061,15 @@ class AICameraCameraManager:
             if time.time() - self.right_turn_timer >= 2.0:                # Execute right turn
                 self.executing_right_turn = True
                 
+                # Start turn signal LED blinking
+                self.start_turn_signal_blink()
+                
                 # Announce the turn
                 if self.tts_manager:
                     await self.tts_manager.say("Turning right", priority=1)
                 
                 logger.info("RIGHT TURN SIGN - Executing right turn now")
-                  # Stop forward movement before starting the turn
+                # Stop forward movement before starting the turn
                 self.px.forward(0)
                 
                 # Setup for differential steering
@@ -1075,6 +1108,9 @@ class AICameraCameraManager:
                 self.right_turn_timer = None
                 self.executing_right_turn = False
                 self.right_turn_sign_detected = False
+
+                # Stop LED blinking
+                self.stop_all_led_patterns()
 
                 # Move forward slowly after the turn
                 self.px.forward(1)  # 10% speed
@@ -1116,6 +1152,9 @@ class AICameraCameraManager:
             self.px.forward(0)
             await asyncio.sleep(1.0)
             
+            # Start turn signal LED blinking
+            self.start_turn_signal_blink()
+            
             # Execute the turn
             logger.info("Executing right turn now...")
             
@@ -1151,6 +1190,9 @@ class AICameraCameraManager:
             self.px.set_dir_servo_angle(0)
             self.px.forward(0)
             
+            # Stop LED blinking
+            self.stop_all_led_patterns()
+            
             logger.info("Calibration turn completed")
             
             # Announce completion if TTS is available
@@ -1166,8 +1208,9 @@ class AICameraCameraManager:
             # Stop the robot if there was an error
             self.px.forward(0)
             self.px.set_dir_servo_angle(0)
-
-
+            
+            # Make sure to stop LED blinking
+            self.stop_all_led_patterns()
     def set_distance_threshold(self, distance):
         """
         Set the distance threshold for detecting objects.
@@ -1242,6 +1285,9 @@ class AICameraCameraManager:
             # Set turning flag
             self.continuous_turning = True
             
+            # Start turn signal LED blinking
+            self.start_turn_signal_blink()
+            
             # Stop forward movement before starting the turn
             self.px.forward(0)
             
@@ -1281,6 +1327,10 @@ class AICameraCameraManager:
             self.px.forward(0)
             self.px.set_dir_servo_angle(0)
             self.continuous_turning = False
+            
+            # Stop LED blinking
+            self.stop_all_led_patterns()
+            
             return False
             
     def stop_continuous_turn(self):
@@ -1306,6 +1356,9 @@ class AICameraCameraManager:
         
         # Reset continuous turning flag
         self.continuous_turning = False
+        
+        # Stop LED blinking
+        self.stop_all_led_patterns()
         
         # Announce if TTS manager is available
         if self.tts_manager:
@@ -1417,3 +1470,62 @@ class AICameraCameraManager:
         """
         self.camera_width = width
         self.camera_height = height
+
+    # ------------------------------------------------------------------
+    # LED Control Helpers 
+    # ------------------------------------------------------------------
+    def _start_blink_thread(self, times=0, interval=0.5, pattern_name="default"):
+        """
+        Start a non-blocking LED blink in a separate thread with a specific pattern.
+        This method now uses the LED manager's built-in non-blocking functionality.
+        
+        Args:
+            times (int): Number of blinks (ignored, always uses continuous blink)
+            interval (float): Time between blinks in seconds
+            pattern_name (str): Name to identify this blink pattern
+        """
+        # We now use the LEDManager's non-blocking blink functionality
+        try:
+            # Store the pattern name for debugging/reference
+            self.led_blink_pattern = pattern_name
+            
+            # Start blinking using the LED manager
+            self.led_manager.start_blinking(interval)
+            logger.debug(f"Started LED blink pattern: {pattern_name} with interval {interval}s")
+        except Exception as e:
+            logger.error(f"Error starting LED blink pattern: {e}")
+    
+    def _stop_blink_thread(self):
+        """Stop any active LED blinking thread"""
+        try:
+            # Use the LED manager's stop_blinking method
+            self.led_manager.stop_blinking()
+            self.led_blink_pattern = None
+            logger.debug("Stopped LED blinking")
+        except Exception as e:
+            logger.error(f"Error stopping LED blink: {e}")
+    
+    def start_turn_signal_blink(self):
+        """Start rapid blinking pattern for turn signals"""
+        self._start_blink_thread(interval=0.25, pattern_name="turn_signal")
+        
+    def start_stop_light(self):
+        """Turn on LED solid for stop indication"""
+        try:
+            # First stop any existing blinking
+            self._stop_blink_thread()
+            
+            # Then turn on the LED solid
+            self.led_manager.turn_on()
+            self.led_blink_pattern = "stop_light"
+            logger.debug("LED turned on solid for stop light")
+        except Exception as e:
+            logger.error(f"Error turning on stop light: {e}")
+        
+    def start_tracking_pulse(self):
+        """Start slow pulsing pattern for tracking mode"""
+        self._start_blink_thread(interval=0.75, pattern_name="tracking")
+    
+    def stop_all_led_patterns(self):
+        """Stop all LED patterns and turn LED off"""
+        self._stop_blink_thread()

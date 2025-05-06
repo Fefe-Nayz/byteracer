@@ -861,6 +861,16 @@ export default function RobotSettings() {
                 </div>
               </div>
             </div>
+            <h3 className="font-bold mb-4">LED Settings</h3>
+            <div>
+              <div className="mb-1 text-xs">Enable LED</div>
+              <Switch
+                checked={localSettings.led?.enabled || false}
+                onCheckedChange={(checked) =>
+                  updateSetting("led", "enabled", checked)
+                }
+              />
+            </div>
           </div>
         </div>
       </Card>
