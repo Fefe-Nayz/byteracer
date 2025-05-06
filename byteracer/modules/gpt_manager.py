@@ -393,7 +393,7 @@ class GPTManager:
                 "local_display": {"type": ["boolean", "null"], "description": "Local display setting"},                
                 "web_display": {"type": ["boolean", "null"], "description": "Web display setting"},
                 "mode": {"type": ["string", "null"], "description": "Mode for the robot. Available modes: 'normal', 'tracking', 'circuit', 'demo'."},
-                "text": {"type": ["string", "null"], "description": "Text for TTS output"},
+                "text": {"type": ["string", "null"], "description": "Text for TTS output. only use it if you want to say something between actions not directly to respond to the user"},
                 "language": {"type": ["string", "null"], "description": "Language for TTS output. Available languages: 'en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'it-IT'."}
               },
               "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode", "text", "language"],
@@ -820,7 +820,7 @@ def _build_script_with_environment(script_code: str) -> str:
    • Available sounds: "alarm", "aurores", "bruh", "cailloux", "fart", "get-out", "india", 
      "klaxon", "klaxon-2", "laugh", "lingango", "nope", "ph", "pipe", "rat-dance", "scream", 
      "tralalelo-tralala", "tuile", "vine-boom", "wow", "wtf"
-   • say(text: string, language: string): TTS output
+   • say(text: string, language: string): TTS output DO NOT use this function to respond to the user, only use it if you want to say something between actions for example
      Sound Settings:
    • set_sound_enabled(enabled: boolean): Master sound toggle
    • set_sound_volume(volume: number): Sets master volume (0-100)
