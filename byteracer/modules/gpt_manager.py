@@ -226,10 +226,10 @@ class GPTManager:
         if conversation_mode:
             self.conversation_cancelled = False
 
-            # Create a callback to notify when mic is ready
+            # Capture the running event loop
+            loop = asyncio.get_running_loop()
             mic_ready_event = asyncio.Event()
-            def mic_ready_callback():
-                # Create a coroutine function that will be called
+            def mic_ready_callback(loop=loop):
                 async def notify_mic_ready():
                     await self._send_gpt_status_update(
                         websocket, 
@@ -237,18 +237,16 @@ class GPTManager:
                         "Microphone ready. Listening for your voice input...",
                         {"mic_status": "ready"}
                     )
-                
-                # Schedule the coroutine to run in the event loop
+                # Use the captured loop
                 asyncio.run_coroutine_threadsafe(
                     notify_mic_ready(),
-                    asyncio.get_event_loop()
+                    loop
                 )
-            
             # Start listening with the callback
             logger.info("Starting conversation mode recording")
-            prompt = await asyncio.get_event_loop().run_in_executor(
+            prompt = await asyncio.get_running_loop().run_in_executor(
                 None, 
-                lambda: self._listen_and_transcribe_blocking(mic_ready_callback)
+                lambda: self._listen_and_transcribe_blocking(lambda: mic_ready_callback(loop))
             )
             
             # Check if the conversation was cancelled during recording
