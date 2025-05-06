@@ -15,6 +15,8 @@ import queue as queue_mod
 import sys
 import os
 import signal
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +199,9 @@ async def run_script_in_isolated_environment(
                          "time": time,
                          "json": json,
                          "traceback": traceback,
-                         "threading": threading}
+                         "threading": threading,
+                         "cv2": cv2,
+                         "np": np}
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             exec(full_script, local_env)

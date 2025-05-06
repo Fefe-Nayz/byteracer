@@ -223,8 +223,8 @@ class GPTManager:
             bool: Success status.
         """
         # If we're in conversation mode, we need to reset the cancellation flag first
+        self.conversation_cancelled = False
         if conversation_mode:
-            self.conversation_cancelled = False
 
             # Capture the running event loop
             loop = asyncio.get_running_loop()
