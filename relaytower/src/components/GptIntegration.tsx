@@ -87,6 +87,8 @@ export default function GptIntegration() {
   } = useWebSocket();
   
   const { toast } = useToast();
+
+  console.log(isMicReady, "Mic Ready State");
   
   // Listen for GPT responses and speech recognition events
   useEffect(() => {
