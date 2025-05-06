@@ -1006,9 +1006,29 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 await self._send_gpt_status_update(websocket, "error", f"Error: {str(e)}")
             return False          
         finally:
-            if conversation_mode and self.is_conversation_active and not self.conversation_cancelled:
+            # Check for cancellation before potentially starting a new conversation round
+            cancelled = self.conversation_cancelled or self.gpt_command_cancelled  
+                
+            # Reset the processing flag and restore the previous robot state
+            self.is_processing = False
+            self.restore_robot_state()
+            logger.info(f"Robot state restored from {self.robot_state_enum.GPT_CONTROLLED} to {self.sensor_manager.robot_state}")
+                    
+            # Make sure motors are stopped when command finishes
+            self.px.forward(0)  # Stop all motors as a safety measure
+            
+            # Only start a new conversation round if not cancelled
+            if not cancelled and conversation_mode and self.is_conversation_active:
                 # Only continue listening if conversation is active and not cancelled
                 logger.info("Conversation mode active, waiting for next command...")
+                # Reset mic state before starting new round
+                if websocket:
+                    await self._send_gpt_status_update(
+                        websocket, 
+                        "progress", 
+                        "Waiting for next conversation turn...",
+                        {"mic_status": "waiting"}
+                    )
                 # re-invoke listening loop automatically
                 logger.info("Conversation mode active, listening for next turn…")
                 # spawn next round without exiting
@@ -1077,24 +1097,28 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         """
         # Always set conversation_cancelled flag first so recording can be aborted
         self.conversation_cancelled = True
+        self.gpt_command_cancelled = True
         
-        if conversation_mode or self.is_conversation_active:
-            # stop the continuous conversation loop
+        # Store current state for return value
+        was_conversation_active = self.is_conversation_active
+        was_processing = self.is_processing
+        
+        # Turn off conversation mode flag immediately
+        if conversation_mode or was_conversation_active:
             logger.info("Cancelling conversation mode")
             self.is_conversation_active = False
             if websocket:
                 await self._send_gpt_status_update(websocket, "cancelled", "Conversation ended.")
                 
-        if self.is_processing:
+        if was_processing:
             logger.info("Cancelling GPT command")
-            self.gpt_command_cancelled = True
 
             if websocket:
                 await self._send_gpt_status_update(websocket, "cancelled", "Cancelling current command...")
 
             # Stop all active scripts
             for script_name in list(self.active_processes.keys()):
-                self._stop_script(script_name)
+                await self._stop_script(script_name, websocket)
                 logger.info(f"Script {script_name} stopped due to cancellation")
             
             # Stop all motors immediately
@@ -1119,11 +1143,11 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             
             return True
         
-        if websocket and not (conversation_mode or self.is_conversation_active):
+        if websocket and not (conversation_mode or was_conversation_active):
             await self._send_gpt_status_update(websocket, "info", "No active command to cancel")
         
         # Return true if either conversation mode or processing was active
-        return self.is_conversation_active or self.is_processing
+        return was_conversation_active or was_processing
        
     async def _get_camera_image(self) -> Optional[str]:
         try:

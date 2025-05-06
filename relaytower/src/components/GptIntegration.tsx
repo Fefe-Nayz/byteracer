@@ -140,7 +140,7 @@ export default function GptIntegration() {
   useEffect(() => {
     if (gptStatus) {
       console.log("GPT Status Update:", gptStatus, actionType);
-      // Set processing state based on the status      
+      // Set processing state based on the status        
       if (gptStatus.status === "completed" || gptStatus.status === "error" || gptStatus.status === "cancelled") {
         setIsProcessing(false);
         
@@ -153,9 +153,14 @@ export default function GptIntegration() {
       } else {
         setIsProcessing(true);
         
-        // Check if this is a mic ready notification
-        if (gptStatus.status === "progress" && gptStatus.mic_status === "ready") {
-          setIsMicReady(true);
+        // Check mic status
+        if (gptStatus.mic_status) {
+          if (gptStatus.mic_status === "ready") {
+            setIsMicReady(true);
+          } else if (gptStatus.mic_status === "waiting") {
+            setIsMicReady(false);
+            setRecognizedText(null);
+          }
         }
       }
       
