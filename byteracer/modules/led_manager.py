@@ -10,23 +10,28 @@ class LEDManager:
         self.blink_thread = None
         self.blink_active = False
         self.blink_interval = 0.5  # Default interval
+        self.led_state = 1  # Track LED state internally (1 = on, 0 = off)
         
         if self.enabled:
-            self.pin.value(1)  # Turn on the LED initially
+            self.turn_on()  # Turn on the LED initially
         else:
-            self.pin.value(0)
+            self.turn_off()
 
     def turn_on(self):
         if not self.enabled:
             return
         self.pin.value(1)  # Turn on the LED
+        self.led_state = 1  # Update internal state
 
     def turn_off(self):
         self.pin.value(0)  # Turn off the LED
+        self.led_state = 0  # Update internal state
 
     def toggle(self):
-        current_value = self.pin.value()
-        self.pin.value(not current_value)  # Toggle the LED state
+        if self.led_state == 1:
+            self.turn_off()
+        else:
+            self.turn_on()
 
     def blink(self, times: int, interval: float):
         """
@@ -38,11 +43,19 @@ class LEDManager:
         """
         if not self.enabled:
             return
+        previous_state = self.led_state  # Store current state before blinking
         for _ in range(times):
             self.turn_on()
             time.sleep(interval)
             self.turn_off()
             time.sleep(interval)
+        
+        # Restore previous state after blinking
+        if previous_state == 1:
+            self.turn_on()
+        else:
+            self.turn_off()
+        
 
     def _blink_loop(self, interval: float):
         """
@@ -67,17 +80,19 @@ class LEDManager:
         if not self.enabled:
             return
             
+        # Store the current LED state before blinking
+        self.previous_state = self.led_state
+            
         # Stop any existing blinking
         self.stop_blinking()
-        
-        # Start new blinking thread
+          # Start new blinking thread
         self.blink_active = True
         self.blink_interval = interval
         self.blink_thread = threading.Thread(target=self._blink_loop, args=(interval,), daemon=True)
         self.blink_thread.start()
         
-    def stop_blinking(self):
-        """Stop any active continuous blinking and turn off the LED."""
+    def stop_blinking(self, led_on: bool = True):
+        """Stop any active continuous blinking and ensure the LED is on if enabled."""
         self.blink_active = False
         
         # Wait for the thread to end if it exists
@@ -85,7 +100,12 @@ class LEDManager:
             self.blink_thread.join(timeout=1.0)
             
         self.blink_thread = None
-        self.turn_off()
+        
+        # Always turn on the LED if enabled
+        if self.enabled and led_on:
+            self.turn_on()
+        else:
+            self.turn_off()
     
     def set_enabled(self, enabled: bool):
         """
@@ -96,9 +116,9 @@ class LEDManager:
         """
         self.enabled = enabled
         if enabled:
-            self.pin.value(1)
+            self.turn_on()
         else:
-            self.pin.value(0)
+            self.turn_off()
             # Stop blinking if it was active
             if self.blink_active:
                 self.stop_blinking()

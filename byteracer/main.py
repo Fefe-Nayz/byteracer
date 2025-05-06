@@ -55,7 +55,7 @@ class ByteRacer:
         # Initialize managers - order matters for dependencies
         self.sound_manager = SoundManager()  # Initialize sound manager first
         self.tts_manager = TTSManager(sound_manager=self.sound_manager)  # Pass sound manager to TTS manager
-        self.sensor_manager = SensorManager(self.px, self.handle_emergency)
+        self.sensor_manager = SensorManager(self.px, self.handle_emergency, self.led_manager)
         
         # Initialize camera with config settings directly
         self.camera_manager = CameraManager(
@@ -949,8 +949,6 @@ class ByteRacer:
         """Handle emergency situations"""
         logging.warning(f"Emergency callback triggered: {emergency.name}")
 
-        self.led_manager.blink(3, 0.25)  # Blink LED 3 times with 0.5s interval
-
         # Clear TTS queue and stop any ongoing speech
         self.tts_manager.clear_queue()
         await self.tts_manager.stop_speech()  # Fixed: properly await the async call
@@ -1198,6 +1196,10 @@ class ByteRacer:
         # Save settings
         await self.save_config_settings()
         await self.send_settings_to_client()
+        # Only blink LED for settings update if not in circuit or tracking mode
+        if not (self.sensor_manager.robot_state == RobotState.CIRCUIT_MODE or 
+            self.sensor_manager.robot_state == RobotState.TRACKING_MODE):
+            self.led_manager.blink(1, 0.5)  # Blink LED to indicate settings update
     
     async def execute_robot_command(self, command):
         """Handle system commands and provide feedback"""

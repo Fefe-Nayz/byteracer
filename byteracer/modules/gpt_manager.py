@@ -1129,6 +1129,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         if conversation_mode or was_conversation_active:
             logger.info("Cancelling conversation mode")
             self.is_conversation_active = False
+            self.restore_robot_state()
             if websocket:
                 await self._send_gpt_status_update(websocket, "cancelled", "Conversation ended.")
                 

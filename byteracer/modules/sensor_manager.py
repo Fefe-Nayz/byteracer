@@ -55,11 +55,12 @@ class SensorManager:
     Manages all sensors and detects emergency situations.
     Implements collision avoidance and edge detection.
     """
-    def __init__(self, picarx_instance, emergency_callback=None):
+    def __init__(self, picarx_instance, emergency_callback=None, led_manager=None):
         self.px = picarx_instance
         self.px.set_cliff_reference([200, 200, 200])
         self.emergency_callback = emergency_callback
-        
+        self.led_manager = led_manager
+
         # Emergency states
         self.current_emergency = EmergencyState.NONE
         self.emergency_active = False
@@ -173,10 +174,13 @@ class SensorManager:
                             asyncio.create_task(self.emergency_callback(emergency))
                         
                         # Start the emergency handling process
+                        self.led_manager.start_blinking(0.1)  # Start blinking LED at 10Hz
                         self._emergency_task = asyncio.create_task(self._handle_emergency(emergency))
                     elif self.emergency_active:
                         # Check if we can clear the emergency
                         await self._check_emergency_clearance()
+                    else:
+                        self.led_manager.stop_blinking()  # Stop blinking LED if no emergency
                 
                 # Short delay to avoid CPU overuse
                 await asyncio.sleep(0.05)  # Slightly faster updates for better responsiveness
