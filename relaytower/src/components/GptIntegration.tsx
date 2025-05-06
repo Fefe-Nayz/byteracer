@@ -517,7 +517,7 @@ export default function GptIntegration() {
             
             <Button
               onClick={toggleConversation}
-              disabled={status !== "connected" || isProcessing}
+              disabled={status !== "connected"}
               variant={isConversationActive ? "destructive" : "default"}
               className="w-full"
             >
