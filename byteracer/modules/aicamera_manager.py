@@ -93,7 +93,7 @@ class AICameraCameraManager:
         self.continuous_turning = False  # Flag to track if continuous turning is active
         
         # Auto-load YOLO model if available in modules directory
-        self.model_path = os.path.join(os.path.dirname(__file__), 'my_model_100_openvino_model')
+        self.model_path = os.path.join(os.path.dirname(__file__), 'feu_nano_60_480_ncnn_model')
         if os.path.exists(self.model_path):
             try:
                 # Try to load the model during initialization but don't block if it fails
