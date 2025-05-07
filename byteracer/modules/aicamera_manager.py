@@ -675,6 +675,9 @@ class AICameraCameraManager:
         fps_avg_len = 30
         avg_frame_rate = 0
         
+        # Expected model input size for NCNN model - 480x480 is recommended for NCNN models
+        model_input_size = (480, 480)
+        
         while self.yolo_detection_active:
             try:
                 t_start = time.perf_counter()
@@ -692,8 +695,12 @@ class AICameraCameraManager:
                 if len(frame.shape) == 2:  # If grayscale
                     frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
                 
-                # Run inference on frame
-                results = self.yolo_model(frame, verbose=False)
+                # Resize frame to match the expected model input size
+                # This is crucial for NCNN models which require exact input dimensions
+                resized_frame = cv2.resize(frame, model_input_size)
+                
+                # Run inference on resized frame
+                results = self.yolo_model(resized_frame, verbose=False)
                 
                 # Extract results
                 detections = results[0].boxes
@@ -718,6 +725,15 @@ class AICameraCameraManager:
                     xyxy_tensor = detections[i].xyxy.cpu()
                     xyxy = xyxy_tensor.numpy().squeeze()
                     xmin, ymin, xmax, ymax = xyxy.astype(int)
+                    
+                    # Scale bounding box coordinates back to original frame size
+                    scale_x = frame.shape[1] / model_input_size[0]
+                    scale_y = frame.shape[0] / model_input_size[1]
+                    
+                    xmin = int(xmin * scale_x)
+                    xmax = int(xmax * scale_x)
+                    ymin = int(ymin * scale_y)
+                    ymax = int(ymax * scale_y)
                     
                     # Get class ID, name and confidence
                     classidx = int(detections[i].cls.item())
