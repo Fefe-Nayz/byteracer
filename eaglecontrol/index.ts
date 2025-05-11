@@ -64,7 +64,9 @@ type WebSocketEventName =
   | "speech_recognition"
   | "start_calibration"
   | "stop_calibration"
-  | "test_calibration";
+  | "test_calibration"
+  | "start_test_calibrate_motors"
+  | "stop_test_calibrate_motors";
 
 type WebSocketEvent = {
   name: WebSocketEventName;
@@ -423,6 +425,18 @@ const wsHandlers = {
 
         case "test_calibration":
           console.log("Test calibration command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "start_test_calibrate_motors":
+          console.log("Start test calibrate motors command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "stop_test_calibrate_motors":
+          console.log("Stop test calibrate motors command received");
           // Forward to all cars
           broadcastToType(message, "car", ws);
           break;
