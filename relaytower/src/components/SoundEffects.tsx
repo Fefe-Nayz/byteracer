@@ -7,13 +7,16 @@ import { useToast } from "@/hooks/use-toast";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 
 export default function SoundEffects() {
-  const [selectedSound, setSelectedSound] = useLocalStorage<string>("gamepad-selected-sound", "fart");
+  const [selectedSound, setSelectedSound] = useLocalStorage<string>(
+    "gamepad-selected-sound",
+    "fart"
+  );
   const { status, playSound, stopSound, settings } = useWebSocket();
   const { toast } = useToast();
-  
+
   const handlePlaySound = (sound: string) => {
     playSound(sound);
-    
+
     // Show toast notification
     toast({
       title: "Playing sound",
@@ -21,10 +24,10 @@ export default function SoundEffects() {
       duration: 2000,
     });
   };
-  
+
   const handleStopSound = () => {
     stopSound();
-    
+
     // Show toast notification
     toast({
       title: "Sounds stopped",
@@ -32,10 +35,10 @@ export default function SoundEffects() {
       duration: 2000,
     });
   };
-  
+
   const handleSelectSound = (sound: string) => {
     setSelectedSound(sound);
-    
+
     // Show toast notification
     toast({
       title: "Quick Sound Selected",
@@ -43,7 +46,7 @@ export default function SoundEffects() {
       duration: 2000,
     });
   };
-  
+
   // Expose selected sound for GamepadInputHandler through window event
   useEffect(() => {
     // Create custom event to share selected sound with GamepadInputHandler
@@ -53,7 +56,7 @@ export default function SoundEffects() {
       })
     );
   }, [selectedSound]);
-  
+
   // Define available sound effects
   const soundEffects = [
     { id: "fart", name: "Fart", icon: "💨" },
@@ -63,24 +66,24 @@ export default function SoundEffects() {
     { id: "laugh", name: "Laugh", icon: "😂" },
     { id: "bruh", name: "Bruh", icon: "😑" },
     { id: "nope", name: "Nope", icon: "❌" },
-    { id:"lingango", name: "Lingango", icon: "🗣️" },
-    { id: "cailloux", name: "Cailloux", icon: "🪨" },
-    { id: "fave", name: "Favéé", icon: "🎤" },
+    { id: "lingango", name: "Lingango", icon: "🗣️" },
+    // { id: "cailloux", name: "Cailloux", icon: "🪨" },
+    // { id: "fave", name: "Favéé", icon: "🎤" },
     { id: "pipe", name: "Pipe", icon: "🔩" },
-    { id: "tuile", name: "Une Tuile", icon: "🧱" },
-    { id: "india", name: "India", icon: "🇮🇳" },
+    // { id: "tuile", name: "Une Tuile", icon: "🧱" },
+    // { id: "india", name: "India", icon: "🇮🇳" },
     { id: "vine-boom", name: "Vine Boom", icon: "💥" },
     { id: "tralalelo-tralala", name: "Tralalelo", icon: "🦈" },
     { id: "get-out", name: "Get Out", icon: "🚪" },
-    { id:"scream", name: "Scream", icon: "😱" },
-    { id:"wtf", name: "WTF", icon: "🤯" },
-    { id:"rat-dance", name: "Rat Dance", icon: "🐀" },
-    { id:"ph", name: "PH", icon: "🤨"},
-    { id:"aurores", name: "Dragorores", icon: "🐉" },
+    // { id: "scream", name: "Scream", icon: "😱" },
+    // { id: "wtf", name: "WTF", icon: "🤯" },
+    { id: "rat-dance", name: "Rat Dance", icon: "🐀" },
+    // { id: "ph", name: "PH", icon: "🤨" },
+    // { id: "aurores", name: "Dragorores", icon: "🐉" },
   ];
-  
+
   const soundEnabled = settings?.sound.enabled || false;
-  
+
   return (
     <Card className="p-4">
       <div className="flex items-center justify-between mb-3">
@@ -93,8 +96,8 @@ export default function SoundEffects() {
             <Gamepad className="h-4 w-4 mr-1" />
             <span>Quick: {selectedSound}</span>
           </div>
-          <Button 
-            variant="destructive" 
+          <Button
+            variant="destructive"
             size="sm"
             onClick={handleStopSound}
             disabled={status !== "connected" || !soundEnabled}
@@ -105,40 +108,42 @@ export default function SoundEffects() {
           </Button>
         </div>
       </div>
-      
+
       <div className="h-[245px] overflow-y-auto pr-2">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {soundEffects.map(sound => (
-        <Button
-          key={sound.id}
-          variant="outline"
-          onClick={() => handlePlaySound(sound.id)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            handleSelectSound(sound.id);
-            return false;
-          }}
-          disabled={status !== "connected" || !soundEnabled }
-          className={`h-auto py-3 relative ${selectedSound === sound.id ? 'border-2 border-primary' : ''}`}
-        >
-          <div className="flex flex-col items-center">
-            <span className="text-xl mb-1">{sound.icon}</span>
-            <span className="text-xs">{sound.name}</span>
-            {selectedSound === sound.id && (
-          <span className="absolute top-0 right-0 p-1">
-            <Gamepad className="h-3 w-3 text-primary" />
-          </span>
-            )}
-          </div>
-        </Button>
+          {soundEffects.map((sound) => (
+            <Button
+              key={sound.id}
+              variant="outline"
+              onClick={() => handlePlaySound(sound.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                handleSelectSound(sound.id);
+                return false;
+              }}
+              disabled={status !== "connected" || !soundEnabled}
+              className={`h-auto py-3 relative ${
+                selectedSound === sound.id ? "border-2 border-primary" : ""
+              }`}
+            >
+              <div className="flex flex-col items-center">
+                <span className="text-xl mb-1">{sound.icon}</span>
+                <span className="text-xs">{sound.name}</span>
+                {selectedSound === sound.id && (
+                  <span className="absolute top-0 right-0 p-1">
+                    <Gamepad className="h-3 w-3 text-primary" />
+                  </span>
+                )}
+              </div>
+            </Button>
           ))}
         </div>
       </div>
-      
+
       <div className="mt-3 text-xs text-muted-foreground">
         <p>Right-click to set as gamepad quick sound</p>
       </div>
-      
+
       {!soundEnabled && status === "connected" && (
         <div className="flex items-center mt-3 text-xs text-amber-600">
           <VolumeX className="h-3 w-3 mr-1" />
