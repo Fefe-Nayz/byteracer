@@ -556,7 +556,7 @@ class CameraManager:
         Display YOLO detections on the vilib camera feed.
         
         Args:
-            detections: YOLO detections from model results
+            detections: YOLO detections from model results or list of transformed detections as dictionaries
             labels: List of class labels
             confidence_threshold: Minimum confidence to display
         """
@@ -568,50 +568,112 @@ class CameraManager:
             if not Vilib.drawing_enabled:
                 Vilib.enable_drawing()
             
-            # Process each detection
-            for i in range(len(detections)):
-                try:
-                    # Get bounding box coordinates (convert from tensor)
-                    xyxy_tensor = detections[i].xyxy.cpu()
-                    xyxy = xyxy_tensor.numpy().squeeze()
-                    xmin, ymin, xmax, ymax = xyxy.astype(int)
-                    
-                    # Get class info
-                    classidx = int(detections[i].cls.item())
-                    classname = labels[classidx]
-                    conf = detections[i].conf.item()
-                    
-                    # Skip if below threshold
-                    if conf < confidence_threshold:
+            # Check if we're receiving transformed detections (dictionaries) or raw detections
+            if detections and isinstance(detections, list) and isinstance(detections[0], dict):
+                # Process transformed detections (dictionaries)
+                for obj in detections:
+                    try:
+                        # Get values from the dictionary
+                        classname = obj['class']
+                        conf = obj['confidence']
+                        xmin = obj['xmin']
+                        ymin = obj['ymin']
+                        width = obj['width']
+                        height = obj['height']
+                        
+                        # Skip if below threshold
+                        if conf < confidence_threshold:
+                            continue
+                        
+                        # Determine color (BGR format)
+                        if classname == "Rouge":
+                            color = (0, 0, 255)  # Red color in BGR
+                        elif classname == "Vert":
+                            color = (0, 255, 0)  # Green color in BGR
+                        elif classname == "Orange":
+                            color = (0, 255, 255)
+                        elif classname == "Stop":
+                            # pink for stop sign
+                            color = (255, 105, 180)
+                        elif classname == "Tourner":
+                            # blue for turn sign
+                            color = (255, 0, 0)
+                        else:
+                            # Default to white for unknown classes
+                            color = (255, 255, 255)
+                        
+                        # Create label with confidence and distance if available
+                        if 'distance_cm' in obj:
+                            label = f'{classname}: {int(conf*100)}% ({obj["distance_cm"]:.1f}cm)'
+                        else:
+                            label = f'{classname}: {int(conf*100)}%'
+                        
+                        # Add rectangle with integrated label to vilib
+                        Vilib.draw_rectangle(
+                            xmin, ymin, width, height, 
+                            color=color, thickness=2,
+                            label=label, label_color=color,
+                            font_scale=0.5, label_thickness=1,
+                            label_position='top'
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing transformed detection: {e}")
                         continue
-                    
-                    # Determine color (BGR format)
-                    if classname == "red":
-                        color = (0, 0, 255)  # Red color in BGR
-                    elif classname == "green":
-                        color = (0, 255, 0)  # Green color in BGR
-                    else:
-                        # Default to blue for other objects
-                        color = (255, 0, 0)
-                    # Calculate dimensions
-                    width = xmax - xmin
-                    height = ymax - ymin
-                    
-                    # Create label with confidence
-                    label = f'{classname}: {int(conf*100)}%'
-                    
-                    # Add rectangle with integrated label to vilib
-                    Vilib.draw_rectangle(
-                        xmin, ymin, width, height, 
-                        color=color, thickness=2,
-                        label=label, label_color=color,
-                        font_scale=0.5, label_thickness=1,
-                        label_position='top'
-                    )
-                    
-                except Exception as e:
-                    logger.error(f"Error processing detection: {e}")
-                    continue
+            else:
+                # Process each raw detection from YOLO
+                for i in range(len(detections)):
+                    try:
+                        # Get bounding box coordinates (convert from tensor)
+                        xyxy_tensor = detections[i].xyxy.cpu()
+                        xyxy = xyxy_tensor.numpy().squeeze()
+                        xmin, ymin, xmax, ymax = xyxy.astype(int)
+                        
+                        # Get class info
+                        classidx = int(detections[i].cls.item())
+                        classname = labels[classidx]
+                        conf = detections[i].conf.item()
+                        
+                        # Skip if below threshold
+                        if conf < confidence_threshold:
+                            continue
+                        
+                        # Determine color (BGR format)
+                        if classname == "Rouge":
+                            color = (0, 0, 255)  # Red color in BGR
+                        elif classname == "Vert":
+                            color = (0, 255, 0)  # Green color in BGR
+                        elif classname == "Orange":
+                            color = (0, 255, 255)
+                        elif classname == "Stop":
+                            # pink for stop sign
+                            color = (255, 105, 180)
+                        elif classname == "Tourner":
+                            # blue for turn sign
+                            color = (255, 0, 0)
+                        else:
+                            # Default to white for unknown classes
+                            color = (255, 255, 255)
+                        # Calculate dimensions
+                        width = xmax - xmin
+                        height = ymax - ymin
+                        
+                        # Create label with confidence and distance if available
+                        # Note: Raw detections don't have distance information
+                        label = f'{classname}: {int(conf*100)}%'
+                        
+                        # Add rectangle with integrated label to vilib
+                        Vilib.draw_rectangle(
+                            xmin, ymin, width, height, 
+                            color=color, thickness=2,
+                            label=label, label_color=color,
+                            font_scale=0.5, label_thickness=1,
+                            label_position='top'
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing detection: {e}")
+                        continue
             
         except Exception as e:
             logger.error(f"Error displaying YOLO detections: {e}")

@@ -1,0 +1,22 @@
+description: Ultralytics YOLO11n model trained on /content/data.yaml
+author: Ultralytics
+date: '2025-05-11T09:09:26.909988'
+version: 8.3.125
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: Orange
+  1: Rouge
+  2: Stop
+  3: Tourner
+  4: Vert
+args:
+  batch: 1
+  half: true
+channels: 3
