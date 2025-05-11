@@ -111,7 +111,7 @@ class Picarx(object):
         if speed != 0:
             # Add minimum +20 at 1% speed, scaling additional boost linearly up to +50 at 100% speed
             # Then constrain to never exceed 100
-            boost = 20 + (speed * 0.2)  # 30 at 1%, ~50 at 100%
+            boost = 15 + (speed * 0.2)  # 30 at 1%, ~50 at 100%
             speed = int(min(100, speed + boost))
         speed = speed - self.cali_speed_value[motor]
         if direction < 0:

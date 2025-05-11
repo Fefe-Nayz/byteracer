@@ -402,9 +402,13 @@ class GPTManager:
                 "text": {"type": ["string", "null"], "description": "Text for TTS output. only use it if you want to say something between actions not directly to respond to the user"},
                 "interval": {"type": ["number", "null"], "description": "Interval for led blinking in seconds"},
                 "times": {"type": ["number", "null"], "description": "Number of times to blink"},
+                "distance_threshold_cm": {"type": ["number", "null"], "description": "Distance threshold for circuit mode (10-100cm)"},
+                "turn_time": {"type": ["number", "null"], "description": "Turn time for circuit mode (1-10 seconds)"},
+                "motor_balance": {"type": ["number", "null"], "description": "Motor balance for circuit mode (-50 / 50)"},
+                "yolo_confidence": {"type": ["number", "null"], "description": "YOLO confidence threshold for circuit mode (0.1-0.9)"},
                 "language": {"type": ["string", "null"], "description": "Language for TTS output. Available languages: 'en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'it-IT'."}
               },
-              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode", "text", "language", "interval", "times"],
+              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode", "text", "language", "interval", "times", "distance_threshold_cm", "turn_time", "motor_balance", "yolo_confidence"],
               "additionalProperties": False
             }
           },
@@ -898,6 +902,11 @@ def _build_script_with_environment(script_code: str) -> str:
    • twist_body(): Makes the robot twist its body
    • rub_hands(): Makes the robot rub its front wheels
    • depressed(): Makes the robot appear depressed
+    AI Settings:
+   • set_distance_threshold_cm(distance_threshold_cm: number): Sets the distance threshold for circuit mode (10-100cm)
+   • set_turn_time(turn_time: number): Sets the turn time for circuit mode (1-10 seconds)
+   • set_motor_balance(motor_balance: number): Sets the motor balance for circuit mode (-50 / 50)
+   • set_yolo_confidence(confidence: number): Sets the YOLO confidence threshold for circuit mode (0.1-0.9)
 
    Finally, if the user is telling you something that would "end the conversation" (like "bye" or "thank you"), you should call the function "end_conversation()"
 
@@ -2184,9 +2193,9 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 return True
                 
             elif function_name == "distance_threshold":
-                distance_threshold = parameters.get("distance_threshold", 0.02)
-                self.config_manager.set("ai.distance_threshold", distance_threshold)
-                self.aicamera_manager.set_distance_threshold(distance_threshold)
+                distance_threshold = parameters.get("distance_threshold_cm", 30)
+                self.config_manager.set("ai.distance_threshold_cm", distance_threshold)
+                self.aicamera_manager.set_action_distance_threshold(distance_threshold)
                 logger.info(f"AI voice settings updated: distance_threshold={distance_threshold}")
                 return True
 
@@ -2195,6 +2204,20 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 self.config_manager.set("ai.turn_time", turn_time)
                 self.aicamera_manager.set_turn_time(turn_time)
                 logger.info(f"AI voice settings updated: turn_time={turn_time}")
+                return True
+            
+            elif function_name == "motor_balance":
+                motor_balance = parameters.get("motor_balance", 0)
+                self.config_manager.set("ai.motor_balance", motor_balance)
+                self.aicamera_manager.set_motor_balance(motor_balance)
+                logger.info(f"AI voice settings updated: motor_balance={motor_balance}")
+                return True
+            
+            elif function_name == "yolo_confidence":
+                yolo_confidence = parameters.get("yolo_confidence", 0.5)
+                self.config_manager.set("ai.yolo_confidence", yolo_confidence)
+                self.aicamera_manager.set_yolo_confidence(yolo_confidence)
+                logger.info(f"AI voice settings updated: yolo_confidence={yolo_confidence}")
                 return True
             
             elif function_name == "enable_led":
@@ -2533,3 +2556,306 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         if hasattr(self, '_stop_listening') and self._stop_listening:
             self._stop_listening(wait_for_stop=False)
             self._stop_listening = None
+
+    async def _prepare_context(self, personality_profile=None):
+        """
+        Prepare the context document for the AI assistant. UNUSED MAYBE NEXT UPDATE
+        
+        Args:
+            personality_profile (str, optional): Personality profile to use
+            
+        Returns:
+            str: The prepared context
+        """
+        # Get sensor data about current robot state
+        sensor_data = self.sensor_manager.get_sensor_data()
+        
+        # Get current settings
+        settings = self.config_manager.get()
+        
+        # Get current timestamp
+        current_time = datetime.now().strftime("%A %d %B %Y, %H:%M:%S")
+        
+        # Get available tools schema
+        tools_schema = self._get_tools_schema()
+        
+        # Robot name if configured
+        robot_name = settings.get("robot", {}).get("name", "Byte Racer")
+        
+        # Build the context document with all available information
+        context = f"""You are the AI assistant for a small robot called {robot_name}. 
+Current time: {current_time}
+
+# Robot Status
+- Battery Level: {sensor_data.get('battery_level', 'Unknown')}%
+- Current Mode: {self.sensor_manager.robot_state.name}
+- Camera Status: {"Active" if self.aicamera_manager and self.aicamera_manager.camera_thread_running else "Inactive"}
+- Face Following: {"Active" if self.aicamera_manager and self.aicamera_manager.face_follow_active else "Inactive"}
+- Color Control: {"Active" if self.aicamera_manager and self.aicamera_manager.color_control_active else "Inactive"}
+- Traffic Sign Detection: {"Active" if self.aicamera_manager and self.aicamera_manager.traffic_sign_detection_active else "Inactive"}
+
+# Current Settings
+## Sound Settings
+- Master Volume: {settings.get('sound', {}).get('volume', 'N/A')}
+- Sound Effects Volume: {settings.get('sound', {}).get('sound_volume', 'N/A')}
+- TTS Volume: {settings.get('sound', {}).get('tts_volume', 'N/A')}
+- Sound Enabled: {settings.get('sound', {}).get('enabled', False)}
+- TTS Enabled: {settings.get('sound', {}).get('tts_enabled', False)}
+
+## Camera Settings
+- Horizontal Flip: {settings.get('camera', {}).get('hflip', False)}
+- Vertical Flip: {settings.get('camera', {}).get('vflip', False)}
+- Local Display: {settings.get('camera', {}).get('local_display', False)}
+- Web Display: {settings.get('camera', {}).get('web_display', True)}
+- Camera Resolution: {settings.get('camera', {}).get('camera_size', [1920, 1080])}
+
+## Drive Settings
+- Max Speed: {settings.get('drive', {}).get('max_speed', 100)}%
+- Max Turn Angle: {settings.get('drive', {}).get('max_turn_angle', 30)}°
+- Motor Balance: {settings.get('drive', {}).get('motor_balance', 0)} (-50 to +50)
+- Enhanced Turning: {settings.get('drive', {}).get('enhanced_turning', True)}
+- Turn In Place: {settings.get('drive', {}).get('turn_in_place', True)}
+
+## AI Settings
+- Speak Pause Threshold: {settings.get('ai', {}).get('speak_pause_threshold', 1.2)} seconds
+- Distance Threshold: {settings.get('ai', {}).get('distance_threshold_cm', 30)} cm
+- Turn Time: {settings.get('ai', {}).get('turn_time', 2.0)} seconds
+- YOLO Confidence Threshold: {settings.get('ai', {}).get('yolo_confidence', 0.5)}
+
+## Safety Settings
+- Collision Avoidance: {settings.get('safety', {}).get('collision_avoidance', True)}
+- Edge Detection: {settings.get('safety', {}).get('edge_detection', True)}
+- Auto Stop: {settings.get('safety', {}).get('auto_stop', True)}
+- Client Timeout: {settings.get('safety', {}).get('client_timeout', 0.5)} seconds
+
+# Available Tools
+You can help me control the robot and interact with its environment through the following functions:
+```
+{tools_schema}
+```
+
+# Important Notes
+1. Always prioritize safety - do not suggest actions that could damage the robot or its surroundings
+2. Respond in a helpful, friendly manner
+3. When using predefined_action functions, provide clear updates on what's happening
+4. If I ask for capabilities beyond what's possible, explain limitations politely
+"""
+
+        # Add personality profile if provided
+        if personality_profile:
+            context += f"\n# Personality Profile\n{personality_profile}\n"
+        
+        return context
+
+    def _get_tools_schema(self):
+        """
+        Get the tools schema for the AI assistant.
+        
+        Returns:
+            str: Tools schema in JSON format
+        """
+        
+        tools_schema = [
+            {
+                "name": "speak",
+                "description": "Make the robot speak using text-to-speech synthesis",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {
+                            "type": "string",
+                            "description": "The text to speak"
+                        },
+                        "priority": {
+                            "type": "integer",
+                            "description": "Optional priority level (1-3, where 1 is highest)",
+                            "enum": [1, 2, 3]
+                        },
+                        "language": {
+                            "type": "string",
+                            "description": "Optional language code (e.g., 'en-US', 'fr-FR', 'de-DE')",
+                            "enum": ["en-US", "fr-FR", "de-DE", "es-ES", "it-IT", "ja-JP"]
+                        },
+                        "use_ai_voice": {
+                            "type": "boolean",
+                            "description": "Whether to use AI voice or standard voice for text-to-speech"
+                        }
+                    },
+                    "required": ["text"]
+                }
+            },
+            {
+                "name": "move_robot",
+                "description": "Control the robot's movement",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "direction": {
+                            "type": "string",
+                            "description": "The direction to move the robot",
+                            "enum": ["forward", "backward", "left", "right", "stop"]
+                        },
+                        "speed": {
+                            "type": "number",
+                            "description": "The speed of the movement (percentage 0-100)"
+                        },
+                        "duration": {
+                            "type": "number",
+                            "description": "How long to maintain this movement (in seconds)"
+                        }
+                    },
+                    "required": ["direction"]
+                }
+            },
+            {
+                "name": "camera_control",
+                "description": "Control the robot's camera (pan/tilt)",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "action": {
+                            "type": "string", 
+                            "description": "The camera action to perform",
+                            "enum": ["pan", "tilt", "reset", "center"]
+                        },
+                        "angle": {
+                            "type": "number",
+                            "description": "The angle to move the camera to (degrees, -90 to +90)"
+                        }
+                    },
+                    "required": ["action"]
+                }
+            },
+            {
+                "name": "execute_predefined_function",
+                "description": "Execute one of the robot's predefined functions",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "function_name": {
+                            "type": "string",
+                            "description": "Name of the predefined function to execute",
+                            "enum": [
+                                "start_face_tracking", 
+                                "stop_face_tracking", 
+                                "start_color_recognition", 
+                                "stop_color_recognition", 
+                                "start_traffic_sign_detection",
+                                "stop_traffic_sign_detection",
+                                "calibrate_right_turn",
+                                "update_settings",
+                                "play_sound"
+                            ]
+                        },
+                        "parameters": {
+                            "type": "object",
+                            "description": "Parameters for the function (if needed)"
+                        }
+                    },
+                    "required": ["function_name"]
+                }
+            }
+        ]
+        
+        # Add detailed documentation for each predefined function's parameters
+        predefined_function_docs = """
+# Predefined Function Parameters Guide
+
+## start_face_tracking
+No parameters needed. Starts tracking faces detected by the camera.
+
+## stop_face_tracking
+No parameters needed. Stops any active face tracking.
+
+## start_color_recognition
+No parameters needed. Starts detecting and tracking colored objects.
+
+## stop_color_recognition
+No parameters needed. Stops color recognition mode.
+
+## start_traffic_sign_detection
+No parameters needed. Starts detecting and responding to traffic signs.
+
+## stop_traffic_sign_detection
+No parameters needed. Stops traffic sign detection mode.
+
+## calibrate_right_turn
+Parameters:
+- command: The calibration action to perform
+  - "test": Run a test right turn with the current settings
+  - "set_time": Update the turn time setting
+  - "start": Start a continuous test turn
+  - "stop": Stop a continuous test turn
+- turn_time: (Optional) New turn time in seconds (for "set_time" command)
+- speed: (Optional) Turn speed from 0.0-1.0 (for "start" command)
+
+Example:
+```
+{
+  "function_name": "calibrate_right_turn",
+  "parameters": {
+    "command": "test"
+  }
+}
+```
+
+## update_settings
+Parameters:
+- setting_type: Category of setting ("sound", "camera", "drive", "safety", "ai")
+- setting_name: Name of the specific setting to change
+- setting_value: New value for the setting
+
+Valid settings by type:
+- sound: enabled, volume, tts_enabled, tts_volume, sound_volume, driving_volume, alert_volume, custom_volume, voice_volume
+- camera: vflip, hflip, local_display, web_display, camera_size
+- drive: max_speed, max_turn_angle, acceleration_factor, enhanced_turning, turn_in_place, motor_balance
+- safety: collision_avoidance, edge_detection, auto_stop, collision_threshold, edge_threshold, client_timeout
+- ai: speak_pause_threshold, distance_threshold_cm, turn_time, yolo_confidence
+
+Example:
+```
+{
+  "function_name": "update_settings",
+  "parameters": {
+    "setting_type": "drive",
+    "setting_name": "max_speed",
+    "setting_value": 80
+  }
+}
+```
+
+## play_sound
+Parameters:
+- sound_file: Name of the built-in sound to play
+- volume: (Optional) Volume override for this sound (0-100)
+- category: (Optional) Sound category for volume control
+
+Built-in sounds:
+- startup
+- shutdown
+- alert
+- confirmation
+- error
+- greeting
+- goodbye
+- chime
+
+Example:
+```
+{
+  "function_name": "play_sound",
+  "parameters": {
+    "sound_file": "confirmation",
+    "volume": 75
+  }
+}
+```
+"""
+        
+        # Format the schema as a nicely indented JSON string
+        schema_str = json.dumps(tools_schema, indent=2)
+        
+        # Add the documentation for predefined functions
+        full_schema = schema_str + "\n" + predefined_function_docs
+        
+        return full_schema

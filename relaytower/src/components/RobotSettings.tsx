@@ -23,6 +23,8 @@ export default function RobotSettings() {
     startCalibration,
     stopCalibration,
     testCalibration,
+    startTestCalibrateMotors,
+    stopTestCalibrateMotors,
   } = useWebSocket();
 
   // Local state for settings (to avoid constant updates)
@@ -482,20 +484,45 @@ export default function RobotSettings() {
 
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
-                  <span>Distance Threshold <span className="text-xs text-gray-500">(Bigger is less sensitive)</span></span>
-                  <span>{localSettings.ai.distance_threshold}</span>
+                  <span>
+                    Action Distance (cm){" "}
+                    <span className="text-xs text-gray-500">
+                      (Distance to act on detected objects)
+                    </span>
+                  </span>
+                  <span>{localSettings.ai.distance_threshold_cm}</span>
                 </div>
                 <Slider
-                  value={[localSettings.ai.distance_threshold]}
-                  min={0.01}
-                  max={1}
-                  step={0.001}
-                  disabled={!localSettings.ai.distance_threshold}
+                  value={[localSettings.ai.distance_threshold_cm || 30]}
+                  min={10}
+                  max={100}
+                  step={1}
                   onValueChange={(value) =>
-                    updateSetting("ai", "distance_threshold", value[0])
+                    updateSetting("ai", "distance_threshold_cm", value[0])
                   }
                 />
               </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>YOLO Confidence Threshold</span>
+                  <span>{localSettings.ai.yolo_confidence || 0.5}</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.yolo_confidence || 0.5]}
+                  min={0.1}
+                  max={0.9}
+                  step={0.05}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "yolo_confidence", value[0])
+                  }
+                />
+                <div className="text-xs text-muted-foreground mt-1">
+                  Lower values will detect more objects but with more false
+                  positives.
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span>Turn Time </span>
@@ -549,6 +576,50 @@ export default function RobotSettings() {
                   </Button>
                 </div>
               </div>
+              
+            <div className="pt-4 border-t space-y-4">
+              <div className="text-sm font-medium mb-2">Motor Calibration</div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Motor Balance</span>
+                  <span>{localSettings.ai.motor_balance || 0}</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.motor_balance || 0]}
+                  min={-50}
+                  max={50}
+                  step={1}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "motor_balance", value[0])
+                  }
+                /> 
+                <div className="text-xs text-muted-foreground mt-1">
+                  <div>
+                    Negative values: More power to left motor (if veering right)
+                  </div>
+                  <div>
+                    Positive values: More power to right motor (if veering left)
+                  </div>
+                  <div>Zero: Equal power to both motors</div>
+                </div>
+              </div>
+
+              <div className="flex justify-between mt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => startTestCalibrateMotors()}
+                >
+                  Start Drive Test
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => stopTestCalibrateMotors()}
+                >
+                  Stop Drive Test
+                </Button>
+              </div>
+            </div>
             </div>
           </div>
         </Card>

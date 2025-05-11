@@ -168,15 +168,17 @@ export interface RobotSettings {
   };
   api: {
     openai_api_key: string;
-  },
+  };
   ai: {
     speak_pause_threshold: number;
-    distance_threshold: number;
+    distance_threshold_cm: number;
     turn_time: number;
-  },
+    yolo_confidence: number;
+    motor_balance: number;
+  };
   led: {
     enabled: boolean;
-  }
+  };
 }
 
 // Define command response interface
@@ -272,6 +274,8 @@ interface WebSocketContextValue {
   startCalibration: () => void;
   stopCalibration: () => void;
   testCalibration: () => void;
+  startTestCalibrateMotors: () => void;
+  stopTestCalibrateMotors: () => void;
 }
 
 // Create context with default values
@@ -1090,6 +1094,47 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     }
   }, [socket]);
 
+  const startTestCalibrateMotors = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const startTestCalibrateMotorsData = {
+        name: "start_test_calibrate_motors",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(startTestCalibrateMotorsData));
+      trackWsMessage("sent", startTestCalibrateMotorsData);
+      console.log("Start test calibrate motors request sent to robot");
+    } else {
+      logError("Cannot send start test calibrate motors request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  const stopTestCalibrateMotors = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const stopTestCalibrateMotorsData = {
+        name: "stop_test_calibrate_motors",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(stopTestCalibrateMotorsData));
+      trackWsMessage("sent", stopTestCalibrateMotorsData);
+      console.log("Stop test calibrate motors request sent to robot");
+    } else {
+      logError("Cannot send stop test calibrate motors request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
 
   // Combine all values and functions for the context
   const contextValue: WebSocketContextValue = {
@@ -1138,6 +1183,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     startCalibration,
     stopCalibration,
     testCalibration,
+    startTestCalibrateMotors,
+    stopTestCalibrateMotors,
   };
 
   return (

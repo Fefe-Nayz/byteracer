@@ -132,6 +132,9 @@ class AICameraCameraManager:
         self.STEER_MIN_ANGLE = -35
         self.STEER_MAX_ANGLE =  35
 
+        # Initialize motor balance
+        self.motor_balance = self.config_manager.get("ai.motor_balance") or 0
+
     def clamp_number(self, num, lower_bound, upper_bound):
         """Clamp 'num' between 'lower_bound' and 'upper_bound'."""
         return max(min(num, max(lower_bound, upper_bound)),
@@ -901,7 +904,7 @@ class AICameraCameraManager:
                 # If no priority objects detected and we're not waiting for anything
                 elif not (self.waiting_for_green or self.waiting_at_stop_sign or self.executing_right_turn):
                     # Move forward at default speed
-                    self.px.forward(1)  # 1% speed
+                    self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
                     # Use closest object for tracking regardless of type
                     best_object = closest_object
                 
@@ -1086,7 +1089,7 @@ class AICameraCameraManager:
                     
                 if self.waiting_for_green:
                     # We were waiting for green after seeing red/yellow, now proceed
-                    self.px.forward(1)  # 1% speed
+                    self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
                     self.waiting_for_green = False
                     
                     # Turn off stop light
@@ -1109,7 +1112,7 @@ class AICameraCameraManager:
                     logger.info("GREEN LIGHT after stopping - Proceeding at 1% speed")
                 elif prev_state != "Vert":
                     # Green light from no previous light detected
-                    self.px.forward(1)  # 1% speed
+                    self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
                     
                     # Turn off any LED patterns
                     self.stop_all_led_patterns(False)
@@ -1121,7 +1124,7 @@ class AICameraCameraManager:
                     logger.info("GREEN LIGHT - Proceeding at 1% speed")
         elif not self.waiting_for_green:
             # If not close enough and not waiting for green after red/yellow, move forward
-            self.px.forward(1)  # 1% speed
+            self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
             logger.info("Traffic light not close enough, proceeding at 1% speed")
             
     async def _handle_stop_sign(self, object_info):
@@ -1181,7 +1184,7 @@ class AICameraCameraManager:
             # Check if we've waited long enough (2 seconds)
             if time.time() - self.stop_sign_timer >= 2.0:
                 # Resume movement
-                self.px.forward(1)  # 1% speed
+                self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
                 self.waiting_at_stop_sign = False
                 
                 # Turn off stop light
@@ -1204,7 +1207,7 @@ class AICameraCameraManager:
                 logger.info("STOP SIGN - Waited 2 seconds, now proceeding at 1% speed")
         elif not self.waiting_at_stop_sign:
             # Not close enough yet, continue moving forward
-            self.px.forward(1)  # 1% speed
+            self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
             logger.info("Stop sign detected but not close enough, proceeding at 1% speed")
     
     async def _handle_right_turn_sign(self, object_info):
@@ -1262,7 +1265,7 @@ class AICameraCameraManager:
         
         elif not is_close_enough and not self.right_turn_pending:
             # Not close enough yet, continue moving forward
-            self.px.forward(1)  # 1% speed
+            self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
             logger.info("Right turn sign detected but not close enough, proceeding at 1% speed")
             
     async def _execute_right_turn(self):
@@ -1332,7 +1335,7 @@ class AICameraCameraManager:
         self.px.set_cam_tilt_angle(0)
 
         # Move forward slowly after the turn
-        self.px.forward(1)  # 1% speed
+        self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
         
         logger.info("RIGHT TURN SIGN - Turn completed, continuing forward")
 
@@ -1831,3 +1834,132 @@ class AICameraCameraManager:
             logger.warning(f"Invalid distance threshold: {distance_cm}. Must be greater than 0")
         
         return self.distance_threshold_cm
+
+    def set_motor_balance(self, balance):
+        """
+        Set the motor balance adjustment value.
+        
+        Args:
+            balance (float): Balance value from -50 to +50
+                             Negative values boost left motor (if veering right)
+                             Positive values boost right motor (if veering left)
+        """
+        if -50 <= balance <= 50:
+            self.motor_balance = balance
+            logger.info(f"Motor balance set to {balance}")
+        else:
+            logger.warning(f"Invalid motor balance value: {balance}. Must be between -50 and 50")
+            
+    def apply_motor_balance(self, speed):
+        """
+        Apply the motor balance adjustment to the speed values.
+        Used during autonomous driving modes.
+        
+        Args:
+            speed (float): Base speed value from 0 to 1.0
+            
+        Returns:
+            tuple: (left_speed, right_speed)
+        """
+        # Convert balance to decimal adjustment (-0.5 to 0.5)
+        balance_adj = self.motor_balance / 100.0
+        
+        # Apply balance: negative reduces right motor, positive reduces left motor
+        left_speed = speed * (1.0 - max(0, balance_adj))
+        right_speed = speed * (1.0 + min(0, balance_adj))
+        
+        return left_speed, right_speed
+        
+    def forward_with_balance(self, speed):
+        """
+        Move forward with motor balance adjustment applied.
+        This is a wrapper for px.forward() that applies the motor balance.
+        
+        Args:
+            speed (float): Speed value from 0 to 1.0
+        """
+        if speed == 0:
+            # If speed is 0, just stop both motors
+            self.px.set_motor_speed(1, 0)
+            self.px.set_motor_speed(2, 0)
+            return
+            
+        # Calculate adjusted speeds with motor balance
+        left_speed, right_speed = self.apply_motor_balance(speed)
+        
+        # Apply speeds to motors
+        self.px.set_motor_speed(1, left_speed * 100)    # Left motor
+        self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (reversed)
+        self.px.set_dir_servo_angle(0)  # Center steering
+        
+    async def calibrate_motors(self, command="start"):
+        """
+        Calibrate the motor balance for straight driving.
+        This function has two modes:
+        - start: Starts a continuous straight drive test at low speed
+        - stop: Stops the continuous drive test
+        
+        Args:
+            command (str): "start" to begin test, "stop" to end test
+            
+        Returns:
+            dict: Status and message
+        """
+        try:
+            if command == "start":
+                logger.info("Starting motor balance test drive")
+            
+                # First stop face following or any other AI feature
+                if self.face_follow_active:
+                    self.stop_face_following()
+                    
+                if self.color_control_active:
+                    self.stop_color_control()
+                
+                if self.traffic_sign_detection_active:
+                    self.stop_traffic_sign_detection()
+                
+                # Start driving straight at low speed with motor balance applied
+                self.forward_with_balance(0.05)  # 5% speed
+                
+                # Announce test start
+                await self.tts_manager.say("Motor balance test started. Watch if robot drives straight.", priority=1)
+
+                    
+                return {
+                    "status": "success",
+                    "message": "Motor balance test started",
+                    "motor_balance": self.motor_balance
+                }
+                
+            elif command == "stop":
+                logger.info("Stopping motor balance test drive")
+            
+                # Stop all motors
+                self.px.set_motor_speed(1, 0)
+                self.px.set_motor_speed(2, 0)
+                
+                # Announce test stop
+                await self.tts_manager.say("Motor balance test stopped. Adjust the motor balance slider if needed.", priority=1)
+                return {
+                    "status": "success",
+                    "message": "Motor balance test stopped",
+                    "motor_balance": self.motor_balance
+                }
+            
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Unknown command: {command}"
+                }
+                
+        except Exception as e:
+            logger.error(f"Error in motor calibration: {e}")
+            # Stop motors on error
+            self.px.set_motor_speed(1, 0)
+            self.px.set_motor_speed(2, 0)
+            
+            return {
+                "status": "error", 
+                "message": f"Calibration error: {str(e)}"
+            }

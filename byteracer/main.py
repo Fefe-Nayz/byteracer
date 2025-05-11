@@ -209,8 +209,20 @@ class ByteRacer:
 
         # Apply AI settings
         self.gpt_manager.set_pause_threshold(settings["ai"]["speak_pause_threshold"])
-        self.aicamera_manager.set_distance_threshold(settings["ai"]["distance_threshold"])
+        
+        # Apply AI Camera settings
+        if "distance_threshold_cm" in settings["ai"]:
+            self.aicamera_manager.set_action_distance_threshold(settings["ai"]["distance_threshold_cm"])
+            
         self.aicamera_manager.set_turn_time(settings["ai"]["turn_time"])
+        
+        # Apply YOLO confidence threshold if available
+        if "yolo_confidence" in settings["ai"]:
+            self.aicamera_manager.set_confidence_threshold(settings["ai"]["yolo_confidence"])
+            
+        # Apply motor balance settings if available
+        if "motor_balance" in settings["ai"]:
+            self.aicamera_manager.set_motor_balance(settings["ai"]["motor_balance"])
         
         logging.info("Applied settings from configuration")
     
@@ -639,6 +651,24 @@ class ByteRacer:
                 await self.send_command_response({
                     "success": True,
                     "message": "Test calibration started"
+                })
+
+            elif data["name"] == "start_test_calibrate_motors":
+                # Handle start test calibrate motors request
+                logging.info("Received start test calibrate motors request")
+                await self.aicamera_manager.calibrate_motors(command="start")
+                await self.send_command_response({
+                    "success": True,
+                    "message": "Test calibrate motors started"
+                })
+
+            elif data["name"] == "stop_test_calibrate_motors":
+                # Handle stop test calibrate motors request
+                logging.info("Received stop test calibrate motors request")
+                await self.aicamera_manager.calibrate_motors(command="stop")
+                await self.send_command_response({
+                    "success": True,
+                    "message": "Test calibrate motors stopped"
                 })
 
             elif data["name"] == "audio_stream":
@@ -1146,12 +1176,22 @@ class ByteRacer:
             if "speak_pause_threshold" in ai:
                 self.config_manager.set("ai.speak_pause_threshold", ai["speak_pause_threshold"])
                 self.gpt_manager.set_pause_threshold(ai["speak_pause_threshold"])
-            if "distance_threshold" in ai:
-                self.config_manager.set("ai.distance_threshold", ai["distance_threshold"])
-                self.aicamera_manager.set_distance_threshold(ai["distance_threshold"])
+                
+            if "distance_threshold_cm" in ai:
+                self.config_manager.set("ai.distance_threshold_cm", ai["distance_threshold_cm"]) 
+                self.aicamera_manager.set_action_distance_threshold(ai["distance_threshold_cm"])
+                
             if "turn_time" in ai:
                 self.config_manager.set("ai.turn_time", ai["turn_time"])
                 self.aicamera_manager.set_turn_time(ai["turn_time"])
+                
+            if "yolo_confidence" in ai:
+                self.config_manager.set("ai.yolo_confidence", ai["yolo_confidence"])
+                self.aicamera_manager.set_confidence_threshold(ai["yolo_confidence"])
+                       
+            if "motor_balance" in ai:
+                self.config_manager.set("ai.motor_balance", ai["motor_balance"])
+                self.aicamera_manager.set_motor_balance(ai["motor_balance"])
 
         if "led" in settings:
             led = settings["led"]

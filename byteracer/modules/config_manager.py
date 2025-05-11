@@ -97,8 +97,10 @@ class ConfigManager:
             },
             "ai": {
                 "speak_pause_threshold": 1.2,
-                "distance_threshold": 0.02,
+                "distance_threshold_cm": 30,
                 "turn_time": 2,
+                "yolo_confidence": 0.5,
+                "motor_balance": 0 # -50 to +50, negative for left bias, positive for right bias
             },
             "led": {
                 "enabled": True,
@@ -411,8 +413,10 @@ class ConfigManager:
             },
             "ai": {
                 "speak_pause_threshold": 1.2,
-                "distance_threshold": 0.02,
+                "distance_threshold_cm": 30,
                 "turn_time": 2,
+                "yolo_confidence": 0.5,
+                "motor_balance": 0 # -50 to +50, negative for left bias, positive for right bias
             },
             "led": {
                 "enabled": True,
