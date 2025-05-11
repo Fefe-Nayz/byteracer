@@ -88,6 +88,7 @@ class SensorManager:
         self.safe_distance_buffer = 10  # Additional cm to add to collision threshold for safe distance
         self.edge_detection_threshold = 0.2  # Normalized line sensor reading
         self.client_timeout = 15  # seconds
+        self.battery_emergency_enabled = True
         self.low_battery_threshold = 15  # percentage
         self.low_battery_last_warning = 0
         self.low_battery_warning_interval = 60  # seconds
@@ -259,7 +260,7 @@ class SensorManager:
                 return EmergencyState.CLIENT_DISCONNECTED
         
         # Check for low battery
-        if self.battery_level < self.low_battery_threshold:
+        if self.battery_emergency_enabled and self.battery_level < self.low_battery_threshold:
             # Only trigger once per warning interval
             if now - self.low_battery_last_warning >= self.low_battery_warning_interval:
                 self.low_battery_last_warning = now
@@ -596,9 +597,69 @@ class SensorManager:
         logger.info(f"Edge detection threshold set to {threshold}")
     
     def set_auto_stop(self, enabled):
-        """Enable or disable auto-stop on client disconnection"""
+        """Enable or disable auto stop on client timeout"""
         self.auto_stop_enabled = enabled
         logger.info(f"Auto-stop {'enabled' if enabled else 'disabled'}")
+    
+    def set_emergency_cooldown(self, seconds):
+        """
+        Set the cooldown time between emergency checks.
+        
+        Args:
+            seconds (float): Cooldown time in seconds (0.1-1.0)
+        """
+        self._emergency_cooldown = max(0.1, min(1.0, seconds))
+        logger.info(f"Emergency cooldown set to {self._emergency_cooldown} seconds")
+    
+    def set_safe_distance_buffer(self, buffer):
+        """
+        Set the safe distance buffer added to collision threshold.
+        
+        Args:
+            buffer (int): Buffer distance in cm (0-100)
+        """
+        self.safe_distance_buffer = max(0, min(100, buffer))
+        logger.info(f"Safe distance buffer set to {self.safe_distance_buffer} cm")
+    
+    def set_battery_emergency_enabled(self, enabled):
+        """
+        Enable or disable low battery emergency.
+        
+        Args:
+            enabled (bool): Whether to enable low battery emergency
+        """
+        self.battery_emergency_enabled = enabled
+        logger.info(f"Battery emergency {'enabled' if enabled else 'disabled'}")
+    
+    def set_low_battery_threshold(self, threshold):
+        """
+        Set the threshold for low battery warnings.
+        
+        Args:
+            threshold (int): Battery percentage threshold (5-30)
+        """
+        self.low_battery_threshold = max(5, min(30, threshold))
+        logger.info(f"Low battery threshold set to {self.low_battery_threshold}%")
+    
+    def set_low_battery_warning_interval(self, interval):
+        """
+        Set the interval between low battery warnings.
+        
+        Args:
+            interval (int): Interval in seconds (10-120)
+        """
+        self.low_battery_warning_interval = max(10, min(120, interval))
+        logger.info(f"Low battery warning interval set to {self.low_battery_warning_interval} seconds")
+    
+    def set_edge_recovery_time(self, seconds):
+        """
+        Set the minimum time to back up after edge is no longer detected.
+        
+        Args:
+            seconds (float): Recovery time in seconds (0.1-5.0)
+        """
+        self.edge_recovery_min_time = max(0.1, min(5.0, seconds))
+        logger.info(f"Edge recovery time set to {self.edge_recovery_min_time} seconds")
     
     def set_tracking(self, enabled):
         """Enable or disable object tracking"""

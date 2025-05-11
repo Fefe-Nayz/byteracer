@@ -406,9 +406,14 @@ class GPTManager:
                 "turn_time": {"type": ["number", "null"], "description": "Turn time for circuit mode (1-10 seconds)"},
                 "motor_balance": {"type": ["number", "null"], "description": "Motor balance for circuit mode (-50 / 50)"},
                 "yolo_confidence": {"type": ["number", "null"], "description": "YOLO confidence threshold for circuit mode (0.1-0.9)"},
+                "speed": {"type": ["number", "null"], "description": "Speed parameter for autonomous driving"},
+                "seconds": {"type": ["number", "null"], "description": "Seconds parameter for autonomous driving"},
+                "buffer": {"type": ["number", "null"], "description": "Safe distance buffer for circuit mode (0-100cm)"},
+                "area": {"type": ["number", "null"], "description": "Target face area for face tracking (5.0-30.0%)"},
+                "zone": {"type": ["number", "null"], "description": "Speed dead zone for face tracking (0.0-1.0)"},
                 "language": {"type": ["string", "null"], "description": "Language for TTS output. Available languages: 'en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'it-IT'."}
               },
-              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode", "text", "language", "interval", "times", "distance_threshold_cm", "turn_time", "motor_balance", "yolo_confidence"],
+              "required": ["sound_name", "volume", "enabled", "threshold", "factor", "priority", "timeout", "gain", "category", "vflip", "hflip", "width", "height", "local_display", "web_display", "mode", "text", "language", "interval", "times", "distance_threshold_cm", "turn_time", "motor_balance", "yolo_confidence", "speed", "seconds", "buffer", "area", "zone"],
               "additionalProperties": False
             }
           },
@@ -862,6 +867,12 @@ def _build_script_with_environment(script_code: str) -> str:
    • set_edge_threshold(threshold: number): Edge detection sensitivity (0.1-0.9)
    • set_auto_stop(enabled: boolean): Automatic safety stop feature
    • set_client_timeout(timeout: number): Sets client timeout in seconds (1-30)
+   • set_edge_recovery_time(seconds: number): Sets the edge recovery time (0.1-5.0 seconds)
+   • set_battery_emergency_enabled(enabled: boolean): Battery emergency toggle
+   • set_safe_distance_buffer(buffer: number): Safe distance buffer (0-100cm)
+   • set_low_battery_threshold(threshold: number): Low battery threshold (0-100%)
+   • set_low_battery_warning_interval(interval: number): Low battery warning interval (1-30 seconds)
+   • set_emergency_cooldown(seconds: number): Emergency cooldown time (1-10 seconds)
      Drive Settings:
    • set_max_speed(speed: number): Speed limit (0-100%)
    • set_max_turn_angle(angle: number): Turn limit (0-100%)
@@ -907,6 +918,17 @@ def _build_script_with_environment(script_code: str) -> str:
    • set_turn_time(turn_time: number): Sets the turn time for circuit mode (1-10 seconds)
    • set_motor_balance(motor_balance: number): Sets the motor balance for circuit mode (-50 / 50)
    • set_yolo_confidence(confidence: number): Sets the YOLO confidence threshold for circuit mode (0.1-0.9)
+   • set_autonomous_speed(speed: number): Sets the autonomous driving speed (0.01-0.2 or 1%-20%)
+   • set_wait_to_turn_time(seconds: number): Sets the wait time before turning (0.5-5.0 seconds)
+   • set_stop_sign_wait_time(seconds: number): Sets the wait time at stop signs (0.5-5.0 seconds)
+   • set_stop_sign_ignore_time(seconds: number): Sets time to ignore stop signs after stopping (1.0-10.0 seconds)
+   • set_traffic_light_ignore_time(seconds: number): Sets time to ignore traffic lights after responding (1.0-10.0 seconds)
+   • set_target_face_area(area: number): Sets the target face area for face tracking (5.0-30.0%)
+   • set_forward_factor(factor: number): Sets the forward factor for face tracking (0.1-1.0)
+   • set_face_tracking_max_speed(speed: number): Sets the maximum speed for face tracking (0.01-0.2 or 1%-20%)
+   • set_speed_dead_zone(zone: number): Sets the speed dead zone for face tracking (0.0-1.0)
+   • set_turn_factor(factor: number): Sets the turn factor for face tracking (0.1-1.0)
+   
 
    Finally, if the user is telling you something that would "end the conversation" (like "bye" or "thank you"), you should call the function "end_conversation()"
 
@@ -2216,7 +2238,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "yolo_confidence":
                 yolo_confidence = parameters.get("yolo_confidence", 0.5)
                 self.config_manager.set("ai.yolo_confidence", yolo_confidence)
-                self.aicamera_manager.set_yolo_confidence(yolo_confidence)
+                self.aicamera_manager.set_confidence_threshold(yolo_confidence)
                 logger.info(f"AI voice settings updated: yolo_confidence={yolo_confidence}")
                 return True
             
@@ -2227,6 +2249,95 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 logger.info(f"AI voice settings updated: led_enabled={led_enabled}")
                 return True
             
+            elif function_name == "set_autonomous_speed":
+                speed = parameters.get("speed", 0.05)
+                
+                # Validate autonomous speed (between 0.01 and 0.2 or 1% to 20%)
+                if not isinstance(speed, (int, float)):
+                    logger.warning(f"Invalid autonomous_speed value: {speed}. Must be a number.")
+                    return False
+                    
+                # Also accept 1-20 values and convert to 0.01-0.2
+                if 1 <= float(speed) <= 20:
+                    speed = float(speed) / 100
+                    
+                # Clamp to valid range
+                speed = max(min(float(speed), 0.2), 0.01)
+                
+                # Update settings
+                self.config_manager.set("ai.autonomous_speed", speed)
+                self.aicamera_manager.set_autonomous_speed(speed)
+                logger.info(f"Autonomous driving speed set to {speed} ({speed*100:.1f}%)")
+                return True
+                
+            elif function_name == "set_wait_to_turn_time":
+                seconds = parameters.get("seconds", 2.0)
+                
+                # Validate timing value (between 0.5 and 5.0 seconds)
+                if not isinstance(seconds, (int, float)):
+                    logger.warning(f"Invalid wait_to_turn_time value: {seconds}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                seconds = max(min(float(seconds), 5.0), 0.5)
+                
+                # Update settings
+                self.config_manager.set("ai.wait_to_turn_time", seconds)
+                self.aicamera_manager.set_wait_to_turn_time(seconds)
+                logger.info(f"Wait-to-turn time set to {seconds} seconds")
+                return True
+                
+            elif function_name == "set_stop_sign_wait_time":
+                seconds = parameters.get("seconds", 2.0)
+                
+                # Validate timing value (between 0.5 and 5.0 seconds)
+                if not isinstance(seconds, (int, float)):
+                    logger.warning(f"Invalid stop_sign_wait_time value: {seconds}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                seconds = max(min(float(seconds), 5.0), 0.5)
+                
+                # Update settings
+                self.config_manager.set("ai.stop_sign_wait_time", seconds)
+                self.aicamera_manager.set_stop_sign_wait_time(seconds)
+                logger.info(f"Stop sign wait time set to {seconds} seconds")
+                return True
+                
+            elif function_name == "set_stop_sign_ignore_time":
+                seconds = parameters.get("seconds", 3.0)
+                
+                # Validate timing value (between 1.0 and 10.0 seconds)
+                if not isinstance(seconds, (int, float)):
+                    logger.warning(f"Invalid stop_sign_ignore_time value: {seconds}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                seconds = max(min(float(seconds), 10.0), 1.0)
+                
+                # Update settings
+                self.config_manager.set("ai.stop_sign_ignore_time", seconds)
+                self.aicamera_manager.set_stop_sign_ignore_time(seconds)
+                logger.info(f"Stop sign ignore time set to {seconds} seconds")
+                return True
+                
+            elif function_name == "set_traffic_light_ignore_time":
+                seconds = parameters.get("seconds", 3.0)
+                
+                # Validate timing value (between 1.0 and 10.0 seconds)
+                if not isinstance(seconds, (int, float)):
+                    logger.warning(f"Invalid traffic_light_ignore_time value: {seconds}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                seconds = max(min(float(seconds), 10.0), 1.0)
+                
+                # Update settings
+                self.config_manager.set("ai.traffic_light_ignore_time", seconds)
+                self.aicamera_manager.set_traffic_light_ignore_time(seconds)
+                logger.info(f"Traffic light ignore time set to {seconds} seconds")
+                return True
+           
             elif function_name == "led_on":
                 self.led_manager.turn_on()
                 return True
@@ -2234,7 +2345,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "led_off":
                 self.led_manager.turn_off()
                 return True
-            
+
             elif function_name == "led_blink":
                times = parameters.get("times", False)
                interval = parameters.get("interval", 0.5)
@@ -2503,6 +2614,194 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 except Exception as e:
                     logger.error(f"Error in stop_recording: {e}")
                     return False
+
+            elif function_name == "set_target_face_area":
+                area = parameters.get("area", 10.0)
+                
+                # Validate the face area (between 5.0 and 30.0 percent)
+                if not isinstance(area, (int, float)):
+                    logger.warning(f"Invalid target_face_area value: {area}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                area = max(min(float(area), 30.0), 5.0)
+                
+                # Update the parameter
+                self.aicamera_manager.TARGET_FACE_AREA = area
+                self.config_manager.set("ai.target_face_area", area)
+                logger.info(f"Target face area set to {area}%")
+                return True
+                
+            elif function_name == "set_forward_factor":
+                factor = parameters.get("factor", 1500.0)
+                
+                # Validate (between 500 and 3000)
+                if not isinstance(factor, (int, float)):
+                    logger.warning(f"Invalid forward_factor value: {factor}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                factor = max(min(float(factor), 3000.0), 500.0)
+                
+                # Update the parameter
+                self.aicamera_manager.FORWARD_FACTOR = factor
+                self.config_manager.set("ai.forward_factor", factor)
+                logger.info(f"Forward factor set to {factor}")
+                return True
+                
+            elif function_name == "set_face_tracking_max_speed":
+                max_speed = parameters.get("speed", 75)
+                
+                # Validate (between 25 and 100)
+                if not isinstance(max_speed, (int, float)):
+                    logger.warning(f"Invalid face_tracking_max_speed value: {max_speed}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                max_speed = max(min(float(max_speed), 100.0), 25.0)
+                
+                # Update the parameter
+                self.aicamera_manager.MAX_SPEED = max_speed
+                self.config_manager.set("ai.face_tracking_max_speed", max_speed)
+                logger.info(f"Face tracking max speed set to {max_speed}")
+                return True
+                
+            elif function_name == "set_speed_dead_zone":
+                dead_zone = parameters.get("zone", 50)
+                
+                # Validate (between 10 and 80)
+                if not isinstance(dead_zone, (int, float)):
+                    logger.warning(f"Invalid speed_dead_zone value: {dead_zone}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                dead_zone = max(min(float(dead_zone), 80.0), 10.0)
+                
+                # Update the parameter
+                self.aicamera_manager.SPEED_DEAD_ZONE = dead_zone
+                self.config_manager.set("ai.speed_dead_zone", dead_zone)
+                logger.info(f"Speed dead zone set to {dead_zone}")
+                return True
+                
+            elif function_name == "set_turn_factor":
+                turn_factor = parameters.get("factor", 35.0)
+                
+                # Validate (between 10 and 100)
+                if not isinstance(turn_factor, (int, float)):
+                    logger.warning(f"Invalid turn_factor value: {turn_factor}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                turn_factor = max(min(float(turn_factor), 100.0), 10.0)
+                
+                # Update the parameter
+                self.aicamera_manager.TURN_FACTOR = turn_factor
+                self.config_manager.set("ai.turn_factor", turn_factor)
+                logger.info(f"Turn factor set to {turn_factor}")
+                return True
+                
+            # Sensor manager emergency settings
+            elif function_name == "set_emergency_cooldown":
+                cooldown = parameters.get("seconds", 0.1)
+                
+                # Validate (between 0.1 and 5.0 seconds)
+                if not isinstance(cooldown, (int, float)):
+                    logger.warning(f"Invalid emergency_cooldown value: {cooldown}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                cooldown = max(min(float(cooldown), 5.0), 0.1)
+                
+                # Update the parameter
+                self.sensor_manager._emergency_cooldown = cooldown
+                self.config_manager.set("safety.emergency_cooldown", cooldown)
+                logger.info(f"Emergency cooldown set to {cooldown} seconds")
+                return True
+                
+            elif function_name == "set_safe_distance_buffer":
+                buffer = parameters.get("distance", 10)
+                
+                # Validate (between 5 and 30 cm)
+                if not isinstance(buffer, (int, float)):
+                    logger.warning(f"Invalid safe_distance_buffer value: {buffer}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                buffer = max(min(float(buffer), 30.0), 5.0)
+                
+                # Update the parameter
+                self.sensor_manager.safe_distance_buffer = buffer
+                self.config_manager.set("safety.safe_distance_buffer", buffer)
+                logger.info(f"Safe distance buffer set to {buffer} cm")
+                return True
+                
+            elif function_name == "set_low_battery_threshold":
+                threshold = parameters.get("threshold", 15)
+                
+                # Validate (between 5 and 30 percent)
+                if not isinstance(threshold, (int, float)):
+                    logger.warning(f"Invalid low_battery_threshold value: {threshold}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                threshold = max(min(float(threshold), 30.0), 5.0)
+                
+                # Update the parameter
+                self.sensor_manager.low_battery_threshold = threshold
+                self.config_manager.set("safety.low_battery_threshold", threshold)
+                logger.info(f"Low battery threshold set to {threshold}%")
+                return True
+                
+            elif function_name == "set_low_battery_warning_interval":
+                interval = parameters.get("seconds", 60)
+                
+                # Validate (between 10 and 300 seconds)
+                if not isinstance(interval, (int, float)):
+                    logger.warning(f"Invalid low_battery_warning_interval value: {interval}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                interval = max(min(float(interval), 300.0), 10.0)
+                
+                # Update the parameter
+                self.sensor_manager.low_battery_warning_interval = interval
+                self.config_manager.set("safety.low_battery_warning_interval", interval)
+                logger.info(f"Low battery warning interval set to {interval} seconds")
+                return True
+                
+            elif function_name == "set_battery_emergency_enabled":
+                enabled = parameters.get("enabled", True)
+                
+                # Validate that it's a boolean
+                if not isinstance(enabled, bool):
+                    logger.warning(f"Invalid enabled value: {enabled}. Must be boolean.")
+                    return False
+                
+                # Update the parameter - we'll implement this in config
+                self.config_manager.set("safety.battery_emergency_enabled", enabled)
+                
+                # We need to update the behavior in the sensor manager
+                self.sensor_manager.battery_emergency_enabled = enabled
+                    
+                logger.info(f"Battery emergency {'enabled' if enabled else 'disabled'}")
+                return True
+                
+            elif function_name == "set_edge_recovery_time":
+                seconds = parameters.get("seconds", 0.5)
+                
+                # Validate (between 0.1 and 5.0 seconds)
+                if not isinstance(seconds, (int, float)):
+                    logger.warning(f"Invalid edge_recovery_time value: {seconds}. Must be a number.")
+                    return False
+                    
+                # Clamp to valid range
+                seconds = max(min(float(seconds), 5.0), 0.1)
+                
+                # Update the parameter
+                self.sensor_manager.edge_recovery_min_time = seconds
+                self.config_manager.set("safety.edge_recovery_time", seconds)
+                logger.info(f"Edge recovery time set to {seconds} seconds")
+                return True
 
             else:
                 logger.warning(f"Unknown predefined function: {function_name}")

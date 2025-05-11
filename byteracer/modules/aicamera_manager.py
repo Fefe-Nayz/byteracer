@@ -94,6 +94,13 @@ class AICameraCameraManager:
         
         # Continuous turning state
         self.continuous_turning = False  # Flag to track if continuous turning is active
+
+        # Initialize speed and timing configuration from config or use defaults
+        self.autonomous_speed = self.config_manager.get("ai.autonomous_speed") or 0.05  # Default 5% speed
+        self.wait_to_turn_time = self.config_manager.get("ai.wait_to_turn_time") or 2.0  # Default 2 seconds
+        self.stop_sign_wait_time = self.config_manager.get("ai.stop_sign_wait_time") or 2.0  # Default 2 seconds
+        self.stop_sign_ignore_time = self.config_manager.get("ai.stop_sign_ignore_time") or 3.0  # Default 3 seconds
+        self.traffic_light_ignore_time = self.config_manager.get("ai.traffic_light_ignore_time") or 3.0  # Default 3 seconds
         
         # Auto-load YOLO model if available in modules directory
         self.model_path = os.path.join(os.path.dirname(__file__), 'model_ncnn_model')
@@ -568,8 +575,59 @@ class AICameraCameraManager:
             self.yolo_min_confidence = threshold
             logger.info(f"Object detection confidence threshold set to {threshold}")
         else:
-            logger.warning(f"Invalid confidence threshold: {threshold}. Must be between 0.0 and 1.0")    
+            logger.warning(f"Invalid confidence threshold: {threshold}. Must be between 0.0 and 1.0")
             
+    def set_target_face_area(self, area):
+        """
+        Set the target face area percentage for face tracking.
+        Args:
+            area (float): Target face area as percentage of frame (5.0-30.0)
+        """
+        self.TARGET_FACE_AREA = max(5.0, min(30.0, area))
+        logger.info(f"Target face area set to {self.TARGET_FACE_AREA}%")
+        
+    def set_forward_factor(self, factor):
+        """
+        Set the forward factor for face tracking movement.
+        Args:
+            factor (float): Forward factor multiplier (0.1-1.0)
+        """
+        # Convert to appropriate range for internal use (0.1-1.0 → 150-1500)
+        internal_factor = 150 + (factor * 1350)  # Scale to 150-1500 range
+        self.FORWARD_FACTOR = internal_factor
+        logger.info(f"Forward factor set to {factor} (internal: {internal_factor})")
+        
+    def set_face_tracking_max_speed(self, speed):
+        """
+        Set the maximum speed for face tracking.
+        Args:
+            speed (float): Maximum speed as percentage (0.01-0.2 or 1%-20%)
+        """
+        # Convert from percentage (0.01-0.2) to internal values (25-100)
+        internal_speed = 25 + (speed * 100 * 3.75)  # Scale to 25-100 range
+        self.MAX_SPEED = int(internal_speed)
+        logger.info(f"Face tracking max speed set to {speed*100}% (internal: {self.MAX_SPEED})")
+        
+    def set_speed_dead_zone(self, zone):
+        """
+        Set the speed dead zone for face tracking.
+        Args:
+            zone (float): Dead zone value (0.0-1.0)
+        """
+        # Convert from 0.0-1.0 to internal values (10-80)
+        internal_zone = 10 + (zone * 70)  # Scale to 10-80 range
+        self.SPEED_DEAD_ZONE = internal_zone
+        logger.info(f"Speed dead zone set to {zone} (internal: {self.SPEED_DEAD_ZONE})")
+        
+    def set_turn_factor(self, factor):
+        """
+        Set the turn factor for face tracking.
+        Args:
+            factor (float): Turn factor value (10.0-50.0)
+        """
+        self.TURN_FACTOR = max(10.0, min(50.0, factor))
+        logger.info(f"Turn factor set to {self.TURN_FACTOR}")
+
     def start_yolo_detection(self, model_path=None):
         """
         Starts YOLO object detection using the camera feed.
@@ -904,7 +962,7 @@ class AICameraCameraManager:
                 # If no priority objects detected and we're not waiting for anything
                 elif not (self.waiting_for_green or self.waiting_at_stop_sign or self.executing_right_turn):
                     # Move forward at default speed
-                    self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
+                    self.forward_with_balance(self.autonomous_speed)  # Use configured autonomous speed
                     # Use closest object for tracking regardless of type
                     best_object = closest_object
                 
@@ -1089,7 +1147,7 @@ class AICameraCameraManager:
                     
                 if self.waiting_for_green:
                     # We were waiting for green after seeing red/yellow, now proceed
-                    self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
+                    self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
                     self.waiting_for_green = False
                     
                     # Turn off stop light
@@ -1101,18 +1159,18 @@ class AICameraCameraManager:
                     self.px.set_cam_pan_angle(0)
                     self.px.set_cam_tilt_angle(0)
                     
-                    # Set ignore period for 3 seconds
-                    self.ignore_traffic_lights_until = time.time() + 3.0
-                    logger.info("Setting traffic light ignore period for 3 seconds")
+                    # Set ignore period using configured value
+                    self.ignore_traffic_lights_until = time.time() + self.traffic_light_ignore_time
+                    logger.info(f"Setting traffic light ignore period for {self.traffic_light_ignore_time} seconds")
                     
                     # Announce if TTS manager is available
                     if self.tts_manager:
                         await self.tts_manager.say("Green light detected", priority=1)
                     
-                    logger.info("GREEN LIGHT after stopping - Proceeding at 1% speed")
+                    logger.info(f"GREEN LIGHT after stopping - Proceeding at {self.autonomous_speed*100:.1f}% speed")
                 elif prev_state != "Vert":
                     # Green light from no previous light detected
-                    self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
+                    self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
                     
                     # Turn off any LED patterns
                     self.stop_all_led_patterns(False)
@@ -1121,11 +1179,11 @@ class AICameraCameraManager:
                     if self.tts_manager:
                         await self.tts_manager.say("Green light detected", priority=1)
 
-                    logger.info("GREEN LIGHT - Proceeding at 1% speed")
+                    logger.info(f"GREEN LIGHT - Proceeding at {self.autonomous_speed*100:.1f}% speed")
         elif not self.waiting_for_green:
             # If not close enough and not waiting for green after red/yellow, move forward
-            self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
-            logger.info("Traffic light not close enough, proceeding at 1% speed")
+            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+            logger.info(f"Traffic light not close enough, proceeding at {self.autonomous_speed*100:.1f}% speed")
             
     async def _handle_stop_sign(self, object_info):
         """
@@ -1164,7 +1222,7 @@ class AICameraCameraManager:
         
         # Handle stop sign behavior
         if is_close_enough and not self.waiting_at_stop_sign:
-            # Stop sign is close enough - stop for 2 seconds
+            # Stop sign is close enough - stop for the configured duration
             self.px.forward(0)
             self.waiting_at_stop_sign = True
             
@@ -1175,16 +1233,16 @@ class AICameraCameraManager:
             if self.tts_manager:
                 await self.tts_manager.say("Stop sign detected", priority=1)
             
-            logger.info("STOP SIGN - Stopping robot for 2 seconds")
+            logger.info(f"STOP SIGN - Stopping robot for {self.stop_sign_wait_time} seconds")
             
-            # Start timer to resume after 2 seconds
+            # Start timer to resume after the configured duration
             self.stop_sign_timer = time.time()
             
         elif self.waiting_at_stop_sign:
-            # Check if we've waited long enough (2 seconds)
-            if time.time() - self.stop_sign_timer >= 2.0:
+            # Check if we've waited long enough
+            if time.time() - self.stop_sign_timer >= self.stop_sign_wait_time:
                 # Resume movement
-                self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
+                self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
                 self.waiting_at_stop_sign = False
                 
                 # Turn off stop light
@@ -1196,19 +1254,19 @@ class AICameraCameraManager:
                 self.px.set_cam_pan_angle(0)
                 self.px.set_cam_tilt_angle(0)
                 
-                # Set ignore period for 3 seconds
-                self.ignore_stop_signs_until = time.time() + 3.0
-                logger.info("Setting stop sign ignore period for 3 seconds")
+                # Set ignore period using configured value
+                self.ignore_stop_signs_until = time.time() + self.stop_sign_ignore_time
+                logger.info(f"Setting stop sign ignore period for {self.stop_sign_ignore_time} seconds")
 
                 # Announce if TTS manager is available
                 if self.tts_manager:
                     await self.tts_manager.say("Proceeding after stop", priority=1)
                 
-                logger.info("STOP SIGN - Waited 2 seconds, now proceeding at 1% speed")
+                logger.info(f"STOP SIGN - Waited {self.stop_sign_wait_time} seconds, now proceeding at {self.autonomous_speed*100:.1f}% speed")
         elif not self.waiting_at_stop_sign:
             # Not close enough yet, continue moving forward
-            self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
-            logger.info("Stop sign detected but not close enough, proceeding at 1% speed")
+            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+            logger.info(f"Stop sign detected but not close enough, proceeding at {self.autonomous_speed*100:.1f}% speed")
     
     async def _handle_right_turn_sign(self, object_info):
         """
@@ -1250,14 +1308,14 @@ class AICameraCameraManager:
         
         # Handle right turn sign behavior
         if is_close_enough and not self.executing_right_turn and not self.right_turn_pending:
-            # Right turn sign is close enough - prepare to turn in 3 seconds
-            logger.info("RIGHT TURN SIGN - Will turn right in 3 seconds")
+            # Right turn sign is close enough - prepare to turn after the configured waiting time
+            logger.info(f"RIGHT TURN SIGN - Will turn right in {self.wait_to_turn_time} seconds")
             
             # Set the flag to indicate a pending turn
             self.right_turn_pending = True
             
-            # Start timer to execute turn after 3 seconds
-            self.right_turn_timer = time.time() + 5.0
+            # Start timer to execute turn after the configured waiting time
+            self.right_turn_timer = time.time() + self.wait_to_turn_time
             
             # Announce if TTS manager is available
             if self.tts_manager:
@@ -1265,9 +1323,9 @@ class AICameraCameraManager:
         
         elif not is_close_enough and not self.right_turn_pending:
             # Not close enough yet, continue moving forward
-            self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
-            logger.info("Right turn sign detected but not close enough, proceeding at 1% speed")
-            
+            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+            logger.info(f"Right turn sign detected but not close enough, proceeding at {self.autonomous_speed*100:.1f}% speed")
+    
     async def _execute_right_turn(self):
         """
         Execute the right turn. Called when it's time to turn after seeing a right turn sign.
@@ -1288,7 +1346,7 @@ class AICameraCameraManager:
         self.px.forward(0)
         
         # Setup for differential steering
-        speed_value = 0.1  # 10% speed
+        speed_value = max(0.1, self.autonomous_speed * 2)  # Use 10% speed or twice the autonomous speed, whichever is higher
         turn_value = 1.0   # Full right turn (normalized -1 to 1)
         turn_direction = 1  # 1 for right, -1 for left, 0 for straight
         abs_turn = abs(turn_value)  # Absolute turn value
@@ -1317,8 +1375,8 @@ class AICameraCameraManager:
         # Reset direction and return to normal driving
         logger.info("Turn completed, resetting steering angle")
         self.px.set_dir_servo_angle(0)
-        self.px.set_motor_speed(1, 1)  # Return to normal forward speed (1%)
-        self.px.set_motor_speed(2, -1) # Return to normal forward speed (1%)
+        self.px.set_motor_speed(1, self.autonomous_speed * 100)  # Return to normal forward speed
+        self.px.set_motor_speed(2, -self.autonomous_speed * 100) # Return to normal forward speed
         
         # Reset turn state
         self.right_turn_timer = None
@@ -1335,9 +1393,9 @@ class AICameraCameraManager:
         self.px.set_cam_tilt_angle(0)
 
         # Move forward slowly after the turn
-        self.forward_with_balance(0.05)  # 5% speed - replace self.px.forward(5)
+        self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
         
-        logger.info("RIGHT TURN SIGN - Turn completed, continuing forward")
+        logger.info(f"RIGHT TURN SIGN - Turn completed, continuing forward at {self.autonomous_speed*100:.1f}% speed")
 
     def _run_turn_calibration(self):
         """Run a single right turn to calibrate the turning parameters"""
@@ -1861,12 +1919,33 @@ class AICameraCameraManager:
         Returns:
             tuple: (left_speed, right_speed)
         """
-        # Convert balance to decimal adjustment (-0.5 to 0.5)
-        balance_adj = self.motor_balance / 100.0
+        # At very low speeds, we need to boost one motor rather than reducing the other
+        # to prevent motors from stalling
+
+        # Calculate boost factor - much stronger for low speeds
+        # At max balance (50), this can double the motor speed on one side
+        boost_factor = abs(self.motor_balance) / 50.0 * 1.5  # Up to 150% boost at max balance
         
-        # Apply balance: negative reduces right motor, positive reduces left motor
-        left_speed = speed * (1.0 - max(0, balance_adj))
-        right_speed = speed * (1.0 + min(0, balance_adj))
+        # Ensure minimum speed so motors don't stall
+        min_speed = max(0.03, speed * 0.7)  # Either 3% minimum or 70% of requested speed
+        
+        if self.motor_balance < 0:
+            # Negative balance: boost left motor (if veering right)
+            left_speed = min(1.0, speed * (1.0 + boost_factor))  # Boost left motor
+            right_speed = speed  # Keep right at requested speed
+        else:
+            # Positive balance: boost right motor (if veering left)
+            left_speed = speed  # Keep left at requested speed
+            right_speed = min(1.0, speed * (1.0 + boost_factor))  # Boost right motor
+        
+        # Apply minimum speed floor to both motors
+        left_speed = max(left_speed, min_speed)
+        right_speed = max(right_speed, min_speed)
+        
+        # Log the actual speeds being applied
+        logger.info(f"Motor balance: {self.motor_balance}, Speed: {speed}, " +
+                   f"Left: {left_speed:.3f} ({left_speed*100:.1f}%), " +
+                   f"Right: {right_speed:.3f} ({right_speed*100:.1f}%)")
         
         return left_speed, right_speed
         
@@ -1888,8 +1967,15 @@ class AICameraCameraManager:
         left_speed, right_speed = self.apply_motor_balance(speed)
         
         # Apply speeds to motors
-        self.px.set_motor_speed(1, left_speed * 100)    # Left motor
-        self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (reversed)
+        logger.info(f"Applying motor speeds - Left: {left_speed*100:.1f}%, Right: {right_speed*100:.1f}%")
+        
+        # Capture the actual PWM values applied (after boost)
+        left_speed_pwm = int(left_speed * 100)    # Convert to percentage for set_motor_speed
+        right_speed_pwm = -int(right_speed * 100)  # Right motor is reversed
+        
+        # Set speeds and direction
+        self.px.set_motor_speed(1, left_speed_pwm)
+        self.px.set_motor_speed(2, right_speed_pwm)
         self.px.set_dir_servo_angle(0)  # Center steering
         
     async def calibrate_motors(self, command="start"):
@@ -1963,3 +2049,68 @@ class AICameraCameraManager:
                 "status": "error", 
                 "message": f"Calibration error: {str(e)}"
             }
+
+    def set_autonomous_speed(self, speed):
+        """
+        Set the default autonomous driving speed.
+        
+        Args:
+            speed (float): Speed value from 0.01 to 0.2 (1% - 20%)
+        """
+        if 0.01 <= speed <= 0.2:
+            self.autonomous_speed = speed
+            logger.info(f"Autonomous driving speed set to {speed*100:.1f}%")
+        else:
+            logger.warning(f"Invalid autonomous speed: {speed}. Must be between 0.01 (1%) and 0.2 (20%)")
+            
+    def set_wait_to_turn_time(self, seconds):
+        """
+        Set the wait time before executing a turn after detecting a turn sign.
+        
+        Args:
+            seconds (float): Time in seconds to wait
+        """
+        if seconds > 0:
+            self.wait_to_turn_time = seconds
+            logger.info(f"Wait-to-turn time set to {seconds} seconds")
+        else:
+            logger.warning(f"Invalid wait time: {seconds}. Must be greater than 0")
+            
+    def set_stop_sign_wait_time(self, seconds):
+        """
+        Set the duration to wait at a stop sign.
+        
+        Args:
+            seconds (float): Time in seconds to stop
+        """
+        if seconds > 0:
+            self.stop_sign_wait_time = seconds
+            logger.info(f"Stop sign wait time set to {seconds} seconds")
+        else:
+            logger.warning(f"Invalid stop time: {seconds}. Must be greater than 0")
+            
+    def set_stop_sign_ignore_time(self, seconds):
+        """
+        Set the time to ignore stop signs after stopping at one.
+        
+        Args:
+            seconds (float): Time in seconds to ignore stop signs
+        """
+        if seconds > 0:
+            self.stop_sign_ignore_time = seconds
+            logger.info(f"Stop sign ignore time set to {seconds} seconds")
+        else:
+            logger.warning(f"Invalid ignore time: {seconds}. Must be greater than 0")
+            
+    def set_traffic_light_ignore_time(self, seconds):
+        """
+        Set the time to ignore traffic lights after responding to one.
+        
+        Args:
+            seconds (float): Time in seconds to ignore traffic lights
+        """
+        if seconds > 0:
+            self.traffic_light_ignore_time = seconds
+            logger.info(f"Traffic light ignore time set to {seconds} seconds")
+        else:
+            logger.warning(f"Invalid ignore time: {seconds}. Must be greater than 0")

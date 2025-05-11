@@ -65,6 +65,12 @@ class ConfigManager:
                 "collision_threshold": 20,  # cm
                 "edge_threshold": 0.2,
                 "client_timeout": 15,  # seconds
+                "emergency_cooldown": 0.1, # seconds between emergency checks
+                "safe_distance_buffer": 10, # cm buffer added to collision threshold
+                "battery_emergency_enabled": True, # Whether to trigger emergency on low battery
+                "low_battery_threshold": 15, # percentage to trigger low battery warning
+                "low_battery_warning_interval": 60, # seconds between low battery warnings
+                "edge_recovery_time": 0.5, # seconds to continue backing up after edge is no longer detected
             },
             
             # Drive settings
@@ -100,7 +106,17 @@ class ConfigManager:
                 "distance_threshold_cm": 30,
                 "turn_time": 2,
                 "yolo_confidence": 0.5,
-                "motor_balance": 0 # -50 to +50, negative for left bias, positive for right bias
+                "motor_balance": 0, # -50 to +50, negative for left bias, positive for right bias
+                "autonomous_speed": 0.05, # Default speed for autonomous driving (5%)
+                "wait_to_turn_time": 2.0, # Time to wait before turning after seeing a turn sign (seconds)
+                "stop_sign_wait_time": 2.0, # Time to wait at a stop sign (seconds)
+                "stop_sign_ignore_time": 3.0, # Time to ignore stop signs after stopping (seconds)
+                "traffic_light_ignore_time": 3.0, # Time to ignore traffic lights after responding (seconds)
+                "target_face_area": 10.0, # Target face area for face tracking (5-30%)
+                "forward_factor": 0.5, # Forward factor for face tracking (0.1-1.0)
+                "face_tracking_max_speed": 0.1, # Maximum speed for face tracking (1-20%)
+                "speed_dead_zone": 0.5, # Speed dead zone for face tracking (0.0-1.0)
+                "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
             },
             "led": {
                 "enabled": True,
@@ -381,6 +397,12 @@ class ConfigManager:
                 "collision_threshold": 20,  # cm
                 "edge_threshold": 0.2,
                 "client_timeout": 15,  # seconds
+                "emergency_cooldown": 0.1, # seconds between emergency checks
+                "safe_distance_buffer": 10, # cm buffer added to collision threshold
+                "battery_emergency_enabled": True, # Whether to trigger emergency on low battery
+                "low_battery_threshold": 15, # percentage to trigger low battery warning
+                "low_battery_warning_interval": 60, # seconds between low battery warnings
+                "edge_recovery_time": 0.5, # seconds to continue backing up after edge is no longer detected
             },
             
             # Drive settings
@@ -416,7 +438,17 @@ class ConfigManager:
                 "distance_threshold_cm": 30,
                 "turn_time": 2,
                 "yolo_confidence": 0.5,
-                "motor_balance": 0 # -50 to +50, negative for left bias, positive for right bias
+                "motor_balance": 0, # -50 to +50, negative for left bias, positive for right bias
+                "autonomous_speed": 0.05, # Default speed for autonomous driving (5%)
+                "wait_to_turn_time": 2.0, # Time to wait before turning after seeing a turn sign (seconds)
+                "stop_sign_wait_time": 2.0, # Time to wait at a stop sign (seconds)
+                "stop_sign_ignore_time": 3.0, # Time to ignore stop signs after stopping (seconds)
+                "traffic_light_ignore_time": 3.0, # Time to ignore traffic lights after responding (seconds)
+                "target_face_area": 10.0, # Target face area for face tracking (5-30%)
+                "forward_factor": 0.5, # Forward factor for face tracking (0.1-1.0)
+                "face_tracking_max_speed": 0.1, # Maximum speed for face tracking (1-20%)
+                "speed_dead_zone": 0.5, # Speed dead zone for face tracking (0.0-1.0)
+                "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
             },
             "led": {
                 "enabled": True,

@@ -1,6 +1,18 @@
 "use client";
-import { createContext, useContext, ReactNode, useState, useEffect, useRef, useCallback } from "react";
-import { trackWsMessage, trackWsConnection, logError } from "@/components/DebugState";
+import {
+  createContext,
+  useContext,
+  ReactNode,
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from "react";
+import {
+  trackWsMessage,
+  trackWsConnection,
+  logError,
+} from "@/components/DebugState";
 
 // Define message types that match our WebSocket protocol
 export type WebSocketMessageType =
@@ -56,7 +68,7 @@ export type NetworkAction =
   | "add_network"
   | "remove_network"
   | "update_ap_settings"
-  | "connect_wifi_mode"
+  | "connect_wifi_mode";
 
 // Define network update data interface
 export interface NetworkUpdateData {
@@ -112,7 +124,7 @@ export interface CameraStatus {
     local: boolean;
     web: boolean;
     resolution: string;
-  }
+  };
 }
 
 // Define settings interface
@@ -147,6 +159,12 @@ export interface RobotSettings {
     collision_threshold: number;
     edge_threshold: number;
     client_timeout: number;
+    emergency_cooldown: number;
+    safe_distance_buffer: number;
+    battery_emergency_enabled: boolean;
+    low_battery_threshold: number;
+    low_battery_warning_interval: number;
+    edge_recovery_time: number;
   };
   drive: {
     max_speed: number;
@@ -175,6 +193,16 @@ export interface RobotSettings {
     turn_time: number;
     yolo_confidence: number;
     motor_balance: number;
+    autonomous_speed: number;
+    wait_to_turn_time: number;
+    stop_sign_wait_time: number;
+    stop_sign_ignore_time: number;
+    traffic_light_ignore_time: number;
+    target_face_area: number;
+    forward_factor: number;
+    face_tracking_max_speed: number;
+    speed_dead_zone: number;
+    turn_factor: number;
   };
   led: {
     enabled: boolean;
@@ -189,7 +217,13 @@ export interface CommandResponse {
 
 // Define GPT status update interface
 export interface GptStatusUpdate {
-  status: "starting" | "progress" | "completed" | "error" | "warning" | "cancelled";
+  status:
+    | "starting"
+    | "progress"
+    | "completed"
+    | "error"
+    | "warning"
+    | "cancelled";
   message: string;
   timestamp: number;
   token_usage?: {
@@ -253,7 +287,9 @@ interface WebSocketContextValue {
   gptStatus: GptStatusUpdate | null;
 
   // Commands
-  sendGamepadState: (gamepadState: Record<string, boolean | string | number>) => void;
+  sendGamepadState: (
+    gamepadState: Record<string, boolean | string | number>
+  ) => void;
   sendRobotCommand: (command: RobotCommand) => void;
   requestBatteryLevel: () => void;
   requestSettings: () => void;
@@ -266,7 +302,12 @@ interface WebSocketContextValue {
   restartCameraFeed: () => void;
   scanNetworks: () => void;
   updateNetwork: (action: NetworkAction, data: NetworkUpdateData) => void;
-  sendGptCommand: (prompt: string, useCamera: boolean, useAiVoice?: boolean, conversationMode?: boolean) => void;
+  sendGptCommand: (
+    prompt: string,
+    useCamera: boolean,
+    useAiVoice?: boolean,
+    conversationMode?: boolean
+  ) => void;
   cancelGptCommand: (conversationMode?: boolean) => void;
   sendAudioStream: (audioData: string) => void;
   startListening: () => void;
@@ -279,7 +320,9 @@ interface WebSocketContextValue {
 }
 
 // Create context with default values
-const WebSocketContext = createContext<WebSocketContextValue | undefined>(undefined);
+const WebSocketContext = createContext<WebSocketContextValue | undefined>(
+  undefined
+);
 
 // Provider component
 export function WebSocketProvider({ children }: { children: ReactNode }) {
@@ -291,14 +334,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [customWsUrl, setCustomWsUrl] = useState<string | null>(null);
   const [customCameraUrl, setCustomCameraUrl] = useState<string | null>(null);
   // Add Python connection status state
-  const [pythonStatus, setPythonStatus] = useState<"connected" | "disconnected" | "unknown">("unknown");
+  const [pythonStatus, setPythonStatus] = useState<
+    "connected" | "disconnected" | "unknown"
+  >("unknown");
 
   // Data state
   const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
   const [sensorData, setSensorData] = useState<SensorData | null>(null);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
   const [settings, setSettings] = useState<RobotSettings | null>(null);
-  const [commandResponse, setCommandResponse] = useState<CommandResponse | null>(null);
+  const [commandResponse, setCommandResponse] =
+    useState<CommandResponse | null>(null);
   const [logs, setLogs] = useState<LogMessage[]>([]);
   // Add GPT status state
   const [gptStatus, setGptStatus] = useState<GptStatusUpdate | null>(null);
@@ -314,14 +360,16 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   // Connect to WebSocket
   const connect = useCallback(() => {
-    setReconnectTrigger(prev => prev + 1);
+    setReconnectTrigger((prev) => prev + 1);
   }, []);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
     if (socketRef.current) {
-      if (socketRef.current.readyState === WebSocket.OPEN ||
-        socketRef.current.readyState === WebSocket.CONNECTING) {
+      if (
+        socketRef.current.readyState === WebSocket.OPEN ||
+        socketRef.current.readyState === WebSocket.CONNECTING
+      ) {
         socketRef.current.close();
       }
     }
@@ -331,8 +379,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Clean up any existing socket first
     if (socket) {
-      if (socket.readyState === WebSocket.OPEN ||
-        socket.readyState === WebSocket.CONNECTING) {
+      if (
+        socket.readyState === WebSocket.OPEN ||
+        socket.readyState === WebSocket.CONNECTING
+      ) {
         socket.close();
       }
       if (pingIntervalRef.current) {
@@ -350,7 +400,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       wsUrl = `ws://${hostname}:3001/ws`;
     }
 
-    console.log(`Connecting to WebSocket at ${wsUrl} (attempt #${reconnectTrigger})...`);
+    console.log(
+      `Connecting to WebSocket at ${wsUrl} (attempt #${reconnectTrigger})...`
+    );
     setStatus("connecting");
 
     // Connect to websocket
@@ -492,7 +544,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             // Dispatch event for other components that might need it
             window.dispatchEvent(
               new CustomEvent("debug:gpt-status", {
-                detail: event.data
+                detail: event.data,
               })
             );
             break;
@@ -517,7 +569,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
           case "log_message":
             // Add log message to the logs array (limit to most recent 500 logs)
-            setLogs(prevLogs => {
+            setLogs((prevLogs) => {
               const newLogs = [...prevLogs, event.data];
               // Keep only the most recent 500 logs to avoid memory issues
               return newLogs.slice(-500);
@@ -525,14 +577,16 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             break;
 
           case "python_status":
-            setPythonStatus(event.data.connected ? "connected" : "disconnected");
+            setPythonStatus(
+              event.data.connected ? "connected" : "disconnected"
+            );
             break;
 
           case "audio_stream":
             // Forward robot audio data to the Listen component
             window.dispatchEvent(
               new CustomEvent("robot:audio-data", {
-                detail: { audioData: event.data.audioData }
+                detail: { audioData: event.data.audioData },
               })
             );
             break;
@@ -552,8 +606,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
       }
-      if (ws.readyState === WebSocket.OPEN ||
-        ws.readyState === WebSocket.CONNECTING) {
+      if (
+        ws.readyState === WebSocket.OPEN ||
+        ws.readyState === WebSocket.CONNECTING
+      ) {
         ws.close();
       }
     };
@@ -579,42 +635,48 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [customWsUrl, customCameraUrl]);
 
   // Function to send gamepad state
-  const sendGamepadState = useCallback((gamepadState: Record<string, boolean | string | number>) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const message = {
-        name: "gamepad_input",
-        data: gamepadState,
-        createdAt: Date.now(),
-      };
+  const sendGamepadState = useCallback(
+    (gamepadState: Record<string, boolean | string | number>) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const message = {
+          name: "gamepad_input",
+          data: gamepadState,
+          createdAt: Date.now(),
+        };
 
-      socket.send(JSON.stringify(message));
-      trackWsMessage("sent", message);
-    }
-  }, [socket]);
+        socket.send(JSON.stringify(message));
+        trackWsMessage("sent", message);
+      }
+    },
+    [socket]
+  );
 
   // Function to send robot commands
-  const sendRobotCommand = useCallback((command: RobotCommand) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const commandData = {
-        name: "robot_command",
-        data: {
-          command,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
+  const sendRobotCommand = useCallback(
+    (command: RobotCommand) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const commandData = {
+          name: "robot_command",
+          data: {
+            command,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
 
-      socket.send(JSON.stringify(commandData));
-      trackWsMessage("sent", commandData);
-      console.log(`Robot command sent: ${command}`);
-    } else {
-      logError("Cannot send robot command", {
-        reason: "Socket not connected",
-        command,
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+        socket.send(JSON.stringify(commandData));
+        trackWsMessage("sent", commandData);
+        console.log(`Robot command sent: ${command}`);
+      } else {
+        logError("Cannot send robot command", {
+          reason: "Socket not connected",
+          command,
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to request battery level
   const requestBatteryLevel = useCallback(() => {
@@ -665,97 +727,109 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   // Function to update settings
-  const updateSettings = useCallback((newSettings: Partial<RobotSettings>) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const settingsData = {
-        name: "settings_update",
-        data: {
-          settings: newSettings,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
+  const updateSettings = useCallback(
+    (newSettings: Partial<RobotSettings>) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const settingsData = {
+          name: "settings_update",
+          data: {
+            settings: newSettings,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
 
-      socket.send(JSON.stringify(settingsData));
-      trackWsMessage("sent", settingsData);
-      console.log("Settings update sent");
-    } else {
-      logError("Cannot send settings update", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+        socket.send(JSON.stringify(settingsData));
+        trackWsMessage("sent", settingsData);
+        console.log("Settings update sent");
+      } else {
+        logError("Cannot send settings update", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to reset settings
-  const resetSettings = useCallback((section?: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const resetData = {
-        name: "reset_settings",
-        data: {
-          section,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
+  const resetSettings = useCallback(
+    (section?: string) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const resetData = {
+          name: "reset_settings",
+          data: {
+            section,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
 
-      socket.send(JSON.stringify(resetData));
-      trackWsMessage("sent", resetData);
-      console.log(`Settings reset sent for section: ${section}`);
-    } else {
-      logError("Cannot send settings reset", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+        socket.send(JSON.stringify(resetData));
+        trackWsMessage("sent", resetData);
+        console.log(`Settings reset sent for section: ${section}`);
+      } else {
+        logError("Cannot send settings reset", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to send text to speak
-  const speakText = useCallback((text: string, language: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const ttsData = {
-        name: "speak_text",
-        data: {
-          text,
-          language,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
+  const speakText = useCallback(
+    (text: string, language: string) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const ttsData = {
+          name: "speak_text",
+          data: {
+            text,
+            language,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
 
-      socket.send(JSON.stringify(ttsData));
-      trackWsMessage("sent", ttsData);
-      console.log(`Text to speak sent: ${text}`);
-    } else {
-      logError("Cannot send text to speak", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+        socket.send(JSON.stringify(ttsData));
+        trackWsMessage("sent", ttsData);
+        console.log(`Text to speak sent: ${text}`);
+      } else {
+        logError("Cannot send text to speak", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to play a sound
-  const playSound = useCallback((sound: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const soundData = {
-        name: "play_sound",
-        data: {
-          sound,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
+  const playSound = useCallback(
+    (sound: string) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const soundData = {
+          name: "play_sound",
+          data: {
+            sound,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
 
-      socket.send(JSON.stringify(soundData));
-      trackWsMessage("sent", soundData);
-      console.log(`Sound to play sent: ${sound}`);
-    } else {
-      logError("Cannot send sound to play", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+        socket.send(JSON.stringify(soundData));
+        trackWsMessage("sent", soundData);
+        console.log(`Sound to play sent: ${sound}`);
+      } else {
+        logError("Cannot send sound to play", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to stop current sound playback
   const stopSound = useCallback(() => {
@@ -829,89 +903,103 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   // Function to update network settings
-  const updateNetwork = useCallback((action: NetworkAction, data: NetworkUpdateData) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const networkData = {
-        name: "network_update",
-        data: {
-          action,
-          data,
+  const updateNetwork = useCallback(
+    (action: NetworkAction, data: NetworkUpdateData) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const networkData = {
+          name: "network_update",
+          data: {
+            action,
+            data,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
+
+        socket.send(JSON.stringify(networkData));
+        trackWsMessage("sent", networkData);
+        console.log(`Network update sent: ${action}`);
+      } else {
+        logError("Cannot send network update", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  ); // Function to send GPT command
+  const sendGptCommand = useCallback(
+    (
+      prompt: string,
+      useCamera: boolean,
+      useAiVoice: boolean = false,
+      conversationMode: boolean = false
+    ) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const gptData = {
+          name: "gpt_command",
+          data: {
+            prompt,
+            useCamera,
+            useAiVoice,
+            conversationMode,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
+
+        socket.send(JSON.stringify(gptData));
+        trackWsMessage("sent", gptData);
+        console.log(`GPT command sent: ${prompt}`);
+
+        // Update local GPT status immediately to show it's starting
+        setGptStatus({
+          status: "starting",
+          message: "Starting GPT command processing...",
           timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
-
-      socket.send(JSON.stringify(networkData));
-      trackWsMessage("sent", networkData);
-      console.log(`Network update sent: ${action}`);
-    } else {
-      logError("Cannot send network update", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);  // Function to send GPT command
-  const sendGptCommand = useCallback((prompt: string, useCamera: boolean, useAiVoice: boolean = false, conversationMode: boolean = false) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const gptData = {
-        name: "gpt_command",
-        data: {
-          prompt,
-          useCamera,
-          useAiVoice,
-          conversationMode,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
-
-      socket.send(JSON.stringify(gptData));
-      trackWsMessage("sent", gptData);
-      console.log(`GPT command sent: ${prompt}`);
-
-      // Update local GPT status immediately to show it's starting
-      setGptStatus({
-        status: "starting",
-        message: "Starting GPT command processing...",
-        timestamp: Date.now()
-      });
-    } else {
-      logError("Cannot send GPT command", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+        });
+      } else {
+        logError("Cannot send GPT command", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to cancel GPT command
-  const cancelGptCommand = useCallback((conversationMode: boolean = false) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const cancelData = {
-        name: "cancel_gpt",
-        data: {
+  const cancelGptCommand = useCallback(
+    (conversationMode: boolean = false) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const cancelData = {
+          name: "cancel_gpt",
+          data: {
+            timestamp: Date.now(),
+            conversationMode,
+          },
+          createdAt: Date.now(),
+        };
+
+        socket.send(JSON.stringify(cancelData));
+        trackWsMessage("sent", cancelData);
+        console.log("GPT command cancellation request sent");
+
+        // Update local GPT status to show cancellation in progress
+        setGptStatus({
+          status: "warning",
+          message: "Canceling GPT command...",
           timestamp: Date.now(),
-          conversationMode,
-        },
-        createdAt: Date.now(),
-      };
-
-      socket.send(JSON.stringify(cancelData));
-      trackWsMessage("sent", cancelData);
-      console.log("GPT command cancellation request sent");
-
-      // Update local GPT status to show cancellation in progress
-      setGptStatus({
-        status: "warning",
-        message: "Canceling GPT command...",
-        timestamp: Date.now()
-      });
-    } else {
-      logError("Cannot send GPT cancel request", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+        });
+      } else {
+        logError("Cannot send GPT cancel request", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to create a new thread
   const createNewThread = useCallback(() => {
@@ -927,7 +1015,6 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       socket.send(JSON.stringify(createThreadData));
       trackWsMessage("sent", createThreadData);
       console.log("Create new thread request sent");
-
     } else {
       logError("Cannot create new thread", {
         reason: "Socket not connected",
@@ -937,25 +1024,28 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   }, [socket]);
 
   // Function to send audio stream data
-  const sendAudioStream = useCallback((audioData: string) => {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      const message = {
-        name: "audio_stream",
-        data: {
-          audio: audioData,
-          timestamp: Date.now(),
-        },
-        createdAt: Date.now(),
-      };
-      socket.send(JSON.stringify(message));
-      trackWsMessage("sent", message);
-    } else {
-      logError("Cannot send audio stream", {
-        reason: "Socket not connected",
-        readyState: socket?.readyState,
-      });
-    }
-  }, [socket]);
+  const sendAudioStream = useCallback(
+    (audioData: string) => {
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        const message = {
+          name: "audio_stream",
+          data: {
+            audio: audioData,
+            timestamp: Date.now(),
+          },
+          createdAt: Date.now(),
+        };
+        socket.send(JSON.stringify(message));
+        trackWsMessage("sent", message);
+      } else {
+        logError("Cannot send audio stream", {
+          reason: "Socket not connected",
+          readyState: socket?.readyState,
+        });
+      }
+    },
+    [socket]
+  );
 
   // Function to request Python connection status
   const requestPythonStatus = useCallback(() => {
@@ -992,9 +1082,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       console.log("Start listening request sent to robot");
 
       // Notify other components about PushToTalk status for coordination
-      window.dispatchEvent(new CustomEvent("listen:status", {
-        detail: { isActive: true }
-      }));
+      window.dispatchEvent(
+        new CustomEvent("listen:status", {
+          detail: { isActive: true },
+        })
+      );
     } else {
       logError("Cannot send start listening request", {
         reason: "Socket not connected",
@@ -1019,9 +1111,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       console.log("Stop listening request sent to robot");
 
       // Notify other components about PushToTalk status for coordination
-      window.dispatchEvent(new CustomEvent("listen:status", {
-        detail: { isActive: false }
-      }));
+      window.dispatchEvent(
+        new CustomEvent("listen:status", {
+          detail: { isActive: false },
+        })
+      );
     } else {
       logError("Cannot send stop listening request", {
         reason: "Socket not connected",
@@ -1049,8 +1143,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         readyState: socket?.readyState,
       });
     }
-  }
-  , [socket]);
+  }, [socket]);
 
   const stopCalibration = useCallback(() => {
     if (socket && socket.readyState === WebSocket.OPEN) {

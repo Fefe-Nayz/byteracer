@@ -223,6 +223,61 @@ class ByteRacer:
         # Apply motor balance settings if available
         if "motor_balance" in settings["ai"]:
             self.aicamera_manager.set_motor_balance(settings["ai"]["motor_balance"])
+            
+        # Apply new autonomous driving settings if available
+        if "autonomous_speed" in settings["ai"]:
+            self.aicamera_manager.set_autonomous_speed(settings["ai"]["autonomous_speed"])
+            
+        if "wait_to_turn_time" in settings["ai"]:
+            self.aicamera_manager.set_wait_to_turn_time(settings["ai"]["wait_to_turn_time"])
+            
+        if "stop_sign_wait_time" in settings["ai"]:
+            self.aicamera_manager.set_stop_sign_wait_time(settings["ai"]["stop_sign_wait_time"])
+            
+        if "stop_sign_ignore_time" in settings["ai"]:
+            self.aicamera_manager.set_stop_sign_ignore_time(settings["ai"]["stop_sign_ignore_time"])
+            
+        if "traffic_light_ignore_time" in settings["ai"]:
+            self.aicamera_manager.set_traffic_light_ignore_time(settings["ai"]["traffic_light_ignore_time"])
+        
+        # Apply face tracking parameters
+        if "target_face_area" in settings["ai"]:
+            self.aicamera_manager.set_target_face_area(settings["ai"]["target_face_area"])
+            
+        if "forward_factor" in settings["ai"]:
+            self.aicamera_manager.set_forward_factor(settings["ai"]["forward_factor"])
+            
+        if "face_tracking_max_speed" in settings["ai"]:
+            self.aicamera_manager.set_face_tracking_max_speed(settings["ai"]["face_tracking_max_speed"])
+            
+        if "speed_dead_zone" in settings["ai"]:
+            self.aicamera_manager.set_speed_dead_zone(settings["ai"]["speed_dead_zone"])
+            
+        if "turn_factor" in settings["ai"]:
+            self.aicamera_manager.set_turn_factor(settings["ai"]["turn_factor"])
+        
+        # Apply sensor manager emergency settings
+        if "emergency_cooldown" in settings["safety"]:
+            self.sensor_manager.set_emergency_cooldown(settings["safety"]["emergency_cooldown"])
+            
+        if "safe_distance_buffer" in settings["safety"]:
+            self.sensor_manager.set_safe_distance_buffer(settings["safety"]["safe_distance_buffer"])
+            
+        if "battery_emergency_enabled" in settings["safety"]:
+            self.sensor_manager.set_battery_emergency_enabled(settings["safety"]["battery_emergency_enabled"])
+            
+        if "low_battery_threshold" in settings["safety"]:
+            self.sensor_manager.set_low_battery_threshold(settings["safety"]["low_battery_threshold"])
+            
+        if "low_battery_warning_interval" in settings["safety"]:
+            self.sensor_manager.set_low_battery_warning_interval(settings["safety"]["low_battery_warning_interval"])
+            
+        if "edge_recovery_time" in settings["safety"]:
+            self.sensor_manager.set_edge_recovery_time(settings["safety"]["edge_recovery_time"])
+        
+        # Apply LED settings if available
+        if "led" in settings and "enabled" in settings["led"]:
+            self.led_manager.set_enabled(settings["led"]["enabled"])
         
         logging.info("Applied settings from configuration")
     
@@ -594,7 +649,7 @@ class ByteRacer:
                 success = self.config_manager.reset_to_defaults(section)
                 
                 # Apply the reset settings
-                await self.apply_config_settings()
+                await self.setup()
                 
                 # Send response
                 await self.send_command_response({
@@ -1135,6 +1190,31 @@ class ByteRacer:
             if "client_timeout" in safety:
                 self.config_manager.set("safety.client_timeout", safety["client_timeout"])
                 self.sensor_manager.client_timeout = safety["client_timeout"]
+                
+            # New sensor manager emergency settings
+            if "emergency_cooldown" in safety:
+                self.config_manager.set("safety.emergency_cooldown", safety["emergency_cooldown"])
+                self.sensor_manager.set_emergency_cooldown(safety["emergency_cooldown"])
+                
+            if "safe_distance_buffer" in safety:
+                self.config_manager.set("safety.safe_distance_buffer", safety["safe_distance_buffer"])
+                self.sensor_manager.set_safe_distance_buffer(safety["safe_distance_buffer"])
+                
+            if "battery_emergency_enabled" in safety:
+                self.config_manager.set("safety.battery_emergency_enabled", safety["battery_emergency_enabled"])
+                self.sensor_manager.set_battery_emergency_enabled(safety["battery_emergency_enabled"])
+                
+            if "low_battery_threshold" in safety:
+                self.config_manager.set("safety.low_battery_threshold", safety["low_battery_threshold"])
+                self.sensor_manager.set_low_battery_threshold(safety["low_battery_threshold"])
+                
+            if "low_battery_warning_interval" in safety:
+                self.config_manager.set("safety.low_battery_warning_interval", safety["low_battery_warning_interval"])
+                self.sensor_manager.set_low_battery_warning_interval(safety["low_battery_warning_interval"])
+                
+            if "edge_recovery_time" in safety:
+                self.config_manager.set("safety.edge_recovery_time", safety["edge_recovery_time"])
+                self.sensor_manager.set_edge_recovery_time(safety["edge_recovery_time"])
 
         if "drive" in settings:
             drive = settings["drive"]
@@ -1193,6 +1273,47 @@ class ByteRacer:
                 self.config_manager.set("ai.motor_balance", ai["motor_balance"])
                 self.aicamera_manager.set_motor_balance(ai["motor_balance"])
 
+            if "autonomous_speed" in ai:
+                self.config_manager.set("ai.autonomous_speed", ai["autonomous_speed"])
+                self.aicamera_manager.set_autonomous_speed(ai["autonomous_speed"])
+            
+            if "wait_to_turn_time" in ai:
+                self.config_manager.set("ai.wait_to_turn_time", ai["wait_to_turn_time"])
+                self.aicamera_manager.set_wait_to_turn_time(ai["wait_to_turn_time"])
+            
+            if "stop_sign_wait_time" in ai:
+                self.config_manager.set("ai.stop_sign_wait_time", ai["stop_sign_wait_time"])
+                self.aicamera_manager.set_stop_sign_wait_time(ai["stop_sign_wait_time"])
+            
+            if "stop_sign_ignore_time" in ai:
+                self.config_manager.set("ai.stop_sign_ignore_time", ai["stop_sign_ignore_time"])
+                self.aicamera_manager.set_stop_sign_ignore_time(ai["stop_sign_ignore_time"])
+            
+            if "traffic_light_ignore_time" in ai:
+                self.config_manager.set("ai.traffic_light_ignore_time", ai["traffic_light_ignore_time"])
+                self.aicamera_manager.set_traffic_light_ignore_time(ai["traffic_light_ignore_time"])
+                
+            # New face tracking settings
+            if "target_face_area" in ai:
+                self.config_manager.set("ai.target_face_area", ai["target_face_area"])
+                self.aicamera_manager.set_target_face_area(ai["target_face_area"])
+                
+            if "forward_factor" in ai:
+                self.config_manager.set("ai.forward_factor", ai["forward_factor"])
+                self.aicamera_manager.set_forward_factor(ai["forward_factor"])
+                
+            if "face_tracking_max_speed" in ai:
+                self.config_manager.set("ai.face_tracking_max_speed", ai["face_tracking_max_speed"])
+                self.aicamera_manager.set_face_tracking_max_speed(ai["face_tracking_max_speed"])
+                
+            if "speed_dead_zone" in ai:
+                self.config_manager.set("ai.speed_dead_zone", ai["speed_dead_zone"])
+                self.aicamera_manager.set_speed_dead_zone(ai["speed_dead_zone"])
+                
+            if "turn_factor" in ai:
+                self.config_manager.set("ai.turn_factor", ai["turn_factor"])
+                self.aicamera_manager.set_turn_factor(ai["turn_factor"])
+
         if "led" in settings:
             led = settings["led"]
             
@@ -1203,35 +1324,49 @@ class ByteRacer:
         if "camera" in settings:
             camera = settings["camera"]
             
-            # First collect all camera setting changes
+            # Get current camera settings for comparison
+            current_camera_settings = self.config_manager.get("camera")
+            
+            # Check if any camera settings actually changed
+            camera_settings_changed = False
             camera_changes = {}
             
-            if "vflip" in camera:
+            # Compare each camera setting
+            if "vflip" in camera and camera["vflip"] != current_camera_settings["vflip"]:
+                camera_settings_changed = True
                 self.config_manager.set("camera.vflip", camera["vflip"])
                 camera_changes['vflip'] = camera["vflip"]
             
-            if "hflip" in camera:
+            if "hflip" in camera and camera["hflip"] != current_camera_settings["hflip"]:
+                camera_settings_changed = True
                 self.config_manager.set("camera.hflip", camera["hflip"])
                 camera_changes['hflip'] = camera["hflip"]
 
-            if "local_display" in camera:
+            if "local_display" in camera and camera["local_display"] != current_camera_settings["local_display"]:
+                camera_settings_changed = True
                 self.config_manager.set("camera.local_display", camera["local_display"])
                 camera_changes['local'] = camera["local_display"]
 
-            if "web_display" in camera:
+            if "web_display" in camera and camera["web_display"] != current_camera_settings["web_display"]:
+                camera_settings_changed = True
                 self.config_manager.set("camera.web_display", camera["web_display"])
                 camera_changes['web'] = camera["web_display"]
 
-            if "camera_size" in camera:
+            if "camera_size" in camera and camera["camera_size"] != current_camera_settings["camera_size"]:
+                camera_settings_changed = True
                 self.config_manager.set("camera.camera_size", camera["camera_size"])
                 camera_changes['camera_size'] = camera["camera_size"]
                 self.aicamera_manager.change_camera_resolution(width=camera["camera_size"][0], height=camera["camera_size"][1])
             
-            # Only update and restart if there are actual changes
-            if camera_changes:
+            # Only update and restart if camera settings actually changed
+            if camera_settings_changed:
+                logging.info(f"Camera settings changed: {camera_changes}")
                 restart_needed = self.camera_manager.update_settings(**camera_changes)
                 if restart_needed:
-                    await self.camera_manager.restart()        
+                    await self.camera_manager.restart()
+                    logging.info(f"Camera restarted due to settings changes: {camera_changes}")
+            else:
+                logging.info("No camera settings changed, skipping camera restart")
         
         # Save settings
         await self.save_config_settings()
