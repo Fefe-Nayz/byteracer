@@ -64,6 +64,7 @@ class AICameraCameraManager:
         self.yolo_model = None
         self.yolo_detection_thread = None
         self.yolo_detection_active = False
+        self.yolo_detection_paused = False  # New flag to temporarily pause detection
         self.yolo_min_confidence = 0.5
         self.yolo_results = []
         self.yolo_object_count = 0
@@ -750,6 +751,11 @@ class AICameraCameraManager:
         
         while self.yolo_detection_active:
             try:
+                # Check if detection is paused (e.g. during turns)
+                if self.yolo_detection_paused:
+                    # Skip processing but continue the loop at reduced frequency
+                    await asyncio.sleep(0.1)
+                    continue
                 t_start = time.perf_counter()
                 
                 # Get current frame from camera via camera_manager
@@ -965,12 +971,6 @@ class AICameraCameraManager:
                     self.forward_with_balance(self.autonomous_speed)  # Use configured autonomous speed
                     # Use closest object for tracking regardless of type
                     best_object = closest_object
-                
-                # Check for pending right turn (even if no sign is visible anymore)
-                if self.right_turn_pending and time.time() >= self.right_turn_timer:
-                    await self._execute_right_turn()
-                    # Skip object tracking during this frame since we're executing a turn
-                    best_object = None
                 
                 # Track the best detected object with the camera
                 if best_object:
@@ -1314,8 +1314,19 @@ class AICameraCameraManager:
             # Set the flag to indicate a pending turn
             self.right_turn_pending = True
             
-            # Start timer to execute turn after the configured waiting time
-            self.right_turn_timer = time.time() + self.wait_to_turn_time
+            try:
+                # Use a thread instead of asyncio task
+                logger.info("Starting delayed turn thread...")
+                turn_thread = threading.Thread(
+                    target=self._thread_delayed_right_turn,
+                    daemon=True
+                )
+                turn_thread.start()
+                logger.info(f"Delayed turn thread started: {turn_thread.name}")
+                
+            except Exception as e:
+                logger.error(f"Error creating delayed turn thread: {e}")
+                self.right_turn_pending = False
             
             # Announce if TTS manager is available
             if self.tts_manager:
@@ -1325,7 +1336,43 @@ class AICameraCameraManager:
             # Not close enough yet, continue moving forward
             self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
             logger.info(f"Right turn sign detected but not close enough, proceeding at {self.autonomous_speed*100:.1f}% speed")
-    
+            
+    def _thread_delayed_right_turn(self):
+        """
+        Thread-based implementation of the delayed right turn.
+        This uses a regular thread with sleep instead of asyncio.
+        """
+        try:
+            logger.info(f"Delayed turn thread started, waiting {self.wait_to_turn_time} seconds...")
+            
+            # Wait for the configured time using standard sleep
+            time.sleep(self.wait_to_turn_time)
+            logger.info(f"Thread sleep completed, about to execute turn")
+            
+            # Execute the turn if we're still pending
+            if self.right_turn_pending:
+                logger.info("Executing right turn from thread...")
+                
+                # We need to run the async method in a new event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(self._execute_right_turn())
+                    logger.info("Right turn execution completed from thread")
+                finally:
+                    loop.close()
+                    
+            else:
+                logger.warning("Right turn was cancelled before execution in thread")
+                
+        except Exception as e:
+            logger.error(f"Error in delayed turn thread: {e}")
+            # Reset turn state on error
+            self.right_turn_pending = False
+            self.executing_right_turn = False
+            # Make sure detection is re-enabled on error
+            self.yolo_detection_paused = False
+
     async def _execute_right_turn(self):
         """
         Execute the right turn. Called when it's time to turn after seeing a right turn sign.
@@ -1334,68 +1381,67 @@ class AICameraCameraManager:
         self.executing_right_turn = True
         self.right_turn_pending = False
         
-        # Start turn signal LED blinking
-        self.start_turn_signal_blink()
-        
-        # Announce the turn
-        if self.tts_manager:
-            await self.tts_manager.say("Turning right", priority=1)
-        
-        logger.info("RIGHT TURN SIGN - Executing right turn now")
-        # Stop forward movement before starting the turn
-        self.px.forward(0)
-        
-        # Setup for differential steering
-        speed_value = max(0.1, self.autonomous_speed * 2)  # Use 10% speed or twice the autonomous speed, whichever is higher
-        turn_value = 1.0   # Full right turn (normalized -1 to 1)
-        turn_direction = 1  # 1 for right, -1 for left, 0 for straight
-        abs_turn = abs(turn_value)  # Absolute turn value
-        
-        # Differential steering: Reduce speed of inner wheel based on turn amount
-        turn_factor = abs_turn * 0.9  # How much to reduce inner wheel speed (max 90% reduction)
-        
-        # Calculate per-wheel speeds
-        if turn_direction > 0:  # Turning right
-            left_speed = speed_value  # Outer wheel at full speed
-            right_speed = speed_value * (1 - turn_factor)  # Inner wheel slowed
-        else:  # Turning left or straight
-            left_speed = speed_value * (1 - (turn_factor if turn_direction < 0 else 0))  # Inner wheel slowed if turning left
-            right_speed = speed_value  # Outer wheel at full speed
-        
-        # Apply speeds to motors and set steering angle
-        logger.info(f"Turning right - Left motor: {left_speed * 100:.1f}%, Right motor: {right_speed * 100:.1f}%, Steering angle: 35°")
-        self.px.set_motor_speed(1, left_speed * 100)    # Left motor
-        self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (reversed in hardware)
-        self.px.set_dir_servo_angle(35)    # Set steering to full right turn
-        
-        # Wait for the turn to complete
-        logger.info("Executing right turn seconds...")
-        await asyncio.sleep(self.right_turn_time)  # Wait for the turn time (default 2 seconds)
-        
-        # Reset direction and return to normal driving
-        logger.info("Turn completed, resetting steering angle")
-        self.px.set_dir_servo_angle(0)
-        self.px.set_motor_speed(1, self.autonomous_speed * 100)  # Return to normal forward speed
-        self.px.set_motor_speed(2, -self.autonomous_speed * 100) # Return to normal forward speed
-        
-        # Reset turn state
-        self.right_turn_timer = None
-        self.executing_right_turn = False
-        self.right_turn_sign_detected = False
+        try:
+            # Pause YOLO detection during the turn
+            logger.info("Pausing YOLO detection for the turn")
+            self.yolo_detection_paused = True
+            
+            # Start turn signal LED blinking
+            self.start_turn_signal_blink()
+            
+            # Announce the turn
+            if self.tts_manager:
+                await self.tts_manager.say("Turning right", priority=1)
+            
+            logger.info("RIGHT TURN SIGN - Executing right turn now")
+            # Stop forward movement before starting the turn
+            self.px.forward(0)
+            
+            # Differential steering approach that increases outer wheel speed
+            base_speed = 0.1  # Base speed (10%)
+            boost_factor = 0.8  # How much to boost outer wheel speed (up to 80% boost)
+            
+            # Calculate per-wheel speeds - boost the outer wheel rather than slowing inner wheel
+            left_speed = base_speed * (1 + boost_factor)  # Outer wheel (left) gets boosted
+            right_speed = base_speed  # Inner wheel (right) stays at base speed
+            
+            # Apply speeds to motors and set steering angle
+            logger.info(f"Turning right - Left motor: {left_speed * 100:.1f}%, Right motor: {right_speed * 100:.1f}%, Steering angle: 35°")
+            self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
+            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
+            self.px.set_dir_servo_angle(35)    # Set steering to full right turn
+            
+            # Wait for the turn to complete
+            logger.info(f"Executing right turn for {self.right_turn_time} seconds...")
+            await asyncio.sleep(self.right_turn_time)  # Wait for the turn time (default 2 seconds)
+            
+            # Reset direction and return to normal driving
+            logger.info("Turn completed, resetting steering angle")
+            self.px.set_dir_servo_angle(0)
+            
+            # Reset turn state
+            self.right_turn_timer = None
+            self.executing_right_turn = False
+            self.right_turn_sign_detected = False
 
-        # Stop LED blinking
-        self.stop_all_led_patterns(False)
-        
-        # Reset camera position after turning right
-        self.x_angle = 0
-        self.y_angle = 0
-        self.px.set_cam_pan_angle(0)
-        self.px.set_cam_tilt_angle(0)
+            # Stop LED blinking
+            self.stop_all_led_patterns(False)
+            
+            # Reset camera position after turning right
+            # self.x_angle = 0
+            # self.y_angle = 0
+            # self.px.set_cam_pan_angle(0)
+            # self.px.set_cam_tilt_angle(0)
 
-        # Move forward slowly after the turn
-        self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
-        
-        logger.info(f"RIGHT TURN SIGN - Turn completed, continuing forward at {self.autonomous_speed*100:.1f}% speed")
+            # Move forward slowly after the turn
+            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+            
+            logger.info(f"RIGHT TURN SIGN - Turn completed, continuing forward at {self.autonomous_speed*100:.1f}% speed")
+            
+        finally:
+            # Always re-enable YOLO detection after the turn, even if there was an error
+            logger.info("Resuming YOLO detection after turn")
+            self.yolo_detection_paused = False
 
     def _run_turn_calibration(self):
         """Run a single right turn to calibrate the turning parameters"""
@@ -1420,6 +1466,11 @@ class AICameraCameraManager:
             logger.info("----- RIGHT TURN CALIBRATION TEST -----")
             logger.info("Testing if the robot turns 90 degrees with current settings")
             
+            # Pause YOLO detection during calibration
+            was_paused = self.yolo_detection_paused
+            self.yolo_detection_paused = True
+            logger.info("Pausing YOLO detection for calibration")
+            
             # Announce the test if TTS is available
             if self.tts_manager:
                 await self.tts_manager.say("Testing right turn calibration", priority=1)
@@ -1434,37 +1485,28 @@ class AICameraCameraManager:
             # Execute the turn
             logger.info("Executing right turn now...")
             
-            # Setup for differential steering
-            speed_value = 0.1  # 10% speed
-            turn_value = 1.0   # Full right turn (normalized -1 to 1)
-            turn_direction = 1  # 1 for right, -1 for left, 0 for straight
-            abs_turn = abs(turn_value)  # Absolute turn value
+            # Differential steering approach that increases outer wheel speed
+            base_speed = 0.1  # Base speed (10%)
+            boost_factor = 0.8  # How much to boost outer wheel speed (up to 80% boost)
             
-            # Differential steering: Reduce speed of inner wheel based on turn amount
-            turn_factor = abs_turn * 0.9  # How much to reduce inner wheel speed (max 90% reduction)
-            
-            # Calculate per-wheel speeds
-            if turn_direction > 0:  # Turning right
-                left_speed = speed_value  # Outer wheel at full speed
-                right_speed = speed_value * (1 - turn_factor)  # Inner wheel slowed
-            else:  # Turning left or straight
-                left_speed = speed_value * (1 - (turn_factor if turn_direction < 0 else 0))  # Inner wheel slowed if turning left
-                right_speed = speed_value  # Outer wheel at full speed
+            # Calculate per-wheel speeds - boost the outer wheel rather than slowing inner wheel
+            left_speed = base_speed * (1 + boost_factor)  # Outer wheel (left) gets boosted
+            right_speed = base_speed  # Inner wheel (right) stays at base speed
             
             # Apply speeds to motors and set steering angle
-            self.px.set_motor_speed(1, left_speed * 100)    # Left motor
-            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (reversed in hardware)
+            logger.info(f"Turning right - Left motor: {left_speed * 100:.1f}%, Right motor: {right_speed * 100:.1f}%, Steering angle: 35°")
+            self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
+            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
             self.px.set_dir_servo_angle(35)    # Set steering to full right turn
             
             # Wait for the turn to complete
-            logger.info("Turning right for 2 seconds...")
+            logger.info(f"Turning right for {self.right_turn_time} seconds...")
             await asyncio.sleep(self.right_turn_time)  # Wait for the turn time (default 2 seconds)
             
             # Stop and reset direction
             self.px.set_motor_speed(1, 0)
             self.px.set_motor_speed(2, 0)
             self.px.set_dir_servo_angle(0)
-            self.px.forward(0)
             
             # Stop LED blinking
             self.stop_all_led_patterns()
@@ -1487,7 +1529,12 @@ class AICameraCameraManager:
             
             # Make sure to stop LED blinking
             self.stop_all_led_patterns()
-    
+            
+        finally:
+            # Reset detection pause state to what it was before
+            self.yolo_detection_paused = was_paused
+            logger.info(f"YOLO detection pause state reset to {was_paused}")
+            
     def set_distance_threshold(self, distance):
         """
         Set the distance threshold for detecting objects.
@@ -1568,26 +1615,18 @@ class AICameraCameraManager:
             # Stop forward movement before starting the turn
             self.px.forward(0)
             
-            # Setup for differential steering
-            turn_value = 1.0   # Full right turn (normalized -1 to 1)
-            turn_direction = 1  # 1 for right, -1 for left, 0 for straight
-            abs_turn = abs(turn_value)  # Absolute turn value
+            # Differential steering approach that increases outer wheel speed
+            base_speed = speed_value  # Use the provided speed as base
+            boost_factor = 0.8  # How much to boost outer wheel speed (up to 80% boost)
             
-            # Differential steering: Reduce speed of inner wheel based on turn amount
-            turn_factor = abs_turn * 0.9  # How much to reduce inner wheel speed (max 90% reduction)
-            
-            # Calculate per-wheel speeds
-            if turn_direction > 0:  # Turning right
-                left_speed = speed_value  # Outer wheel at full speed
-                right_speed = speed_value * (1 - turn_factor)  # Inner wheel slowed
-            else:  # Turning left or straight
-                left_speed = speed_value * (1 - (turn_factor if turn_direction < 0 else 0))  # Inner wheel slowed if turning left
-                right_speed = speed_value  # Outer wheel at full speed
+            # Calculate per-wheel speeds - boost the outer wheel rather than slowing inner wheel
+            left_speed = base_speed * (1 + boost_factor)  # Outer wheel (left) gets boosted
+            right_speed = base_speed  # Inner wheel (right) stays at base speed
             
             # Apply speeds to motors and set steering angle
             logger.info(f"Continuous turning right - Left motor: {left_speed * 100:.1f}%, Right motor: {right_speed * 100:.1f}%, Steering angle: 35°")
-            self.px.set_motor_speed(1, left_speed * 100)    # Left motor
-            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (reversed in hardware)
+            self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
+            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
             self.px.set_dir_servo_angle(35)    # Set steering to full right turn
             
             logger.info("Continuous right turn active - call stop_continuous_turn() to stop")
@@ -1924,10 +1963,10 @@ class AICameraCameraManager:
 
         # Calculate boost factor - much stronger for low speeds
         # At max balance (50), this can double the motor speed on one side
-        boost_factor = abs(self.motor_balance) / 50.0 * 1.5  # Up to 150% boost at max balance
+        boost_factor = abs(self.motor_balance) / 50.0 * 2  # Up to 150% boost at max balance
         
         # Ensure minimum speed so motors don't stall
-        min_speed = max(0.03, speed * 0.7)  # Either 3% minimum or 70% of requested speed
+        min_speed = max(0.03, speed * 0.6)  # Either 3% minimum or 70% of requested speed
         
         if self.motor_balance < 0:
             # Negative balance: boost left motor (if veering right)
