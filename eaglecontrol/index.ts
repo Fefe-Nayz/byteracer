@@ -35,10 +35,38 @@ type WebSocketEventName =
   | "car_ready"
   | "gamepad_input"
   | "client_register"
-  | "robot_command"     // New: For sending commands to the robot
-  | "command_response"  // New: For receiving command responses
-  | "battery_request"   // New: For requesting battery level
-  | "battery_info";     // New: For receiving battery information
+  | "robot_command"       // For sending commands to the robot
+  | "command_response"    // For receiving command responses
+  | "battery_request"     // For requesting battery level
+  | "battery_info"        // For receiving battery information
+  | "settings"            // For receiving settings from the robot
+  | "settings_update"     // For sending settings changes to the robot
+  | "reset_settings"      // For resetting settings to defaults
+  | "sensor_data"         // For receiving sensor data
+  | "camera_status"       // For receiving camera status
+  | "speak_text"          // For sending text to be spoken
+  | "play_sound"          // For sending a sound to be played
+  | "stop_sound"          // For stopping all currently playing sounds
+  | "stop_tts"            // For stopping currently playing speech
+  | "gpt_command"         // For sending GPT commands
+  | "gpt_response"        // For receiving GPT responses
+  | "gpt_status_update"   // For receiving GPT status updates
+  | "cancel_gpt"          // For cancelling a GPT command
+  | "create_thread"       // For creating a new GPT conversation thread
+  | "network_scan"        // For requesting network scan
+  | "network_list"        // For receiving network list
+  | "network_update"      // For updating network settings
+  | "audio_stream"        // For streaming audio data to the robot
+  | "start_listening"      // For starting audio listening
+  | "stop_listening"       // For stopping audio listening
+  | "python_status_request" // For requesting Python connection status
+  | "log_message"
+  | "speech_recognition"
+  | "start_calibration"
+  | "stop_calibration"
+  | "test_calibration"
+  | "start_test_calibrate_motors"
+  | "stop_test_calibrate_motors";
 
 type WebSocketEvent = {
   name: WebSocketEventName;
@@ -131,6 +159,8 @@ const wsHandlers = {
             else if (type === "controller") controllers.set(client.id, client);
             else viewers.set(client.id, client);
 
+            broadcastToType(message, "car", ws);
+
             console.log(`Client ${client.id} registered as ${type}`);
           }
           break;
@@ -154,7 +184,7 @@ const wsHandlers = {
         case "gamepad_input":
           broadcastToType(message, "car", ws);
           broadcastToType(message, "viewer", ws);
-          console.log(message);
+          // Reduced logging frequency for gamepad inputs to avoid console spam
           break;
 
         case "ping":
@@ -170,19 +200,21 @@ const wsHandlers = {
           );
           break;
 
-        // New cases for handling robot commands and responses
+        // Robot commands
         case "robot_command":
           console.log(`Robot command received: ${event.data.command}`);
           // Forward command to all cars
           broadcastToType(message, "car", ws);
           break;
 
+        // Battery requests
         case "battery_request":
           console.log("Battery level request received");
           // Forward the request to all cars
           broadcastToType(message, "car", ws);
           break;
 
+        // Command responses
         case "command_response":
           console.log(`Command response: ${event.data.message}`);
           // Forward the response to all controllers and viewers
@@ -190,11 +222,223 @@ const wsHandlers = {
           broadcastToType(message, "viewer", ws);
           break;
 
+        // Battery information
         case "battery_info":
-          console.log(`Battery info received: ${event.data.level}%`);
           // Forward battery info to all controllers and viewers
           broadcastToType(message, "controller", ws);
           broadcastToType(message, "viewer", ws);
+          break;
+
+        // Sensor data
+        case "sensor_data":
+          // Forward sensor data to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Camera status
+        case "camera_status":
+          console.log(`Camera status: ${event.data.state}`);
+          // Forward camera status to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Settings from robot
+        case "settings":
+          console.log("Settings received from: " + client.type);
+          if (client.type === "car") {
+            // Forward settings from car to all controllers and viewers
+            broadcastToType(message, "controller", ws);
+            broadcastToType(message, "viewer", ws);
+          } else if (client.type === "controller" || client.type === "viewer") {
+            // Forward settings request from controller/viewer to all cars
+            console.log("Forwarding settings request to cars");
+            broadcastToType(message, "car", ws);
+          }
+          break;
+
+        // Settings updates from client
+        case "settings_update":
+          console.log("Settings update request received");
+          // Forward settings update to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Reset settings
+        case "reset_settings":
+          console.log(`Settings reset request received for section: ${event.data.section || "all"}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Text to speak
+        case "speak_text":
+          console.log(`Text to speak: ${event.data.text}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Sound to play
+        case "play_sound":
+          console.log(`Sound to play: ${event.data.sound}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Stop sound
+        case "stop_sound":
+          console.log("Stop sound request received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Stop TTS
+        case "stop_tts":
+          console.log("Stop TTS request received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // GPT commands
+        case "gpt_command":
+          console.log(`GPT command: ${event.data.prompt}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;        // GPT responses
+        case "gpt_response":
+          console.log("GPT response received");
+          // Forward to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // GPT status updates
+        case "gpt_status_update":
+          console.log(`GPT status update: ${event.data.status} - ${event.data.message}`);
+          // Forward to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;        // Cancel GPT command
+        case "cancel_gpt":
+          console.log("GPT command cancellation request received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+          
+        // Create new thread
+        case "create_thread":
+          console.log("New GPT thread request received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Network scan request
+        case "network_scan":
+          console.log("Network scan requested");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Network list update
+        case "network_list":
+          console.log("Network list received");
+          // Forward to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+
+        // Network settings update
+        case "network_update":
+          console.log(`Network update request: ${event.data.action}`);
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Existing cases ...
+        case "audio_stream":
+          console.log("Audio stream received");
+          // Forward the audio stream from a controller to all connected cars
+          if (client.type === "controller") {
+            broadcastToType(message, "car", ws);
+          }
+          else if (client.type === "car") {
+            broadcastToType(message, "controller", ws);
+          }
+          break;
+        
+        case "start_listening":
+          console.log("Start listening command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "stop_listening":
+          console.log("Stop listening command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        // Python status request
+        case "python_status_request":
+          console.log("Python connection status requested");
+          
+          // Check if there are any car clients connected
+          const carsConnected = cars.size > 0;
+          
+          // Respond immediately with the current connection status
+          ws.send(JSON.stringify({
+            name: "python_status",
+            data: {
+              connected: carsConnected,
+              timestamp: Date.now()
+            },
+            createdAt: Date.now()
+          }));
+          
+          console.log(`Python connection status: ${carsConnected ? "Connected" : "Disconnected"}`);
+          break;
+
+        case "log_message":
+          // Forward log messages to all controllers and viewers
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
+          break;
+        
+        case "speech_recognition":
+          console.log("Speech recognition data received");
+          // Forward speech recognition data to all controllers
+          broadcastToType(message, "controller", ws);
+          break;
+
+        case "start_calibration":
+          console.log("Start calibration command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "stop_calibration":
+          console.log("Stop calibration command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "test_calibration":
+          console.log("Test calibration command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "start_test_calibrate_motors":
+          console.log("Start test calibrate motors command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "stop_test_calibrate_motors":
+          console.log("Stop test calibrate motors command received");
+          // Forward to all cars
+          broadcastToType(message, "car", ws);
           break;
 
         default:

@@ -38,7 +38,7 @@ export default function GamepadList() {
       <h2 className="text-xl font-bold mb-2">Available Gamepads</h2>
 
       {availableGamepads.length === 0 ? (
-        <div className="text-center p-6 border rounded-md">
+        <div className="text-center p-6 border rounded-xl">
           <p>No gamepads detected.</p>
           <p className="text-sm text-gray-500 mt-2">
             Connect a gamepad and press any button to activate it.

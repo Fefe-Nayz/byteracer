@@ -10,6 +10,8 @@ export default function RemapControls() {
     listeningFor,
     getInputLabelForMapping,
     remappingType,
+    selectedGamepadId,
+    resetAllMappings, // Add the resetAllMappings function from context
   } = useGamepadContext();
 
   // Filter actions by type
@@ -34,6 +36,12 @@ export default function RemapControls() {
     if (preferredType === "axis" || action.type === "axis")
       return "Move any axis...";
     return "Waiting for input...";
+  }
+
+  // Helper function to reset the mappings to default
+  function resetMappings() {
+    // Use the reset function from the useGamepad hook instead of manually manipulating localStorage
+    resetAllMappings();
   }
 
   // Render function for standard actions (button or axis)
@@ -156,7 +164,18 @@ export default function RemapControls() {
 
   return (
     <div>
-      <h3 className="text-lg font-semibold mb-3">Customize Controls</h3>
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-lg font-semibold">Customize Controls</h3>
+        {selectedGamepadId && (
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={resetMappings}
+          >
+            Reset to Defaults
+          </Button>
+        )}
+      </div>
 
       {/* Multi-Input Actions (Both) */}
       {bothActions.length > 0 && (

@@ -28,7 +28,9 @@ export type ActionKey =
   | "turnCameraLeft"
   | "turnCameraUp"
   | "turnCameraDown"
-  | "use";
+  | "use"
+  | "pushToTalk"
+  | "listen";
 
 export interface ActionInfo {
   key: ActionKey;
@@ -198,6 +200,18 @@ export const ACTIONS: ActionInfo[] = [
     type: "button",
     defaultMapping: { type: "button", index: 2 },
   },
+  {
+    key: "pushToTalk",
+    label: "Push to talk",
+    type: "button",
+    defaultMapping: { type: "button", index: 0 },
+  },
+  {
+    key: "listen",
+    label: "Écouter",
+    type: "button",
+    defaultMapping: { type: "button", index: 1 },
+  },
 ];
 
 // Update Mapping type - Fix the "both" type issue
@@ -216,15 +230,18 @@ type Mapping = Record<
   }
 >;
 
+// Updated type definition to fix the error
+type StoredMappings = {
+  [gamepadId: string]: Mapping;
+} & {
+  _resetFlag?: boolean; // Separate from the index signature
+};
+
 type GamepadState = {
   connected: boolean;
   pressedInputs: Set<string>;
   axisValues: number[];
   _lastUpdate?: number;
-};
-
-type StoredMappings = {
-  [gamepadId: string]: Mapping;
 };
 
 export function useGamepad() {
@@ -311,6 +328,8 @@ export function useGamepad() {
   // Update mappings when gamepad changes - load from storage
   useEffect(() => {
     if (!selectedGamepadId) return;
+
+
 
     // Only load from storage if we have a gamepad selected
     if (selectedGamepadId && storedMappings[selectedGamepadId]) {
@@ -561,25 +580,17 @@ export function useGamepad() {
     const map = mappings[action];
     if (!map || map.index === -1) return false; // Check for -1 (unmapped)
 
-    // Find the action info to check if it's "both" type
-
     if (map.type === "button") {
       const id = `button-${map.index}`;
       return gamepadState.pressedInputs.has(id);
+    } else if (map.type === "axis") {
+      // For axis mapping, we need to process the axis value
+      const val = gamepadState.axisValues[map.index] ?? 0;
+      const deadzone = map.axisConfig?.deadzone ?? 0.1;
+      
+      // Apply deadzone threshold
+      return Math.abs(val) > deadzone;
     }
-    // } else if (map.type === "axis") {
-    //   // For axis
-    //   const val = gamepadState.axisValues[map.index] ?? 0;
-
-    //   // For turn actions, use different thresholds
-    //   if (action === "turn") {
-    //     return Math.abs(val) > 0.2;
-    //   } else if (action === "turnCameraX" || action === "turnCameraY") {
-    //     return Math.abs(val) > 0.2;
-    //   }
-
-    //   return Math.abs(val) > 0.2;
-    // }
 
     // Should never reach here, but better safe
     return false;
@@ -666,26 +677,6 @@ export function useGamepad() {
     return null;
   }
 
-  // Find if any action is using this input
-  // function findActionUsingInput(
-  //   type: "button" | "axis",
-  //   index: number,
-  //   currentMappings?: Mapping
-  // ): ActionKey | null {
-  //   // Use provided mappings or fall back to the current state mappings
-  //   const mappingsToCheck = currentMappings || mappings;
-
-  //   for (const [action, cfg] of Object.entries(mappingsToCheck) as [
-  //     ActionKey,
-  //     { type: string; index: number }
-  //   ][]) {
-  //     if (cfg.type === type && cfg.index === index) {
-  //       return action as ActionKey;
-  //     }
-  //   }
-  //   return null;
-  // }
-
   // Improved findAllActionsUsingInput function to find ALL conflicts
   function findAllActionsUsingInput(
     type: "button" | "axis",
@@ -728,11 +719,6 @@ export function useGamepad() {
 
   /** Polling function, called periodically. */
   function updateGamepadState() {
-    // Debug output every few seconds when in listening mode
-    // console.log("updateGamepadState running - selectedID:", selectedGamepadId,
-    //           "listening:", listeningFor,
-    //           "connected:", gamepadState.connected);
-
     const now = Date.now();
     if (listeningFor && now % 1000 < 50) {
       console.log("Still listening for:", listeningFor);
@@ -747,8 +733,6 @@ export function useGamepad() {
     updateAvailableGamepads();
 
     if (!selectedGamepadId) {
-      // Early return
-      // console.log("No gamepad ID selected, skipping remap check");
       if (gamepadState.connected) {
         setGamepadState({
           connected: false,
@@ -765,7 +749,6 @@ export function useGamepad() {
     );
 
     if (!activePad) {
-      console.log("Selected gamepad not found in navigator.getGamepads()");
       if (gamepadState.connected) {
         setGamepadState({
           connected: false,
@@ -799,8 +782,6 @@ export function useGamepad() {
       const action = remappingRef.current.action;
       const actionType = remappingRef.current.actionType;
 
-      console.log(`Checking for ${actionType} input for action ${action}`);
-
       // For button-type actions or "both" type
       if (actionType === "button" || actionType === "both") {
         // Check each button directly
@@ -809,10 +790,6 @@ export function useGamepad() {
 
           // Check if pressed or value > 0.5 (for analog buttons/triggers)
           if (buttonState.pressed || buttonState.value > 0.5) {
-            console.log(
-              `Button ${i} detected for ${action} (pressed=${buttonState.pressed}, value=${buttonState.value})`
-            );
-
             // Make sure this is a new button press - wasn't already pressed
             const wasPressed = gamepadState.pressedInputs.has(`button-${i}`);
             if (wasPressed) {
@@ -838,30 +815,11 @@ export function useGamepad() {
 
           // Only detect significant movement
           if (change > 0.7) {
-            console.log(
-              `Axis ${i} moved from ${initialValue} to ${currentValue} (change: ${change}) for ${action}`
-            );
-
             // Map to axis type
             remapToAxis(action, i);
             return; // Exit after successful remap
           }
         }
-      }
-    }
-
-    // Log the buttons state in each poll during remapping
-    if (remappingRef.current.active) {
-      const activeButtons = []; // Changed to const
-      for (let i = 0; i < activePad.buttons.length; i++) {
-        if (activePad.buttons[i].pressed || activePad.buttons[i].value > 0.5) {
-          activeButtons.push(
-            `Button ${i}: ${activePad.buttons[i].value.toFixed(2)}`
-          );
-        }
-      }
-      if (activeButtons.length > 0) {
-        console.log("Active buttons:", activeButtons.join(", "));
       }
     }
 
@@ -917,14 +875,7 @@ export function useGamepad() {
 
         // Only clear the conflicting mapping if sharing is not allowed
         if (!sharingAllowed) {
-          console.log(
-            `Removing button ${buttonIndex} from ${conflictingAction} (conflict resolution)`
-          );
           newMappings[conflictingAction] = { type: "button", index: -1 }; // -1 means unassigned
-        } else {
-          console.log(
-            `Allowing shared button ${buttonIndex} between ${action} and ${conflictingAction}`
-          );
         }
       });
 
@@ -940,8 +891,6 @@ export function useGamepad() {
       actionType: null,
     };
     setListeningFor(null);
-
-    console.log("Remapping complete with conflict resolution (button)");
   }
 
   function remapToAxis(action: ActionKey, axisIndex: number) {
@@ -978,14 +927,7 @@ export function useGamepad() {
 
         // Only clear the conflicting mapping if sharing is not allowed
         if (!sharingAllowed) {
-          console.log(
-            `Removing axis ${axisIndex} from ${conflictingAction} (conflict resolution)`
-          );
           newMappings[conflictingAction] = { type: "axis", index: -1 }; // -1 means unassigned
-        } else {
-          console.log(
-            `Allowing shared axis ${axisIndex} between ${action} and ${conflictingAction}`
-          );
         }
       });
 
@@ -1015,19 +957,15 @@ export function useGamepad() {
       actionType: null,
     };
     setListeningFor(null);
-
-    console.log("Remapping complete with conflict resolution (axis)");
   }
 
   // Set up event listeners and polling
   useEffect(() => {
-    function onConnect(e: GamepadEvent) {
-      console.log("Gamepad connected:", e.gamepad.id);
+    function onConnect() {
       updateAvailableGamepads();
     }
 
     function onDisconnect(e: GamepadEvent) {
-      console.log("Gamepad disconnected:", e.gamepad.id);
       updateAvailableGamepads();
 
       if (selectedGamepadId === e.gamepad.id) {
@@ -1097,6 +1035,56 @@ export function useGamepad() {
     return sign * ((absValue - deadzone) / (1 - deadzone));
   }
 
+  // Add a function to reset mappings
+  function resetAllMappings() {
+    if (listeningFor) {
+      listenForNextInput(null);
+    }
+    
+    // Create default mappings for reference
+    const defaultMappings = {} as Mapping;
+
+    ACTIONS.forEach((action) => {
+      const actionInfo = ACTIONS.find((a) => a.key === action.key);
+
+      // Create mapping with correct type (button or axis, not both)
+      const mapping: Mapping[ActionKey] = {
+        type: action.defaultMapping.type,
+        index: action.defaultMapping.index,
+      };
+
+      // Add axisConfig if this is an axis-type mapping
+      if (action.defaultMapping.type === "axis") {
+        mapping.axisConfig = {
+          min: actionInfo?.axisConfig?.defaultMin ?? -1.0,
+          max: actionInfo?.axisConfig?.defaultMax ?? 1.0,
+          inverted: actionInfo?.axisConfig?.inverted ?? false,
+          normalize: actionInfo?.axisConfig?.normalize ?? "full",
+          deadzone: actionInfo?.axisConfig?.deadzone ?? 0.1,
+        };
+      }
+
+      defaultMappings[action.key] = mapping;
+    });
+
+    // Reset mappings to default
+    setMappings(defaultMappings);
+    
+    // Set reset flag while preserving type compatibility
+    // We need to keep the gamepad mappings structure intact
+    const emptiedMappings: StoredMappings = {};
+    if (selectedGamepadId) {
+      emptiedMappings[selectedGamepadId] = defaultMappings;
+    }
+    
+    // Add the reset flag
+    setStoredMappings({
+      ...emptiedMappings,
+      _resetFlag: true,
+    } as StoredMappings);
+    
+  }
+
   return {
     // Available gamepads
     availableGamepads,
@@ -1125,6 +1113,7 @@ export function useGamepad() {
     remappingType,
 
     setAxisConfig,
+    resetAllMappings, // Expose the reset function
 
     // Action definitions and groupings
     ACTIONS,
