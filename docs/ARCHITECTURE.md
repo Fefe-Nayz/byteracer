@@ -10,6 +10,8 @@ ByteRacer est un systeme de teleoperation pour robot SunFounder Picar-X. Le depo
 
 ## Vue d'ensemble
 
+![Synoptique logiciel ByteRacer](media/synoptic/software-architecture.png)
+
 ```mermaid
 flowchart LR
     Browser["Navigateur operateur\nRelayTower"] <-->|"WebSocket\nws://<host>:3001/ws"| Eagle["EagleControl\nBun + Hono"]
@@ -27,6 +29,8 @@ flowchart LR
 - `EagleControl` expose le endpoint WebSocket `ws://<host>:3001/ws` et le endpoint HTTP `http://<host>:3001/stats`.
 - Le flux video MJPEG est expose par `Vilib` sur `http://<host>:9000/mjpg`.
 - `ByteRacer` ne s'expose pas directement au reseau: il se connecte localement a `EagleControl` via `ws://127.0.0.1:3001/ws`.
+
+![Chaine de pilotage manuel](media/synoptic/control-flow.png)
 
 ## Repartition des responsabilites
 

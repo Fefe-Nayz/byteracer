@@ -91,6 +91,8 @@ Flux detaille:
 
 ### 3.2 Pilotage manuel
 
+![Flux de pilotage manuel](media/synoptic/control-flow.png)
+
 ```mermaid
 sequenceDiagram
     participant UI as RelayTower
@@ -170,6 +172,8 @@ Flux GPT:
    - renvoyer `gpt_response` et, en mode conversation, `speech_recognition`.
 
 ### 3.6 Audio bidirectionnel
+
+![Flux audio bidirectionnel](media/synoptic/audio-flow.png)
 
 Il existe deux flux audio distincts:
 
