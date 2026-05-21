@@ -356,15 +356,28 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   // Refs
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const manualDisconnectRef = useRef(false);
   const socketRef = useRef<WebSocket | null>(null);
 
   // Connect to WebSocket
   const connect = useCallback(() => {
+    manualDisconnectRef.current = false;
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
     setReconnectTrigger((prev) => prev + 1);
   }, []);
 
   // Disconnect from WebSocket
   const disconnect = useCallback(() => {
+    manualDisconnectRef.current = true;
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
     if (socketRef.current) {
       if (
         socketRef.current.readyState === WebSocket.OPEN ||
@@ -377,6 +390,8 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   // WebSocket connection effect
   useEffect(() => {
+    let shouldReconnect = true;
+
     // Clean up any existing socket first
     if (socket) {
       if (
@@ -389,6 +404,11 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
       }
+    }
+
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
     }
 
     // Determine which WebSocket URL to use
@@ -413,6 +433,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.onopen = () => {
       console.log("Connected to gamepad server");
       setStatus("connected");
+      reconnectAttemptRef.current = 0;
       trackWsConnection("connect");
 
       // Register as controller
@@ -470,6 +491,17 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
+      }
+
+      if (shouldReconnect && !manualDisconnectRef.current) {
+        const attempt = reconnectAttemptRef.current;
+        const delay = Math.min(10000, 1000 * Math.pow(2, attempt));
+        reconnectAttemptRef.current = attempt + 1;
+
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectTimeoutRef.current = null;
+          setReconnectTrigger((prev) => prev + 1);
+        }, delay);
       }
     };
 
@@ -601,10 +633,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     };
 
     return () => {
+      shouldReconnect = false;
       // Clean up when effect runs again or component unmounts
       if (pingIntervalRef.current) {
         clearInterval(pingIntervalRef.current);
         pingIntervalRef.current = null;
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       if (
         ws.readyState === WebSocket.OPEN ||

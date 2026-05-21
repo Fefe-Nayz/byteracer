@@ -16,6 +16,7 @@ type WifiNetwork = { ssid: string; password: string };
 interface NetworkStatus {
   ap_mode_active: boolean;
   current_ip: string;
+  wifi_interface?: string;
   current_connection?: {
     ssid: string;
     name: string;
@@ -36,6 +37,7 @@ export default function NetworkSettings() {
 
   // Local state for form values
   const [mode, setMode] = useState<NetworkMode>("wifi");
+  const [activeTab, setActiveTab] = useState<NetworkMode>("wifi");
   const [apName, setApName] = useState("");
   const [apPassword, setApPassword] = useState("");
   const [knownNetworks, setKnownNetworks] = useState<WifiNetwork[]>([]);
@@ -92,8 +94,10 @@ export default function NetworkSettings() {
           // Update mode based on active mode from status
           if (event.detail.status.ap_mode_active) {
             setMode("ap");
+            setActiveTab("ap");
           } else {
             setMode("wifi");
+            setActiveTab("wifi");
           }
         }
       }
@@ -121,14 +125,16 @@ export default function NetworkSettings() {
 
     // Set a timeout to clear the scanning state in case no response
     setTimeout(() => {
-      if (isScanning) {
-        setIsScanning(false);
+      setIsScanning((current) => {
+        if (!current) return current;
+
         toast({
           title: "Network scan timeout",
           description: "No response from the robot",
           variant: "destructive",
         });
-      }
+        return false;
+      });
     }, 15000); // 15 seconds timeout
   };
 
@@ -198,6 +204,7 @@ export default function NetworkSettings() {
     if (newMode === mode) return; // No change
 
     setMode(newMode);
+    setActiveTab(newMode);
 
     // Execute the actual mode switch
     if (newMode === "ap") {
@@ -323,7 +330,7 @@ export default function NetworkSettings() {
       </Select>
       </div>
 
-      <Tabs defaultValue={mode} className="w-full">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as NetworkMode)} className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="wifi">WiFi Settings</TabsTrigger>
           <TabsTrigger value="ap">Access Point Settings</TabsTrigger>

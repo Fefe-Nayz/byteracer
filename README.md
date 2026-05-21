@@ -88,6 +88,32 @@ cd /home/pi/ByteRacer
 bash startup.sh
 ```
 
+### Diagnostic rapide
+
+```bash
+cd /home/pi/ByteRacer
+bash byteracer/scripts/doctor.sh
+```
+
+Ce rapport affiche les services `systemd` ou `screen`, les ports ouverts, l'etat reseau, le commit courant et les derniers logs utiles.
+
+### Installation appliance recommandee
+
+Sur un Raspberry Pi propre, le script de bootstrap installe les dependances, recupere uniquement l'applicatif via sparse checkout, build l'interface statique, installe les services `systemd` et applique des reglages qui reduisent les ecritures sur la carte SD:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nayzflux/byteracer/working-2/byteracer/scripts/bootstrap_raspberry_pi.sh -o bootstrap_raspberry_pi.sh
+bash bootstrap_raspberry_pi.sh
+sudo reboot
+```
+
+Apres redemarrage:
+
+```bash
+sudo systemctl start byteracer-stack.target
+bash /home/pi/ByteRacer/byteracer/scripts/doctor.sh
+```
+
 ### Mode manuel
 
 Dans trois terminaux distincts:

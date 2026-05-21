@@ -534,7 +534,7 @@ class CameraManager:
         
         elif obj_type == 'traffic_sign':
             # Check if any traffic sign was detected
-            if Vilib.detect_obj_parameter.get('traffic_sign_t') is not 'none':
+            if Vilib.detect_obj_parameter.get('traffic_sign_t') != 'none':
                 result['traffic_sign_detected'] = True
                 result['x'] = Vilib.detect_obj_parameter.get('traffic_sign_x', 0)
                 result['y'] = Vilib.detect_obj_parameter.get('traffic_sign_y', 0)

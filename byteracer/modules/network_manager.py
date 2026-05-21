@@ -34,13 +34,16 @@ class NetworkManager:
             "ip": "192.168.50.5/24"
         }
         
-        # Default interface (can be automatically detected if needed)
-        self.wifi_interface = "wlan0"
+        # Default interface, detected when possible to support renamed devices.
+        self.wifi_interface = self._detect_wifi_interface()
         
         # Flag to track AP mode status
         self._ap_mode_active = False
         
-        # Check current network status
+        # Load AP settings from AccessPopup if it is installed.
+        self._load_ap_config()
+
+        # Check current network status without mutating it.
         self._check_ap_mode()
 
     def _run_command(self, command: List[str], timeout: int = 10) -> Tuple[int, str, str]:
@@ -71,6 +74,54 @@ class NetworkManager:
             self.logger.error(f"Error executing command: {e}")
             return -1, "", str(e)
 
+    async def _run_command_async(self, command: List[str], timeout: int = 10) -> Tuple[int, str, str]:
+        """Run a blocking system command from async code without freezing the event loop."""
+        return await asyncio.to_thread(self._run_command, command, timeout)
+
+    def _detect_wifi_interface(self) -> str:
+        """Detect the primary WiFi interface, falling back to wlan0."""
+        returncode, stdout, _ = self._run_command(
+            ["nmcli", "-t", "-f", "DEVICE,TYPE", "device", "status"],
+            timeout=5,
+        )
+        if returncode == 0:
+            for line in stdout.splitlines():
+                parts = line.split(":")
+                if len(parts) >= 2 and parts[1] == "wifi":
+                    return parts[0]
+
+        returncode, stdout, _ = self._run_command(["iw", "dev"], timeout=5)
+        if returncode == 0:
+            for line in stdout.splitlines():
+                line = line.strip()
+                if line.startswith("Interface "):
+                    return line.split("Interface ", 1)[1].strip()
+
+        return "wlan0"
+
+    def _load_ap_config(self) -> None:
+        """Read AccessPopup AP settings if the script is installed."""
+        script_path = "/usr/bin/accesspopup"
+        if not os.path.isfile(script_path):
+            return
+
+        try:
+            with open(script_path, "r", encoding="utf-8", errors="ignore") as handle:
+                content = handle.read()
+
+            ssid_match = re.search(r"ap_ssid='([^']*)'", content)
+            password_match = re.search(r"ap_pw='([^']*)'", content)
+            ip_match = re.search(r"ap_ip='([^']*)'", content)
+
+            if ssid_match:
+                self.ap_config["ssid"] = ssid_match.group(1)
+            if password_match:
+                self.ap_config["password"] = password_match.group(1)
+            if ip_match:
+                self.ap_config["ip"] = ip_match.group(1)
+        except Exception as e:
+            self.logger.warning(f"Could not read AccessPopup settings: {e}")
+
     async def scan_wifi_networks(self) -> List[str]:
         """
         Scans for nearby WiFi networks using 'iw' or 'nmcli' and returns a list of detected SSIDs.
@@ -79,6 +130,11 @@ class NetworkManager:
             List of unique SSID names
         """
         try:
+            self._check_ap_mode()
+            if self._ap_mode_active:
+                self.logger.info("Skipping WiFi scan while AP mode is active")
+                return []
+
             # First ensure WiFi is powered on
             self._ensure_wifi_powered()
             
@@ -134,6 +190,9 @@ class NetworkManager:
             Dictionary with connection status information
         """
         try:
+            if not ssid:
+                return {"success": False, "message": "SSID is required"}
+
             # If we're in AP mode, we should switch to wifi mode first
             if self._ap_mode_active:
                 success = await self.switch_wifi_mode("wifi")
@@ -143,12 +202,27 @@ class NetworkManager:
                         "message": "Could not switch from AP to WiFi mode"
                     }
             
-            # Try to connect to the specified WiFi
-            returncode, stdout, stderr = self._run_command(
-                ["nmcli", "device", "wifi", "connect", ssid, "password", password]
-            )
+            self._ensure_wifi_powered()
+            conn_name = self._find_wifi_connection_by_ssid(ssid)
+
+            if conn_name:
+                if password:
+                    await self._run_command_async(
+                        ["nmcli", "connection", "modify", conn_name, "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password],
+                        timeout=10,
+                    )
+                returncode, stdout, stderr = await self._run_command_async(
+                    ["nmcli", "connection", "up", conn_name],
+                    timeout=45,
+                )
+            else:
+                returncode, stdout, stderr = await self._run_command_async(
+                    ["nmcli", "device", "wifi", "connect", ssid, "password", password, "ifname", self.wifi_interface],
+                    timeout=60,
+                )
             
             if returncode == 0:
+                await self._wait_for_ip(self.wifi_interface, timeout=20)
                 # Successfully connected
                 self.logger.info(f"Successfully connected to WiFi: {ssid}")
                 return {
@@ -185,41 +259,15 @@ class NetworkManager:
             Dictionary with operation status information
         """
         try:
-            # List all saved connections along with their SSIDs
-            returncode, stdout, stderr = self._run_command(
-                ["nmcli", "-t", "-f", "NAME,UUID", "connection", "show"]
-            )
-            
-            if returncode != 0:
-                return {
-                    "success": False,
-                    "message": f"Failed to list connections: {stderr}"
-                }
-            
-            # Look for an existing connection with this SSID
-            conn_name = None
-            
-            # Get details for each connection to find matching SSID
-            connections = stdout.splitlines()
-            for connection in connections:
-                parts = connection.split(":")
-                if len(parts) >= 1:
-                    conn_name = parts[0]
-                    # Check if this connection's SSID matches what we're looking for
-                    details_rc, details_out, _ = self._run_command(
-                        ["nmcli", "-t", "connection", "show", conn_name]
-                    )
-                    if details_rc == 0:
-                        for line in details_out.splitlines():
-                            if "802-11-wireless.ssid:" in line and ssid in line:
-                                # Found a matching connection
-                                conn_name = parts[0]
-                                break
+            if not ssid or not password:
+                return {"success": False, "message": "SSID and password are required"}
+
+            conn_name = self._find_wifi_connection_by_ssid(ssid)
             
             if conn_name:
                 # Update the password for the existing connection
-                returncode, stdout, stderr = self._run_command(
-                    ["nmcli", "connection", "modify", conn_name, "wifi-sec.psk", password]
+                returncode, stdout, stderr = await self._run_command_async(
+                    ["nmcli", "connection", "modify", conn_name, "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", password, "connection.autoconnect", "yes"]
                 )
                 
                 if returncode != 0:
@@ -229,8 +277,9 @@ class NetworkManager:
                     }
                 
                 # Optionally, restart the connection to apply the new password
-                self._run_command(["nmcli", "connection", "down", conn_name])
-                self._run_command(["nmcli", "connection", "up", conn_name])
+                await self._run_command_async(["nmcli", "connection", "down", conn_name], timeout=15)
+                await self._run_command_async(["nmcli", "connection", "up", conn_name], timeout=45)
+                await self._wait_for_ip(self.wifi_interface, timeout=20)
                 
                 self.logger.info(f"Updated password for connection '{conn_name}'")
                 return {
@@ -240,8 +289,9 @@ class NetworkManager:
                 }
             else:
                 # Create a new connection profile
-                returncode, stdout, stderr = self._run_command(
-                    ["nmcli", "device", "wifi", "connect", ssid, "password", password]
+                returncode, stdout, stderr = await self._run_command_async(
+                    ["nmcli", "device", "wifi", "connect", ssid, "password", password, "ifname", self.wifi_interface],
+                    timeout=60,
                 )
                 
                 if returncode != 0:
@@ -251,6 +301,7 @@ class NetworkManager:
                     }
                 
                 self.logger.info(f"Created new connection for '{ssid}'")
+                await self._wait_for_ip(self.wifi_interface, timeout=20)
                 return {
                     "success": True,
                     "message": f"Created new connection for '{ssid}'",
@@ -275,35 +326,7 @@ class NetworkManager:
             Dictionary with operation status information
         """
         try:
-            # List all saved connections
-            returncode, stdout, stderr = self._run_command(
-                ["nmcli", "-t", "-f", "NAME", "connection", "show"]
-            )
-            
-            if returncode != 0:
-                return {
-                    "success": False,
-                    "message": f"Failed to list connections: {stderr}"
-                }
-            
-            # Find connection name that matches the SSID
-            conn_name = None
-            connections = stdout.splitlines()
-            
-            for connection in connections:
-                # Check each connection's SSID
-                details_rc, details_out, _ = self._run_command(
-                    ["nmcli", "-t", "connection", "show", connection]
-                )
-                if details_rc == 0:
-                    for line in details_out.splitlines():
-                        if "802-11-wireless.ssid:" in line and ssid in line:
-                            # Found matching connection
-                            conn_name = connection
-                            break
-                
-                if conn_name:
-                    break
+            conn_name = self._find_wifi_connection_by_ssid(ssid)
             
             if not conn_name:
                 return {
@@ -336,6 +359,54 @@ class NetworkManager:
                 "message": f"Error: {error_msg}"
             }
 
+    def _find_wifi_connection_by_ssid(self, ssid: str) -> Optional[str]:
+        """Return the NetworkManager connection name for an exact SSID match."""
+        returncode, stdout, stderr = self._run_command(
+            ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"]
+        )
+
+        if returncode != 0:
+            self.logger.error(f"Failed to list connections: {stderr}")
+            return None
+
+        for line in stdout.splitlines():
+            parts = line.split(":")
+            if len(parts) < 2 or parts[1] not in ["wifi", "802-11-wireless"]:
+                continue
+
+            conn_name = parts[0]
+            details_rc, details_out, _ = self._run_command(
+                ["nmcli", "-t", "connection", "show", conn_name]
+            )
+
+            if details_rc != 0:
+                continue
+
+            for detail in details_out.splitlines():
+                prefix = "802-11-wireless.ssid:"
+                if detail.startswith(prefix) and detail[len(prefix):].strip() == ssid:
+                    return conn_name
+
+        return None
+
+    async def _wait_for_ip(self, interface: str, timeout: int = 20) -> bool:
+        """Wait until an interface has a usable IPv4 address."""
+        deadline = time.time() + timeout
+
+        while time.time() < deadline:
+            ip_address = self.get_ip_address(interface).get(interface, "")
+            if self._is_usable_ip(ip_address):
+                return True
+            await asyncio.sleep(1)
+
+        return False
+
+    @staticmethod
+    def _is_usable_ip(value: Optional[str]) -> bool:
+        if not value:
+            return False
+        return bool(re.match(r"^\d+\.\d+\.\d+\.\d+$", value))
+
     async def switch_wifi_mode(self, mode: str) -> bool:
         """
         Switches the network mode between AP and WiFi client modes.
@@ -347,33 +418,55 @@ class NetworkManager:
             True if the mode was switched successfully, False otherwise
         """
         try:
-            if mode.lower() == "ap" and not self._ap_mode_active:
+            mode = mode.lower()
+            script_path = "/usr/bin/accesspopup"
+            if not os.path.isfile(script_path):
+                self.logger.error("AccessPopup script not found; cannot switch network mode")
+                return False
+
+            self._check_ap_mode()
+
+            if mode == "ap" and not self._ap_mode_active:
                 # Switch to AP mode
-                returncode, stdout, stderr = self._run_command(
-                    ["sudo", "accesspopup", "-a"]
+                returncode, stdout, stderr = await self._run_command_async(
+                    ["sudo", script_path, "-a"],
+                    timeout=60,
                 )
                 
                 if returncode != 0:
                     self.logger.error(f"Failed to switch to AP mode: {stderr}")
                     return False
                 
-                self._ap_mode_active = True
-                self.logger.info("Switched to Access Point mode")
-                return True
+                for _ in range(20):
+                    await asyncio.sleep(1)
+                    self._check_ap_mode()
+                    if self._ap_mode_active:
+                        self.logger.info("Switched to Access Point mode")
+                        return True
+
+                self.logger.error("AccessPopup command succeeded but AP mode was not detected")
+                return False
                 
-            elif mode.lower() == "wifi" and self._ap_mode_active:
+            elif mode == "wifi" and self._ap_mode_active:
                 # Switch to WiFi client mode
-                returncode, stdout, stderr = self._run_command(
-                    ["sudo", "accesspopup"]
+                returncode, stdout, stderr = await self._run_command_async(
+                    ["sudo", script_path],
+                    timeout=60,
                 )
                 
                 if returncode != 0:
                     self.logger.error(f"Failed to switch to WiFi mode: {stderr}")
                     return False
                 
-                self._ap_mode_active = False
-                self.logger.info("Switched to WiFi client mode")
-                return True
+                for _ in range(20):
+                    await asyncio.sleep(1)
+                    self._check_ap_mode()
+                    if not self._ap_mode_active:
+                        self.logger.info("Switched to WiFi client mode")
+                        return True
+
+                self.logger.error("AccessPopup command succeeded but WiFi mode was not detected")
+                return False
                 
             else:
                 # Already in the requested mode
@@ -400,6 +493,13 @@ class NetworkManager:
                 return {
                     "success": False,
                     "message": "No changes requested"
+                }
+
+            validation_error = self._validate_ap_credentials(ssid, password)
+            if validation_error:
+                return {
+                    "success": False,
+                    "message": validation_error
                 }
             
             # Path to the AccessPopup script
@@ -481,6 +581,23 @@ class NetworkManager:
                 "success": False,
                 "message": f"Error: {error_msg}"
             }
+
+    @staticmethod
+    def _validate_ap_credentials(ssid: Optional[str], password: Optional[str]) -> Optional[str]:
+        """Validate AP credentials before writing them into a shell script."""
+        for label, value in (("SSID", ssid), ("password", password)):
+            if value is None:
+                continue
+            if "\n" in value or "\r" in value or "'" in value:
+                return f"AP {label} cannot contain quotes or newlines"
+
+        if ssid is not None and not ssid.strip():
+            return "AP SSID cannot be empty"
+
+        if password is not None and len(password) < 8:
+            return "AP password must be at least 8 characters"
+
+        return None
 
     async def get_saved_wifi_networks(self) -> List[Dict[str, str]]:
         """
@@ -586,6 +703,31 @@ class NetworkManager:
         
         return result
 
+    def get_reachable_ip(self, status: Optional[Dict[str, Any]] = None) -> str:
+        """Return the best IP address to announce to a user."""
+        if status is None:
+            status = {
+                "ip_addresses": self.get_ip_address(),
+                "ap_ip": self.ap_config.get("ip", ""),
+            }
+
+        ip_addresses = status.get("ip_addresses", {})
+        preferred = ip_addresses.get(self.wifi_interface)
+        if self._is_usable_ip(preferred):
+            return preferred
+
+        if status.get("ap_mode_active"):
+            ap_ip = status.get("ap_ip") or self.ap_config.get("ip", "")
+            ap_ip = str(ap_ip).split("/", 1)[0]
+            if self._is_usable_ip(ap_ip):
+                return ap_ip
+
+        for ip_address in ip_addresses.values():
+            if self._is_usable_ip(ip_address):
+                return ip_address
+
+        return ""
+
     def get_current_connection(self) -> Dict[str, Any]:
         """
         Get details about the currently active WiFi connection.
@@ -602,11 +744,16 @@ class NetworkManager:
             if returncode != 0:
                 return {}
             
-            # Find active WiFi connection
+            # Find active WiFi client connection
             wifi_conn = None
             for line in stdout.splitlines():
                 parts = line.split(":")
                 if len(parts) >= 3 and parts[2] in ["wifi", "802-11-wireless"] and parts[1] == self.wifi_interface:
+                    mode_rc, mode_out, _ = self._run_command(
+                        ["nmcli", "-g", "802-11-wireless.mode", "connection", "show", parts[0]]
+                    )
+                    if mode_rc == 0 and mode_out.strip().lower() == "ap":
+                        continue
                     wifi_conn = parts[0]
                     break
             
@@ -628,7 +775,7 @@ class NetworkManager:
                 if "802-11-wireless.ssid:" in line:
                     result["ssid"] = line.split("802-11-wireless.ssid:")[1].strip()
                 elif "IP4.ADDRESS" in line:
-                    result["ip"] = line.split("IP4.ADDRESS[1]:")[1].strip()
+                    result["ip"] = line.split(":", 1)[1].strip()
                 
             return result
             
@@ -644,10 +791,14 @@ class NetworkManager:
             True if connected, False otherwise
         """
         try:
-            # Try to connect to a reliable host (Google DNS)
-            socket.create_connection(("8.8.8.8", 53), timeout=3)
-            return True
-        except (socket.timeout, socket.error):
+            for host, port in (("github.com", 443), ("1.1.1.1", 53), ("8.8.8.8", 53)):
+                try:
+                    with socket.create_connection((host, port), timeout=3):
+                        return True
+                except (socket.timeout, socket.error, OSError):
+                    continue
+            return False
+        except Exception:
             return False
 
     async def get_connection_status(self) -> Dict[str, Any]:
@@ -666,6 +817,7 @@ class NetworkManager:
             "ap_mode_active": self._ap_mode_active,
             "ip_addresses": self.get_ip_address(),
             "ap_ssid": self.ap_config["ssid"],
+            "wifi_interface": self.wifi_interface,
         }
         
         # Get current connection details
@@ -701,6 +853,8 @@ class NetworkManager:
                             status["ap_ip"] = ip_match.group(1)
             except Exception as e:
                 self.logger.error(f"Error getting AP details: {e}")
+
+        status["reachable_ip"] = self.get_reachable_ip(status)
         
         return status
 
@@ -716,7 +870,7 @@ class NetworkManager:
         """Check if AP mode is currently active."""
         try:
             returncode, stdout, stderr = self._run_command(
-                ["nmcli", "-t", "connection", "show", "--active"]
+                ["nmcli", "-t", "-f", "NAME,DEVICE,TYPE", "connection", "show", "--active"]
             )
             
             if returncode != 0:
@@ -728,33 +882,79 @@ class NetworkManager:
                 parts = line.split(":")
                 if len(parts) >= 2:
                     conn_name = parts[0]
+                    device = parts[1] if len(parts) > 1 else ""
+                    conn_type = parts[2] if len(parts) > 2 else ""
+
+                    if conn_type not in ["wifi", "802-11-wireless"] or device != self.wifi_interface:
+                        continue
                     
                     # Check if this connection is in AP mode
                     details_rc, details_out, _ = self._run_command(
-                        ["nmcli", "-t", "connection", "show", conn_name]
+                        ["nmcli", "-g", "802-11-wireless.mode", "connection", "show", conn_name]
                     )
                     
-                    if details_rc == 0 and "802-11-wireless.mode:ap" in details_out:
+                    if details_rc == 0 and details_out.strip().lower() == "ap":
                         self._ap_mode_active = True
                         return
             
-            # If we didn't find any AP connection, check via different method
-            script_path = "/usr/bin/accesspopup"
-            if os.path.isfile(script_path):
-                # Run accesspopup with no arguments to see current state
-                status_rc, status_out, _ = self._run_command(
-                    ["sudo", script_path]
-                )
-                
-                if status_rc == 0 and "Access Point " in status_out and "active" in status_out:
-                    self._ap_mode_active = True
-                    return
+            # Fallback to iw; this is read-only and does not toggle AccessPopup.
+            iw_rc, iw_out, _ = self._run_command(["iw", "dev", self.wifi_interface, "info"])
+            if iw_rc == 0:
+                for line in iw_out.splitlines():
+                    if line.strip().lower() == "type ap":
+                        self._ap_mode_active = True
+                        return
+
+            # Last read-only fallback: a usable AP address without a WiFi client
+            ap_ip = str(self.ap_config.get("ip", "")).split("/", 1)[0]
+            wlan_ip = self.get_ip_address(self.wifi_interface).get(self.wifi_interface, "")
+            if ap_ip and wlan_ip == ap_ip:
+                self._ap_mode_active = True
+                return
             
             self._ap_mode_active = False
             
         except Exception as e:
             self.logger.error(f"Error checking AP mode: {e}")
             self._ap_mode_active = False
+
+    async def ensure_network_available(self) -> Dict[str, Any]:
+        """
+        Ensure the robot has a usable local network path.
+
+        Startup policy:
+        1. keep the current working WiFi/AP state if it has an IP;
+        2. try saved WiFi profiles;
+        3. fall back to Access Point mode if no WiFi profile works.
+        """
+        self._ensure_wifi_powered()
+        status = await self.get_connection_status()
+
+        if status.get("reachable_ip"):
+            return status
+
+        saved_networks = status.get("saved_networks") or await self.get_saved_wifi_networks()
+        for network in saved_networks:
+            conn_id = network.get("id")
+            ssid = network.get("ssid", conn_id)
+            if not conn_id:
+                continue
+
+            self.logger.info(f"Trying saved WiFi profile: {ssid}")
+            returncode, stdout, stderr = await self._run_command_async(
+                ["nmcli", "connection", "up", conn_id],
+                timeout=45,
+            )
+            if returncode == 0 and await self._wait_for_ip(self.wifi_interface, timeout=20):
+                return await self.get_connection_status()
+
+            self.logger.warning(f"Saved WiFi profile failed for {ssid}: {stderr}")
+
+        if not self._ap_mode_active:
+            self.logger.warning("No WiFi profile connected; falling back to AP mode")
+            await self.switch_wifi_mode("ap")
+
+        return await self.get_connection_status()
 
     async def restart_networking(self) -> bool:
         """

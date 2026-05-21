@@ -97,6 +97,11 @@ class ConfigManager:
                 "auto_update": True
             },
 
+            # Optional local cache for networks managed outside NetworkManager.
+            "network": {
+                "known_networks": []
+            },
+
             # API settings
             "api": {
                 "openai_api_key": ""
@@ -429,6 +434,10 @@ class ConfigManager:
                 "auto_update": True
             },
 
+            "network": {
+                "known_networks": []
+            },
+
             # API settings
             "api": {
                 "openai_api_key": ""
@@ -457,7 +466,7 @@ class ConfigManager:
 
         with self._lock:
             if section is None:
-                # Reset everything except network settings
+                # Reset every configurable section to its default values.
                 for key, value in default_settings.items():
                     self.settings[key] = value
             elif section in default_settings:

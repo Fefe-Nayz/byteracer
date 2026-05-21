@@ -1,22 +1,15 @@
 import { Hono } from "hono";
-import type { ServerWebSocket } from "bun";
 import { createBunWebSocket } from "hono/bun";
+import type { WSContext, WSMessageReceive } from "hono/ws";
 
 const app = new Hono();
 
-// Define data types for WebSocket
-type WSData = {
-  id: string;
-  type: "car" | "controller" | "viewer";
-  connectedAt: number;
-};
-
 // Create the WebSocket handler with proper type
-const { upgradeWebSocket } = createBunWebSocket<WSData>();
+const { upgradeWebSocket, websocket } = createBunWebSocket();
 
 // Store all connected clients with their roles
 type Client = {
-  ws: ServerWebSocket<WSData>;
+  ws: WSContext;
   id: string;
   type: "car" | "controller" | "viewer";
   connectedAt: number;
@@ -26,7 +19,7 @@ type Client = {
 const cars = new Map<string, Client>();
 const controllers = new Map<string, Client>();
 const viewers = new Map<string, Client>();
-const allClients = new Map<ServerWebSocket<WSData>, Client>();
+const allClients = new Map<unknown, Client>();
 
 // Update WebSocketEventName to include the new message types
 type WebSocketEventName =
@@ -60,6 +53,8 @@ type WebSocketEventName =
   | "start_listening"      // For starting audio listening
   | "stop_listening"       // For stopping audio listening
   | "python_status_request" // For requesting Python connection status
+  | "python_status"
+  | "client_disconnected"
   | "log_message"
   | "speech_recognition"
   | "start_calibration"
@@ -75,11 +70,12 @@ type WebSocketEvent = {
 };
 
 // Broadcast function to send messages to clients
-function broadcast(message: string, excludeWs?: ServerWebSocket<WSData>) {
-  allClients.forEach((client, ws) => {
-    if (excludeWs && ws === excludeWs) return;
+function broadcast(message: string, excludeWs?: WSContext) {
+  const excludedKey = excludeWs ? wsKey(excludeWs) : null;
+  allClients.forEach((client, key) => {
+    if (excludedKey && key === excludedKey) return;
     try {
-      ws.send(message);
+      client.ws.send(message);
     } catch (err) {
       console.error(`Error broadcasting to client ${client.id}:`, err);
     }
@@ -87,12 +83,13 @@ function broadcast(message: string, excludeWs?: ServerWebSocket<WSData>) {
 }
 
 // Function to broadcast only to specific client types
-function broadcastToType(message: string, clientType: "car" | "controller" | "viewer", excludeWs?: ServerWebSocket<WSData>) {
+function broadcastToType(message: string, clientType: "car" | "controller" | "viewer", excludeWs?: WSContext) {
   const clientMap = clientType === "car" ? cars :
     clientType === "controller" ? controllers : viewers;
+  const excludedKey = excludeWs ? wsKey(excludeWs) : null;
 
   clientMap.forEach((client) => {
-    if (excludeWs && client.ws === excludeWs) return;
+    if (excludedKey && wsKey(client.ws) === excludedKey) return;
     try {
       client.ws.send(message);
     } catch (err) {
@@ -101,17 +98,23 @@ function broadcastToType(message: string, clientType: "car" | "controller" | "vi
   });
 }
 
+function normalizeMessage(data: WSMessageReceive): string | null {
+  if (typeof data === "string") return data;
+  if (data instanceof Blob) {
+    console.warn("Ignoring binary Blob WebSocket message");
+    return null;
+  }
+  return Buffer.from(data as ArrayBuffer).toString();
+}
+
+function wsKey(ws: WSContext): unknown {
+  return ws.raw ?? ws;
+}
+
 // Define WebSocket handlers
 const wsHandlers = {
-  open(ws: ServerWebSocket<WSData>) {
+  onOpen(_evt: Event, ws: WSContext) {
     const clientId = crypto.randomUUID();
-
-    // Set data directly on WebSocket object
-    ws.data = {
-      id: clientId,
-      type: "viewer",
-      connectedAt: Date.now()
-    };
 
     const client: Client = {
       ws,
@@ -120,7 +123,7 @@ const wsHandlers = {
       connectedAt: Date.now()
     };
 
-    allClients.set(ws, client);
+    allClients.set(wsKey(ws), client);
     viewers.set(clientId, client);
 
     console.log(`New client connected: ${clientId}`);
@@ -132,10 +135,12 @@ const wsHandlers = {
     }));
   },
 
-  message(ws: ServerWebSocket<WSData>, message: string) {
+  onMessage(evt: MessageEvent<WSMessageReceive>, ws: WSContext) {
     try {
+      const message = normalizeMessage(evt.data);
+      if (!message) return;
       const event = JSON.parse(message) as WebSocketEvent;
-      const client = allClients.get(ws);
+      const client = allClients.get(wsKey(ws));
 
       if (!client) {
         console.warn("Message received from unknown client");
@@ -152,9 +157,6 @@ const wsHandlers = {
 
             client.type = type;
             client.id = id || client.id;
-            ws.data.type = type;
-            ws.data.id = id || client.id;
-
             if (type === "car") cars.set(client.id, client);
             else if (type === "controller") controllers.set(client.id, client);
             else viewers.set(client.id, client);
@@ -173,8 +175,6 @@ const wsHandlers = {
 
             client.type = "car";
             client.id = event.data.id;
-            ws.data.type = "car";
-            ws.data.id = event.data.id;
             cars.set(event.data.id, client);
           }
 
@@ -451,12 +451,12 @@ const wsHandlers = {
     }
   },
 
-  close(ws: ServerWebSocket<WSData>) {
-    const client = allClients.get(ws);
+  onClose(_evt: CloseEvent, ws: WSContext) {
+    const client = allClients.get(wsKey(ws));
     if (client) {
       console.log(`Client disconnected: ${client.id} (${client.type})`);
 
-      allClients.delete(ws);
+      allClients.delete(wsKey(ws));
       if (client.type === "car") cars.delete(client.id);
       else if (client.type === "controller") controllers.delete(client.id);
       else viewers.delete(client.id);
@@ -485,8 +485,19 @@ app.get("/stats", (c) => {
   });
 });
 
+app.get("/health", (c) => {
+  return c.json({
+    ok: true,
+    cars: cars.size,
+    controllers: controllers.size,
+    viewers: viewers.size,
+    uptime: process.uptime(),
+    updatedAt: new Date().toISOString()
+  });
+});
+
 export default {
   fetch: app.fetch,
   port: 3001,
-  websocket: wsHandlers
+  websocket
 };

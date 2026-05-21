@@ -1,90 +1,47 @@
 #!/bin/bash
-# Script to restart the Python controller with TTS feedback
 
-# Project paths
-BYTERACER_PATH="/home/pi/ByteRacer"
-TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
-SCRIPTS_DIR="$(dirname "$0")"
-LOG_FILE="${SCRIPTS_DIR}/restart_python.log"
+set -uo pipefail
 
-# Setup logging
-exec > >(tee -a "${LOG_FILE}") 2>&1
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== RESTART PYTHON STARTED =========="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export BYTERACER_PATH="${BYTERACER_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
-# Function to log with timestamp
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/common.sh"
 
-# Function to run a command and log its output
-run_cmd() {
-    local cmd="$1"
-    log "Executing: $cmd"
-    output=$(eval "$cmd" 2>&1)
-    exit_code=$?
-    if [ -n "$output" ]; then
-        echo "$output" | while IFS= read -r line; do
-            log "  > $line"
-        done
+LOG_FILE="${BYTERACER_LOG_DIR}/restart_python.log"
+setup_logging "${LOG_FILE}"
+
+log "========== RESTART PYTHON STARTED =========="
+speak "Restarting robot controller"
+
+if systemd_unit_exists "byteracer-python.service"; then
+    if restart_systemd_unit "byteracer-python.service"; then
+        sleep 3
+        if sudo systemctl is-active --quiet "byteracer-python.service"; then
+            log "Python controller systemd service is active"
+            speak "Robot controller restarted"
+            log "========== RESTART PYTHON COMPLETED =========="
+            exit 0
+        fi
     fi
-    log "Command exit code: $exit_code"
-    return $exit_code
-}
-
-# Function to speak with TTS
-speak() {
-    if [ -f "$TTS_SCRIPT" ]; then
-        python3 "$TTS_SCRIPT" "$1"
-    else
-        log "TTS script not found: $TTS_SCRIPT"
-    fi
-}
-
-log "Restarting Python controller..."
-speak "Restarting robot controller."
-
-# First, check if an active (non-dead) 'byteracer' screen session exists.
-SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep byteracer)
-
-if [ -n "$SESSION_ACTIVE" ]; then
-    log "Active screen session 'byteracer' found. Sending SIGINT for graceful shutdown..."
-    run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \$'\003'"
-    sleep 5  # Wait for graceful shutdown
-
-    PID=$(pgrep -f "python3 main.py" || echo "")
-    if [ -n "$PID" ]; then
-        log "Python process did not exit gracefully after SIGINT, force killing PID $PID..."
-        run_cmd "kill -9 $PID"
-        sleep 2
-    else
-        log "Python process exited gracefully."
-    fi
-else
-    log "No active screen session 'byteracer' found."
+    log "Systemd restart failed; trying screen fallback"
 fi
 
-# Re-check for an active session after waiting
-SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep byteracer)
-if [ -z "$SESSION_ACTIVE" ]; then
-    log "No active session for 'byteracer' found. Creating a new screen session..."
-    run_cmd "sudo -u pi screen -dmS byteracer bash -c 'cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py; exec bash'"
-else
-    log "Active session found. Injecting restart command into 'byteracer'..."
-    run_cmd "sudo -u pi screen -S byteracer -p 0 -X stuff \"cd ${BYTERACER_PATH}/byteracer && sudo python3 main.py$(printf '\\r')\""
-fi
+stop_screen_session "byteracer" "python3 .*main.py"
 
-log "Waiting for process to start..."
-sleep 3
-
-PID=$(pgrep -f "python3 main.py" || echo "")
-if [ -n "$PID" ]; then
-    log "Python controller restarted successfully with PID $PID."
-    run_cmd "ps -p $PID -o pid,cmd,etime"
-    speak "Robot controller has been restarted successfully."
+if start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -E env PATH=${PATH} python3 main.py"; then
+    sleep 3
+    if pgrep -f "python3 .*main.py" >/dev/null 2>&1; then
+        log "Python controller process is running"
+        speak "Robot controller restarted"
+    else
+        log "Python screen started but controller process was not found"
+        speak "Robot controller did not become ready"
+        exit 1
+    fi
 else
-    log "Error: Failed to restart Python controller!"
-    run_cmd "ps aux | grep 'python3 main.py' | grep -v grep"
-    speak "Failed to restart robot controller. Please check the system logs."
+    log "Failed to start Python screen session"
+    speak "Robot controller failed to start"
     exit 1
 fi
 

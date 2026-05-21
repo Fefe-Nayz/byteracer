@@ -1,0 +1,19 @@
+[Unit]
+Description=ByteRacer EagleControl WebSocket server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__BYTERACER_USER__
+WorkingDirectory=__BYTERACER_PATH__/eaglecontrol
+Environment=PATH=__BUN_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
+ExecStart=__BUN_BIN__ run start
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

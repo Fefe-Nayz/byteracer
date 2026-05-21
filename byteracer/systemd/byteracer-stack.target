@@ -1,0 +1,7 @@
+[Unit]
+Description=ByteRacer application stack
+Wants=byteracer-eaglecontrol.service byteracer-relaytower.service byteracer-python.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target

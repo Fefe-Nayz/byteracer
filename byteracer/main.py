@@ -100,11 +100,15 @@ class ByteRacer:
         await self.log_manager.start()
         await self.audio_manager.start()
         
-        # Initialize network manager
-        self.network_manager = NetworkManager()
-        
         # Load settings from config
         await self.apply_config_settings()
+
+        # Ensure a usable local network path before announcing addresses.
+        try:
+            network_status = await self.network_manager.ensure_network_available()
+            logging.info(f"Network ready: {network_status}")
+        except Exception as e:
+            logging.error(f"Network bootstrap failed; continuing with current state: {e}")
         
         # Start TTS introduction
         await self.tts_manager.say("ByteRacer robot controller started successfully", priority=1, blocking=True)
@@ -204,7 +208,7 @@ class ByteRacer:
         self.sensor_manager.set_edge_detection(settings["safety"]["edge_detection"])
         self.sensor_manager.set_auto_stop(settings["safety"]["auto_stop"])
         self.sensor_manager.collision_threshold = settings["safety"]["collision_threshold"]
-        self.sensor_manager.edge_detection_threshold = settings["safety"]["edge_threshold"]
+        self.sensor_manager.set_edge_detection_threshold(settings["safety"]["edge_threshold"])
         self.sensor_manager.client_timeout = settings["safety"]["client_timeout"]
 
         # Apply AI settings
@@ -274,6 +278,27 @@ class ByteRacer:
             
         if "edge_recovery_time" in settings["safety"]:
             self.sensor_manager.set_edge_recovery_time(settings["safety"]["edge_recovery_time"])
+
+        # Apply mode settings in one place so resets and startup are deterministic.
+        modes = settings.get("modes", {})
+        if modes.get("tracking_enabled"):
+            self.sensor_manager.set_tracking(True)
+            self.aicamera_manager.start_face_following()
+        else:
+            self.aicamera_manager.stop_face_following()
+
+        if modes.get("circuit_mode_enabled"):
+            self.sensor_manager.set_circuit_mode(True)
+            self.aicamera_manager.start_color_control()
+            self.aicamera_manager.start_traffic_sign_detection()
+        else:
+            self.aicamera_manager.stop_color_control()
+            self.aicamera_manager.stop_traffic_sign_detection()
+
+        if modes.get("demo_mode_enabled"):
+            self.sensor_manager.set_demo_mode(True)
+        elif modes.get("normal_mode_enabled", True):
+            self.sensor_manager.set_normal_mode(True)
         
         # Apply LED settings if available
         if "led" in settings and "enabled" in settings["led"]:
@@ -298,13 +323,9 @@ class ByteRacer:
                 try:
                     # Get current network status
                     network_status = await self.network_manager.get_connection_status()
-                    current_ips = network_status.get("ip_addresses", {})
                     current_mode = "ap" if network_status.get("ap_mode_active", False) else "wifi"
                     port = "3000"
-                    
-                    # Get the primary interface IP
-                    wifi_interface = self.network_manager.wifi_interface
-                    current_ip = current_ips.get(wifi_interface, "unknown")
+                    current_ip = network_status.get("reachable_ip") or self.network_manager.get_reachable_ip(network_status)
 
                     logging.info(f"Current IP: {current_ip}, Mode: {current_mode}")
                     
@@ -333,6 +354,11 @@ class ByteRacer:
                         # Update previous state
                         previous_ip = current_ip
                         previous_mode = current_mode
+
+                        if not current_ip:
+                            await self.tts_manager.say("Network is still starting. Waiting for an IP address.", priority=1)
+                            await asyncio.sleep(15)
+                            continue
                         
                         # Prepare message based on mode
                         if current_mode == "ap":
@@ -361,10 +387,14 @@ class ByteRacer:
     
     async def connect_to_websocket(self, url):
         """Connect to the WebSocket server and handle reconnection"""
+        reconnect_delay = 2
+        last_tts_warning = 0
+
         while True:
             try:
                 async with websockets.connect(url) as websocket:
                     self.websocket = websocket
+                    reconnect_delay = 2
                     logging.info(f"Connected to WebSocket server at {url}")
                     
                     # Set the websocket in the log manager for real-time log streaming
@@ -406,11 +436,15 @@ class ByteRacer:
                 # self.sensor_manager.update_client_status(False, True)
                 self.sensor_manager.robot_state.setConnected(False)
                 
-                # Announce reconnection attempts via TTS
-                await self.tts_manager.say("Connection to control server lost. Attempting to reconnect.", priority=1)
+                # Announce reconnection attempts without spamming the speaker.
+                now = time.time()
+                if now - last_tts_warning > 60:
+                    await self.tts_manager.say("Connection to control server lost. Attempting to reconnect.", priority=1)
+                    last_tts_warning = now
                 
                 # Wait before retrying
-                await asyncio.sleep(5)
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(30, reconnect_delay * 2)
     
     async def handle_message(self, message, websocket):
         """Handle messages received from the WebSocket"""
@@ -479,7 +513,11 @@ class ByteRacer:
 
             elif data["name"] == "client_disconnected":
                 # Handle client disconnect notification
-                logging.info(f"Received client disconnect notification, client ID: {data['data'].get('id', 'unknown')}")
+                client_type = data["data"].get("type", "unknown")
+                logging.info(f"Received client disconnect notification, client ID: {data['data'].get('id', 'unknown')}, type: {client_type}")
+
+                if client_type != "controller":
+                    return
                 
                 # Update sensor manager about client disconnect
                 self.sensor_manager.robot_state = RobotState.STANDBY
@@ -639,7 +677,8 @@ class ByteRacer:
                     
                     # After network update, send updated network list
                     if result["success"]:
-                        networks = await self.network_manager.scan_wifi_networks()
+                        status = await self.network_manager.get_connection_status()
+                        networks = [] if status.get("ap_mode_active") else await self.network_manager.scan_wifi_networks()
                         await self.send_network_list(networks)
             
             elif data["name"] == "reset_settings":
@@ -649,7 +688,7 @@ class ByteRacer:
                 success = self.config_manager.reset_to_defaults(section)
                 
                 # Apply the reset settings
-                await self.setup()
+                await self.apply_config_settings()
                 
                 # Send response
                 await self.send_command_response({
@@ -874,8 +913,6 @@ class ByteRacer:
         """Send list of available WiFi networks to client"""
         if self.websocket:
             try:
-                # Freeze robot state while sending network list
-                self.sensor_manager.robot_state = RobotState.STANDBY
                 # Get current connection status first for more complete information
                 connection_status = await self.network_manager.get_connection_status()
                 
@@ -893,10 +930,11 @@ class ByteRacer:
                     "saved_networks": saved_networks,
                     "status": {
                         "ap_mode_active": connection_status["ap_mode_active"],
-                        "current_ip": connection_status["ip_addresses"].get(self.network_manager.wifi_interface, "Unknown"),
+                        "current_ip": connection_status.get("reachable_ip") or "Unknown",
                         "current_connection": current_connection,
                         "ap_ssid": connection_status.get("ap_ssid", "ByteRacer_AP"),
-                        "internet_connected": connection_status.get("internet_connected", False)
+                        "internet_connected": connection_status.get("internet_connected", False),
+                        "wifi_interface": connection_status.get("wifi_interface", self.network_manager.wifi_interface)
                     }
                 }
                 
@@ -1386,13 +1424,13 @@ class ByteRacer:
                 await self.tts_manager.say("Restarting system. Please wait.", priority=1, blocking=True)
                 result = {"success": True, "message": "Rebooting system..."}
                 # Schedule system reboot after response is sent
-                threading.Timer(2.0, lambda: subprocess.run("sudo reboot", shell=True)).start()
+                threading.Timer(2.0, lambda: subprocess.run(["sudo", "reboot"], check=False)).start()
                 
             elif command == "stop_robot":
                 # Shutdown the system
                 await self.tts_manager.say("Shutting down system. Goodbye!", priority=1, blocking=True)
                 result = {"success": True, "message": "Shutting down system..."}
-                threading.Timer(2.0, lambda: subprocess.run("sudo shutdown -h now", shell=True)).start()
+                threading.Timer(2.0, lambda: subprocess.run(["sudo", "shutdown", "-h", "now"], check=False)).start()
                 
             elif command == "restart_all_services":
 
@@ -1409,8 +1447,8 @@ class ByteRacer:
             elif command == "restart_websocket":
                 # Restart just the WebSocket service
                 success = subprocess.run(
-                    f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/restart_websocket.sh",
-                    shell=True,
+                    ["bash", "./byteracer/scripts/restart_websocket.sh"],
+                    cwd=PROJECT_DIR,
                     check=False
                 ).returncode == 0
                 
@@ -1420,8 +1458,8 @@ class ByteRacer:
             elif command == "restart_web_server":
                 # Restart just the web server
                 success = subprocess.run(
-                    f"cd {PROJECT_DIR} && sudo bash ./byteracer/scripts/restart_web_server.sh",
-                    shell=True,
+                    ["bash", "./byteracer/scripts/restart_web_server.sh"],
+                    cwd=PROJECT_DIR,
                     check=False
                 ).returncode == 0
                 

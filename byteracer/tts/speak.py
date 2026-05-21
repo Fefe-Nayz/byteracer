@@ -81,8 +81,11 @@ def main():
         print(f"Speaking: {text} (volume: {volume}%)")
         
         # Generate wave file with pico2wave
-        pico_cmd = f'pico2wave -l {args.lang} -w {temp_file} "{text}"'
-        result = subprocess.run(pico_cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(
+            ["pico2wave", "-l", args.lang, "-w", temp_file, text],
+            capture_output=True,
+            text=True,
+        )
         if result.returncode != 0:
             print(f"TTS error: {result.stderr}", file=sys.stderr)
             return 1
@@ -96,17 +99,20 @@ def main():
             volume_file = f"/tmp/tts_vol_{uuid.uuid4().hex}.wav"
             
             # Use sox to adjust volume (create a new file instead of playing directly)
-            vol_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier}'
             print(f"Adjusting volume with sox: multiplier {vol_multiplier}")
             
-            vol_result = subprocess.run(vol_cmd, shell=True, capture_output=True, text=True)
+            vol_result = subprocess.run(
+                ["sox", temp_file, volume_file, "vol", str(vol_multiplier)],
+                capture_output=True,
+                text=True,
+            )
             if vol_result.returncode != 0:
                 print(f"Volume adjustment error: {vol_result.stderr}", file=sys.stderr)
                 # If volume adjustment fails, fall back to the original file
-                play_cmd = f'aplay {temp_file}'
+                play_file = temp_file
             else:
                 # Play the volume-adjusted file
-                play_cmd = f'aplay {volume_file}'
+                play_file = volume_file
                 
                 # Remove the original temp file
                 try:
@@ -116,12 +122,12 @@ def main():
                     print(f"Failed to remove original TTS file: {e}", file=sys.stderr)
         else:
             # Just play the original file at full volume
-            play_cmd = f'aplay {temp_file}'
+            play_file = temp_file
             if volume != 100:
                 print("Volume control requires sox. Install with: sudo apt-get install sox")
         
         # Play the audio file
-        play_result = subprocess.run(play_cmd, shell=True, capture_output=True, text=True)
+        play_result = subprocess.run(["aplay", play_file], capture_output=True, text=True)
         if play_result.returncode != 0:
             print(f"Audio playback error: {play_result.stderr}", file=sys.stderr)
             return 1

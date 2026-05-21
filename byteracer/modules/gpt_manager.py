@@ -2357,14 +2357,14 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 logger.info("Restart robot requested")
                 await self.tts_manager.say("Restarting system. Please wait.", priority=2, blocking=True)
                 import threading
-                threading.Timer(2.0, lambda: subprocess.run("sudo reboot", shell=True)).start()
+                threading.Timer(2.0, lambda: subprocess.run(["sudo", "reboot"], check=False)).start()
                 return True
                 
             elif function_name == "shutdown_robot":
                 logger.info("Shutdown robot requested")
                 await self.tts_manager.say("Shutting down system. Goodbye!", priority=2, blocking=True)
                 import threading
-                threading.Timer(2.0, lambda: subprocess.run("sudo shutdown -h now", shell=True)).start()
+                threading.Timer(2.0, lambda: subprocess.run(["sudo", "shutdown", "-h", "now"], check=False)).start()
                 return True
             
             elif function_name == "restart_all_services":
@@ -2386,8 +2386,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 import os
                 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
                 success = subprocess.run(
-                    f"cd {project_dir} && sudo bash ./byteracer/scripts/restart_websocket.sh",
-                    shell=True,
+                    ["bash", "./byteracer/scripts/restart_websocket.sh"],
+                    cwd=project_dir,
                     check=False
                 ).returncode == 0
                 if not success:
@@ -2401,8 +2401,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 import os
                 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
                 success = subprocess.run(
-                    f"cd {project_dir} && sudo bash ./byteracer/scripts/restart_web_server.sh",
-                    shell=True,
+                    ["bash", "./byteracer/scripts/restart_web_server.sh"],
+                    cwd=project_dir,
                     check=False
                 ).returncode == 0
                 if not success:

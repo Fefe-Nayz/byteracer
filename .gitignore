@@ -1,0 +1,9 @@
+byteracer/config/
+byteracer/logs/
+byteracer/scripts/*.log
+relaytower/.next/
+relaytower/out/
+relaytower/node_modules/
+eaglecontrol/node_modules/
+*.pyc
+__pycache__/

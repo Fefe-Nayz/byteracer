@@ -54,7 +54,7 @@ class WebSocketLogHandler(logging.Handler):
         super().__init__()
         self.websocket = websocket
         # Use a thread-safe queue instead of asyncio.Queue
-        self.queue = queue.Queue()
+        self.queue = queue.Queue(maxsize=500)
         self.event_loop = None
         self.worker_thread = None
         self.running = True
@@ -81,13 +81,16 @@ class WebSocketLogHandler(logging.Handler):
         try:
             log_entry = self.format(record)
             
-            # Add to thread-safe queue - no asyncio needed here
-            self.queue.put({
+            # Add to thread-safe queue - no asyncio needed here.
+            # Drop log streaming entries if the UI is not consuming fast enough.
+            self.queue.put_nowait({
                 "level": record.levelname,
                 "message": log_entry,
                 "timestamp": int(time.time() * 1000)
             })
             
+        except queue.Full:
+            pass
         except Exception as e:
             self.handleError(record)
     
@@ -146,11 +149,11 @@ class LogManager:
     """
     Manages logging with timestamps and automatic log rotation.
     """
-    def __init__(self, log_dir=None, max_log_files=10, max_log_size_mb=10):
+    def __init__(self, log_dir=None, max_log_files=5, max_log_size_mb=2):
         # Set log directory
         if log_dir is None:
-            # Default to logs directory in the project
-            self.log_dir = Path(__file__).parent.parent / "logs"
+            # Default to tmpfs-friendly logs. Set BYTERACER_LOG_DIR to persist logs elsewhere.
+            self.log_dir = Path(os.environ.get("BYTERACER_LOG_DIR", "/tmp/byteracer/logs"))
         else:
             self.log_dir = Path(log_dir)
         
@@ -160,6 +163,11 @@ class LogManager:
         # Log settings
         self.max_log_files = max_log_files
         self.max_log_size_mb = max_log_size_mb
+        self.file_log_level = getattr(
+            logging,
+            os.environ.get("BYTERACER_FILE_LOG_LEVEL", "INFO").upper(),
+            logging.INFO,
+        )
         self.log_file_path = self.log_dir / f"byteracer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         
         # WebSocket handler
@@ -186,7 +194,7 @@ class LogManager:
         
         # Create file handler
         file_handler = logging.FileHandler(self.log_file_path)
-        file_handler.setLevel(logging.DEBUG)
+        file_handler.setLevel(self.file_log_level)
         
         # Create console handler
         console_handler = logging.StreamHandler()
@@ -300,7 +308,7 @@ class LogManager:
                             
                             # Create new handler
                             new_handler = logging.FileHandler(new_log_path)
-                            new_handler.setLevel(logging.DEBUG)
+                            new_handler.setLevel(self.file_log_level)
                             new_handler.setFormatter(formatter)
                             
                             # Add new handler

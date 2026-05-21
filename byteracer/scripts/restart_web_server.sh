@@ -1,84 +1,48 @@
 #!/bin/bash
-# Script to restart the Web server with TTS feedback
 
-# Project paths
-BYTERACER_PATH="/home/pi/ByteRacer"
-TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
-SCRIPTS_DIR="$(dirname "$0")"
-LOG_FILE="${SCRIPTS_DIR}/restart_web_server.log"
+set -uo pipefail
 
-exec > >(tee -a "${LOG_FILE}") 2>&1
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== RESTART WEB SERVER STARTED =========="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export BYTERACER_PATH="${BYTERACER_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/common.sh"
 
-run_cmd() {
-    local cmd="$1"
-    log "Executing: $cmd"
-    output=$(eval "$cmd" 2>&1)
-    exit_code=$?
-    if [ -n "$output" ]; then
-        echo "$output" | while IFS= read -r line; do
-            log "  > $line"
-        done
-    fi
-    log "Command exit code: $exit_code"
-    return $exit_code
-}
+LOG_FILE="${BYTERACER_LOG_DIR}/restart_web_server.log"
+setup_logging "${LOG_FILE}"
 
-speak() {
-    if [ -f "$TTS_SCRIPT" ]; then
-        python3 "$TTS_SCRIPT" "$1"
-    else
-        log "TTS script not found: $TTS_SCRIPT"
-    fi
-}
+log "========== RESTART WEB SERVER STARTED =========="
+speak "Restarting web server"
 
-log "Restarting Web server (relaytower)..."
-speak "Restarting Web server. Please wait."
-
-SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep relaytower)
-
-if [ -n "$SESSION_ACTIVE" ]; then
-    log "Active screen session 'relaytower' found. Sending SIGINT for graceful shutdown..."
-    run_cmd "sudo -u pi screen -S relaytower -p 0 -X stuff \$'\003'"
-    sleep 5
-    PID=$(ps aux | grep "bun run start" | grep "relaytower" | grep -v grep | awk '{print $2}' | head -n 1)
-    if [ -n "$PID" ]; then
-        log "Web server process did not exit gracefully, force killing PID $PID..."
-        run_cmd "kill -9 $PID"
-        sleep 2
-    else
-        log "Web server process exited gracefully."
-    fi
-else
-    log "No active screen session 'relaytower' found."
+if [ ! -d "${BYTERACER_PATH}/relaytower/out" ]; then
+    log "RelayTower build is missing; building before restart"
+    build_relaytower_if_needed "true" || log "RelayTower build failed; attempting service start anyway"
 fi
 
-# Re-check for an active session; if none, create a new one.
-SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep relaytower)
-if [ -z "$SESSION_ACTIVE" ]; then
-    log "No active 'relaytower' session exists. Creating a new session..."
-    run_cmd "sudo -u pi screen -dmS relaytower bash -c 'cd ${BYTERACER_PATH}/relaytower && bun run start; exec bash'"
-else
-    log "Active session found. Injecting restart command into 'relaytower'..."
-    run_cmd "sudo -u pi screen -S relaytower -p 0 -X stuff \"cd ${BYTERACER_PATH}/relaytower && bun run start$(printf '\\r')\""
+if systemd_unit_exists "byteracer-relaytower.service"; then
+    if restart_systemd_unit "byteracer-relaytower.service" && wait_for_port "127.0.0.1" 3000 20; then
+        log "Web server is listening on port 3000"
+        speak "Web server restarted"
+        log "========== RESTART WEB SERVER COMPLETED =========="
+        exit 0
+    fi
+    log "Systemd restart failed; trying screen fallback"
 fi
 
-log "Waiting for process to start..."
-sleep 5
+stop_screen_session "relaytower" "bun .*server.ts|next start"
 
-PID=$(ps aux | grep "bun run start" | grep "relaytower" | grep -v grep | awk '{print $2}' | head -n 1)
-if [ -n "$PID" ]; then
-    log "Web server restarted successfully with PID $PID."
-    run_cmd "ps -p $PID -o pid,cmd,etime"
-    speak "Web server has been restarted successfully."
+if start_screen_session "relaytower" "${BYTERACER_PATH}/relaytower" "bun run start"; then
+    if wait_for_port "127.0.0.1" 3000 30; then
+        log "Web server is listening on port 3000"
+        speak "Web server restarted"
+    else
+        log "RelayTower screen started but port 3000 is not ready"
+        speak "Web server did not become ready"
+        exit 1
+    fi
 else
-    log "Error: Failed to restart Web server!"
-    run_cmd "ps aux | grep 'bun run' | grep 'relaytower' | grep -v grep"
-    speak "Failed to restart Web server. Please check the system logs."
+    log "Failed to start RelayTower screen session"
+    speak "Web server failed to start"
     exit 1
 fi
 

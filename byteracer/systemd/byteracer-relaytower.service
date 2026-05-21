@@ -1,0 +1,20 @@
+[Unit]
+Description=ByteRacer RelayTower static web UI
+After=network-online.target byteracer-eaglecontrol.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__BYTERACER_USER__
+WorkingDirectory=__BYTERACER_PATH__/relaytower
+Environment=PATH=__BUN_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
+Environment=PORT=3000
+ExecStart=__BUN_BIN__ run start
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -196,17 +196,19 @@ class TTSManager:
             # Generate the TTS wave file
             temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
             final_file = temp_file
-            pico_cmd = f'pico2wave -l {lang} -w {temp_file} "{text}"'
+            pico_cmd = ["pico2wave", "-l", lang, "-w", temp_file, text]
             logger.debug(f"Generating TTS for: '{text}'")
             
             # Generate the audio file
-            self._current_process = subprocess.Popen(pico_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            result = self._current_process.wait()
+            process = subprocess.Popen(pico_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self._current_process = process
+            _, stderr = process.communicate()
+            result = process.returncode
             self._current_process = None
             
             if result != 0:
-                stderr = self._current_process.stderr.read().decode() if self._current_process.stderr else "Unknown error"
-                logger.error(f"TTS pico2wave error: {stderr}")
+                error_text = stderr.decode(errors="replace") if stderr else "Unknown error"
+                logger.error(f"TTS pico2wave error: {error_text}")
                 return False
             
             # Apply volume adjustment if needed
@@ -228,10 +230,12 @@ class TTSManager:
                 
                 # Use sox to adjust volume and apply gain
                 vol_multiplier = max(0.0, min(1.0, effective_volume))
-                gain_cmd = f'sox {temp_file} {volume_file} vol {vol_multiplier} gain {self.audio_gain}'
+                gain_cmd = ["sox", temp_file, volume_file, "vol", str(vol_multiplier), "gain", str(self.audio_gain)]
                 
-                self._current_process = subprocess.Popen(gain_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                result = self._current_process.wait()
+                process = subprocess.Popen(gain_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self._current_process = process
+                _, stderr = process.communicate()
+                result = process.returncode
                 self._current_process = None
                 
                 if result == 0:

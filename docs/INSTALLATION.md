@@ -20,10 +20,10 @@ Pour un Raspberry Pi neuf, la sequence recommandee est la suivante:
 4. activer l'audio I2S et le bus I2C;
 5. calibrer les servos et les capteurs du Picar-X;
 6. installer Bun, puis optionnellement Node.js;
-7. cloner le depot dans `/home/pi/ByteRacer`;
+7. cloner uniquement l'applicatif dans `/home/pi/ByteRacer`;
 8. installer `relaytower`, `eaglecontrol` et `byteracer`;
 9. configurer la cle OpenAI si l'IA doit etre activee;
-10. configurer le demarrage automatique et, si besoin, le mode point d'acces.
+10. installer les services `systemd`, les protections de carte SD et, si besoin, le mode point d'acces.
 
 ## 2. Prerequis
 
@@ -187,20 +187,31 @@ sudo apt-get install -y nodejs
 
 Si vous ne l'utilisez pas, vous pouvez faire tourner `relaytower` et `eaglecontrol` uniquement avec Bun.
 
-## 7. Recuperer le depot
+## 7. Recuperer le depot applicatif
 
-Le mode appliance suppose un dossier final dans `/home/pi/ByteRacer`.
+Le robot n'a pas besoin des documents lourds, presentations, videos et anciens modeles pour fonctionner. Utiliser un sparse checkout evite de telecharger et d'ecrire ces fichiers sur la carte SD.
 
 ```bash
-cd /home/pi
-git clone -b main https://github.com/nayzflux/byteracer.git ByteRacer
-cd /home/pi/ByteRacer
+curl -fsSL https://raw.githubusercontent.com/nayzflux/byteracer/working-2/byteracer/scripts/install_app_sparse.sh -o install_app_sparse.sh
+REPO_URL=https://github.com/nayzflux/byteracer.git \
+BRANCH=working-2 \
+TARGET_DIR=/home/pi/ByteRacer \
+bash install_app_sparse.sh
 ```
 
-Point important:
+Depuis une machine neuve, le plus simple est d'utiliser le bootstrap complet:
 
-- le boot script `startup.sh` utilise par defaut la branche `working-2` si aucune configuration n'existe encore;
-- si vous voulez rester sur `main`, pensez a mettre a jour `github.branch` apres le premier demarrage ou a desactiver `github.auto_update`.
+```bash
+curl -fsSL https://raw.githubusercontent.com/nayzflux/byteracer/working-2/byteracer/scripts/bootstrap_raspberry_pi.sh -o bootstrap_raspberry_pi.sh
+bash bootstrap_raspberry_pi.sh
+```
+
+Variables utiles:
+
+- `REPO_URL`: depot Git a utiliser;
+- `BRANCH`: branche ou tag a installer;
+- `TARGET_DIR`: dossier final, par defaut `/home/pi/ByteRacer`;
+- `INSTALL_ACCESSPOPUP=true`: tente aussi de recuperer AccessPopup.
 
 ## 8. Installation des services du projet
 
@@ -211,6 +222,8 @@ cd /home/pi/ByteRacer/relaytower
 bun install
 bun run build
 ```
+
+`RelayTower` est exporte statiquement par Next.js. En production, `bun run start` sert le dossier `relaytower/out` avec un petit serveur Bun au lieu de lancer `next start`, ce qui reduit nettement RAM, CPU et ecritures disque.
 
 ### 8.2 `eaglecontrol`
 
@@ -298,16 +311,45 @@ Une fois les trois services lances:
 - verifier `http://<ip_du_robot>:9000/mjpg`;
 - controler que `RelayTower` passe a `connected` puis `python_status = connected`.
 
-## 12. Demarrage automatique avec `startup.sh`
+## 12. Demarrage automatique avec `systemd`
+
+Le mode recommande est `systemd`, plus robuste que `screen` pour un robot qui doit redemarrer seul:
+
+```bash
+cd /home/pi/ByteRacer
+bash byteracer/scripts/install_systemd_services.sh
+sudo systemctl start byteracer-stack.target
+```
+
+Services installes:
+
+- `byteracer-eaglecontrol.service`: WebSocket port `3001`;
+- `byteracer-relaytower.service`: interface web statique port `3000`;
+- `byteracer-python.service`: controleur Python robot;
+- `byteracer-stack.target`: groupe les trois services.
+
+Verification:
+
+```bash
+systemctl status byteracer-eaglecontrol byteracer-relaytower byteracer-python
+bash /home/pi/ByteRacer/byteracer/scripts/doctor.sh
+```
+
+## 13. Fallback avec `startup.sh`
 
 Le script racine `startup.sh` est le mode appliance du projet. Il:
 
 1. annonce vocalement le boot;
 2. attend une connexion Internet;
 3. lit `github.repo_url`, `github.branch` et `github.auto_update`;
-4. met a jour le depot si `auto_update = true`;
-5. reinstalle les dependances;
-6. lance `eaglecontrol`, `relaytower` et `byteracer` dans des sessions `screen`.
+4. met a jour le depot si `auto_update = true`, en preservant `byteracer/config`;
+5. reinstalle/rebuild seulement ce qui est necessaire;
+6. nettoie les anciennes sessions `screen`;
+7. lance `eaglecontrol`, `relaytower` et `byteracer`.
+
+Le script est tolerant aux erreurs: une panne TTS, une absence Internet ou un echec de mise a jour ne doit pas empecher le demarrage de la version locale deja installee.
+
+Si les services `systemd` sont installes, `startup.sh` les utilise. Sinon, il retombe sur l'ancien mode `screen`.
 
 Lancement manuel:
 
@@ -320,7 +362,24 @@ bash startup.sh
 
 Quand `github.auto_update` est a `true`, `startup.sh` peut executer un `git reset --hard origin/<branch>` dans le dossier de production. Ce mode est adapte a un robot appliance, pas a une copie de travail avec modifications locales.
 
-## 13. Activation au boot via `crontab`
+## 14. Reduire l'usure de la carte SD
+
+Le bootstrap applique ces reglages:
+
+- logs applicatifs dans `/tmp/byteracer/logs` par defaut;
+- `journald` en mode volatile avec taille limitee;
+- `/tmp` en `tmpfs`;
+- `noatime` sur la racine si possible;
+- `zram-tools` pour eviter le swap classique sur SD.
+
+Le fichier Python garde seulement quelques logs courts en rotation. Pour rendre les logs persistants temporairement:
+
+```bash
+export BYTERACER_LOG_DIR=/home/pi/ByteRacer/byteracer/logs
+export BYTERACER_FILE_LOG_LEVEL=INFO
+```
+
+## 15. Activation au boot via `crontab`
 
 Pour reproduire le setup de production historique:
 
@@ -334,15 +393,15 @@ Ajouter la ligne suivante:
 @reboot export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/pi/.bun/bin" && /home/pi/ByteRacer/startup.sh >> /home/pi/startup.log 2>&1
 ```
 
-Puis appliquer les permissions historiques si vous gardez le meme mode appliance:
+Le diagnostic rapide se lance avec:
 
 ```bash
-sudo chmod -R 777 /home/pi/ByteRacer/
+bash /home/pi/ByteRacer/byteracer/scripts/doctor.sh
 ```
 
-Ce `chmod` large simplifie un setup de demonstration, mais il est volontairement permissif. Si vous durcissez la machine, adaptez les utilisateurs, groupes et permissions au lieu de garder `777`.
+Eviter `sudo chmod -R 777 /home/pi/ByteRacer/`. Si des permissions bloquent, corriger plutot le proprietaire du dossier (`pi`) et les permissions des scripts.
 
-## 14. Installation du mode point d'acces / AccessPopup
+## 16. Installation du mode point d'acces / AccessPopup
 
 Les fonctions reseau du projet s'appuient sur `accesspopup` pour basculer le robot en point d'acces et exposer un portail de configuration.
 
@@ -360,7 +419,7 @@ Pendant l'installation:
 - definir le nom du point d'acces;
 - definir le mot de passe du point d'acces.
 
-## 15. Check-list de verification finale
+## 17. Check-list de verification finale
 
 Verifier les points suivants:
 
@@ -374,7 +433,7 @@ Verifier les points suivants:
 - le robot parle via TTS et joue les sons;
 - les commandes GPT fonctionnent si la cle OpenAI est configuree.
 
-## 16. Depannage rapide
+## 18. Depannage rapide
 
 ### Le robot ne se connecte pas a EagleControl
 
@@ -410,7 +469,7 @@ Verifier les points suivants:
 - verifier la presence du microphone si vous utilisez les modes conversationnels;
 - verifier la connectivite Internet du robot avant d'essayer un appel OpenAI.
 
-## 17. Resume des commandes utiles
+## 19. Resume des commandes utiles
 
 ```bash
 # preparation systeme

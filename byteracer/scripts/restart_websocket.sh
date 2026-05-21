@@ -1,84 +1,43 @@
 #!/bin/bash
-# Script to restart the WebSocket server with TTS feedback
 
-# Project paths
-BYTERACER_PATH="/home/pi/ByteRacer"
-TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
-SCRIPTS_DIR="$(dirname "$0")"
-LOG_FILE="${SCRIPTS_DIR}/restart_websocket.log"
+set -uo pipefail
 
-exec > >(tee -a "${LOG_FILE}") 2>&1
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== RESTART WEBSOCKET STARTED =========="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export BYTERACER_PATH="${BYTERACER_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/common.sh"
 
-run_cmd() {
-    local cmd="$1"
-    log "Executing: $cmd"
-    output=$(eval "$cmd" 2>&1)
-    exit_code=$?
-    if [ -n "$output" ]; then
-        echo "$output" | while IFS= read -r line; do
-            log "  > $line"
-        done
+LOG_FILE="${BYTERACER_LOG_DIR}/restart_websocket.log"
+setup_logging "${LOG_FILE}"
+
+log "========== RESTART WEBSOCKET STARTED =========="
+speak "Restarting WebSocket service"
+
+if systemd_unit_exists "byteracer-eaglecontrol.service"; then
+    if restart_systemd_unit "byteracer-eaglecontrol.service" && wait_for_port "127.0.0.1" 3001 20; then
+        log "WebSocket service is listening on port 3001"
+        speak "WebSocket service restarted"
+        log "========== RESTART WEBSOCKET COMPLETED =========="
+        exit 0
     fi
-    log "Command exit code: $exit_code"
-    return $exit_code
-}
-
-speak() {
-    if [ -f "$TTS_SCRIPT" ]; then
-        python3 "$TTS_SCRIPT" "$1"
-    else
-        log "TTS script not found: $TTS_SCRIPT"
-    fi
-}
-
-log "Restarting WebSocket server (eaglecontrol)..."
-speak "Restarting WebSocket service. Please wait."
-
-SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep eaglecontrol)
-
-if [ -n "$SESSION_ACTIVE" ]; then
-    log "Active screen session 'eaglecontrol' found. Sending SIGINT for graceful shutdown..."
-    run_cmd "sudo -u pi screen -S eaglecontrol -p 0 -X stuff \$'\003'"
-    sleep 5
-    PID=$(ps aux | grep "bun run start" | grep "eaglecontrol" | grep -v grep | awk '{print $2}' | head -n 1)
-    if [ -n "$PID" ]; then
-        log "WebSocket process did not exit gracefully, force killing PID $PID..."
-        run_cmd "kill -9 $PID"
-        sleep 2
-    else
-        log "WebSocket process exited gracefully."
-    fi
-else
-    log "No active screen session 'eaglecontrol' found."
+    log "Systemd restart failed; trying screen fallback"
 fi
 
-# Re-check for an active session; if none, create one.
-SESSION_ACTIVE=$(sudo -u pi screen -list | grep -v "Dead" | grep eaglecontrol)
-if [ -z "$SESSION_ACTIVE" ]; then
-    log "No active 'eaglecontrol' session exists. Creating a new session..."
-    run_cmd "sudo -u pi screen -dmS eaglecontrol bash -c 'cd ${BYTERACER_PATH}/eaglecontrol && bun run start; exec bash'"
-else
-    log "Active session found. Injecting restart command into 'eaglecontrol'..."
-    run_cmd "sudo -u pi screen -S eaglecontrol -p 0 -X stuff \"cd ${BYTERACER_PATH}/eaglecontrol && bun run start$(printf '\\r')\""
-fi
+stop_screen_session "eaglecontrol" "bun .*index.ts"
 
-log "Waiting for process to start..."
-sleep 5
-
-PID=$(ps aux | grep "bun run start" | grep "eaglecontrol" | grep -v grep | awk '{print $2}' | head -n 1)
-if [ -n "$PID" ]; then
-    log "WebSocket server restarted successfully with PID $PID."
-    run_cmd "ps -p $PID -o pid,cmd,etime"
-    speak "WebSocket server has been restarted successfully."
+if start_screen_session "eaglecontrol" "${BYTERACER_PATH}/eaglecontrol" "bun run start"; then
+    if wait_for_port "127.0.0.1" 3001 20; then
+        log "WebSocket service is listening on port 3001"
+        speak "WebSocket service restarted"
+    else
+        log "WebSocket screen started but port 3001 is not ready"
+        speak "WebSocket service did not become ready"
+        exit 1
+    fi
 else
-    log "Error: Failed to restart WebSocket server!"
-    run_cmd "ps aux | grep 'bun run' | grep 'eaglecontrol' | grep -v grep"
-    speak "Failed to restart WebSocket server. Please check the system logs."
+    log "Failed to start WebSocket screen session"
+    speak "WebSocket service failed to start"
     exit 1
 fi
 

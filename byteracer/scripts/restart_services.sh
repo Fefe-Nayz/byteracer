@@ -1,102 +1,39 @@
 #!/bin/bash
-# Script to restart all ByteRacer services with TTS feedback
 
-# Project paths
-BYTERACER_PATH="/home/pi/ByteRacer"
-TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
-SCRIPTS_PATH="${BYTERACER_PATH}/byteracer/scripts"
-SCRIPTS_DIR="$(dirname "$0")"
-LOG_FILE="${SCRIPTS_DIR}/restart_services.log"
+set -uo pipefail
 
-exec > >(tee -a "${LOG_FILE}") 2>&1
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] ========== RESTART ALL SERVICES STARTED =========="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export BYTERACER_PATH="${BYTERACER_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
-}
+# shellcheck source=/dev/null
+source "${SCRIPT_DIR}/common.sh"
 
-run_cmd() {
-    local cmd="$1"
-    log "Executing: $cmd"
-    output=$(eval "$cmd" 2>&1)
-    exit_code=$?
-    if [ -n "$output" ]; then
-        echo "$output" | while IFS= read -r line; do
-            log "  > $line"
-        done
-    fi
-    log "Command exit code: $exit_code"
-    return $exit_code
-}
+LOG_FILE="${BYTERACER_LOG_DIR}/restart_services.log"
+setup_logging "${LOG_FILE}"
 
-speak() {
-    if [ -f "$TTS_SCRIPT" ]; then
-        python3 "$TTS_SCRIPT" "$1"
-    else
-        log "TTS script not found: $TTS_SCRIPT"
-    fi
-}
+log "========== RESTART ALL SERVICES STARTED =========="
+speak "Restarting all ByteRacer services"
 
-# Make sure individual scripts are executable
-run_cmd "chmod +x \"${SCRIPTS_PATH}/restart_websocket.sh\""
-run_cmd "chmod +x \"${SCRIPTS_PATH}/restart_web_server.sh\""
-run_cmd "chmod +x \"${SCRIPTS_PATH}/restart_python.sh\""
+chmod +x "${SCRIPT_DIR}/restart_websocket.sh" "${SCRIPT_DIR}/restart_web_server.sh" "${SCRIPT_DIR}/restart_python.sh" 2>/dev/null || true
 
-log "Restarting all ByteRacer services..."
-speak "Restarting all ByteRacer services. This may take a moment."
+WEBSOCKET_EXIT=0
+WEBSERVER_EXIT=0
+PYTHON_EXIT=0
 
-log "Calling restart_websocket.sh"
-run_cmd "\"${SCRIPTS_PATH}/restart_websocket.sh\""
-WEBSOCKET_EXIT=$?
-if [ $WEBSOCKET_EXIT -ne 0 ]; then
-    log "Error: restart_websocket.sh failed with exit code $WEBSOCKET_EXIT"
-fi
+"${SCRIPT_DIR}/restart_websocket.sh" || WEBSOCKET_EXIT=$?
+"${SCRIPT_DIR}/restart_web_server.sh" || WEBSERVER_EXIT=$?
+"${SCRIPT_DIR}/restart_python.sh" || PYTHON_EXIT=$?
 
-log "Calling restart_web_server.sh"
-run_cmd "\"${SCRIPTS_PATH}/restart_web_server.sh\""
-WEBSERVER_EXIT=$?
-if [ $WEBSERVER_EXIT -ne 0 ]; then
-    log "Error: restart_web_server.sh failed with exit code $WEBSERVER_EXIT"
-fi
+log "Screen sessions after restart:"
+screen_list
 
-log "Calling restart_python.sh"
-run_cmd "\"${SCRIPTS_PATH}/restart_python.sh\""
-PYTHON_EXIT=$?
-if [ $PYTHON_EXIT -ne 0 ]; then
-    log "Error: restart_python.sh failed with exit code $PYTHON_EXIT"
-fi
-
-log "All services restart process completed."
-speak "All services restart process completed."
-
-session_exists() {
-    sudo -u pi screen -list | grep -v "Dead" | grep -q "$1"
-    return $?
-}
-
-all_running=true
-for session in "eaglecontrol" "relaytower" "byteracer"; do
-    if ! run_cmd "sudo -u pi screen -list" | grep -v "Dead" | grep -q "$session"; then
-        log "Warning: $session is not running!"
-        speak "Warning! $session is not running."
-        all_running=false
-    else
-        log "Session $session is running."
-    fi
-done
-
-log "Process status check:"
-run_cmd "ps aux | grep -E 'python3 main.py|bun run .* eaglecontrol|bun run .* relaytower' | grep -v grep"
-
-log "Screen sessions:"
-run_cmd "sudo -u pi screen -list"
-
-if [ "$all_running" = true ]; then
-    log "All services are now running correctly."
-    speak "All services are now running correctly."
+if [ "${WEBSOCKET_EXIT}" -eq 0 ] && [ "${WEBSERVER_EXIT}" -eq 0 ] && [ "${PYTHON_EXIT}" -eq 0 ]; then
+    log "All services restarted successfully"
+    speak "All services restarted"
 else
-    log "Some services failed to restart. Please check the logs."
-    speak "Warning! Some services failed to restart. Please check the logs."
+    log "Restart failures: websocket=${WEBSOCKET_EXIT}, web=${WEBSERVER_EXIT}, python=${PYTHON_EXIT}"
+    speak "Some services failed to restart"
+    exit 1
 fi
 
 log "========== RESTART ALL SERVICES COMPLETED =========="
