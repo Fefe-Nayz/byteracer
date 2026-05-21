@@ -99,7 +99,7 @@ Ce rapport affiche les services `systemd` ou `screen`, les ports ouverts, l'etat
 
 ### Installation appliance recommandee
 
-Sur un Raspberry Pi propre, le script de bootstrap installe les dependances, recupere uniquement l'applicatif via sparse checkout, build l'interface statique, installe les services `systemd` et applique des reglages qui reduisent les ecritures sur la carte SD:
+Sur un Raspberry Pi propre, le script de bootstrap installe les dependances, recupere uniquement l'applicatif via sparse checkout, build l'interface statique, installe les services `systemd`, installe AccessPopup et applique des reglages qui reduisent les ecritures sur la carte SD:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/nayzflux/byteracer/working-2/byteracer/scripts/bootstrap_raspberry_pi.sh -o bootstrap_raspberry_pi.sh

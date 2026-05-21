@@ -93,7 +93,7 @@ Le script `byteracer/install.sh` du depot ne clone aujourd'hui que `picar-x`. Po
 cd ~/
 git clone -b v2.0 https://github.com/sunfounder/robot-hat.git
 cd robot-hat
-sudo python3 setup.py install
+sudo python3 install.py
 ```
 
 ### 4.2 Installer `vilib` avec la branche `picamera2`
@@ -111,7 +111,11 @@ sudo python3 install.py
 cd ~/
 git clone -b v2.0 https://github.com/sunfounder/picar-x.git --depth 1
 cd picar-x
-sudo python3 setup.py install
+if [ -f install.py ]; then
+  sudo python3 install.py
+else
+  sudo pip3 install ./ --break-system-packages
+fi
 ```
 
 ### 4.4 Activer l'audio I2S fourni par SunFounder
@@ -211,7 +215,8 @@ Variables utiles:
 - `REPO_URL`: depot Git a utiliser;
 - `BRANCH`: branche ou tag a installer;
 - `TARGET_DIR`: dossier final, par defaut `/home/pi/ByteRacer`;
-- `INSTALL_ACCESSPOPUP=true`: tente aussi de recuperer AccessPopup.
+- `INSTALL_ACCESSPOPUP=false`: desactive l'installation d'AccessPopup, installee par defaut;
+- `ACCESSPOPUP_SSID`, `ACCESSPOPUP_PASSWORD`, `ACCESSPOPUP_IP`: reglages du hotspot de secours.
 
 ## 8. Installation des services du projet
 
@@ -458,7 +463,7 @@ Verifier les points suivants:
 ### Les fonctions reseau ne marchent pas
 
 - verifier `nmcli`;
-- verifier la presence de `/usr/bin/accesspopup`;
+- verifier la presence de `/usr/local/bin/accesspopup` et `/etc/accesspopup.conf`;
 - verifier que `NetworkManager` tourne bien;
 - verifier les permissions `sudo` pour les commandes reseau.
 

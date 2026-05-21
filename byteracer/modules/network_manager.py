@@ -23,6 +23,12 @@ class NetworkManager:
     - Update Access Point settings
     """
 
+    ACCESSPOPUP_SCRIPT_CANDIDATES = (
+        "/usr/local/bin/accesspopup",
+        "/usr/bin/accesspopup",
+    )
+    ACCESSPOPUP_CONFIG_FILE = "/etc/accesspopup.conf"
+
     def __init__(self):
         """Initialize the NetworkManager with default settings"""
         self.logger = logging.getLogger("NetworkManager")
@@ -100,15 +106,12 @@ class NetworkManager:
         return "wlan0"
 
     def _load_ap_config(self) -> None:
-        """Read AccessPopup AP settings if the script is installed."""
-        script_path = "/usr/bin/accesspopup"
-        if not os.path.isfile(script_path):
+        """Read AccessPopup AP settings if it is installed."""
+        content = self._read_accesspopup_settings()
+        if not content:
             return
 
         try:
-            with open(script_path, "r", encoding="utf-8", errors="ignore") as handle:
-                content = handle.read()
-
             ssid_match = re.search(r"ap_ssid='([^']*)'", content)
             password_match = re.search(r"ap_pw='([^']*)'", content)
             ip_match = re.search(r"ap_ip='([^']*)'", content)
@@ -121,6 +124,24 @@ class NetworkManager:
                 self.ap_config["ip"] = ip_match.group(1)
         except Exception as e:
             self.logger.warning(f"Could not read AccessPopup settings: {e}")
+
+    def _get_accesspopup_script_path(self) -> Optional[str]:
+        for script_path in self.ACCESSPOPUP_SCRIPT_CANDIDATES:
+            if os.path.isfile(script_path):
+                return script_path
+        return None
+
+    def _get_accesspopup_settings_path(self) -> Optional[str]:
+        if os.path.isfile(self.ACCESSPOPUP_CONFIG_FILE):
+            return self.ACCESSPOPUP_CONFIG_FILE
+        return self._get_accesspopup_script_path()
+
+    def _read_accesspopup_settings(self) -> str:
+        for settings_path in (self.ACCESSPOPUP_CONFIG_FILE, self._get_accesspopup_script_path()):
+            if settings_path and os.path.isfile(settings_path):
+                with open(settings_path, "r", encoding="utf-8", errors="ignore") as handle:
+                    return handle.read()
+        return ""
 
     async def scan_wifi_networks(self) -> List[str]:
         """
@@ -419,8 +440,8 @@ class NetworkManager:
         """
         try:
             mode = mode.lower()
-            script_path = "/usr/bin/accesspopup"
-            if not os.path.isfile(script_path):
+            script_path = self._get_accesspopup_script_path()
+            if not script_path:
                 self.logger.error("AccessPopup script not found; cannot switch network mode")
                 return False
 
@@ -479,7 +500,7 @@ class NetworkManager:
 
     async def update_ap_settings(self, ssid: str = None, password: str = None) -> Dict[str, Any]:
         """
-        Updates the Access Point credentials by modifying the AccessPopup script.
+        Updates the Access Point credentials by modifying AccessPopup settings.
         
         Args:
             ssid: New SSID for the access point (optional)
@@ -502,21 +523,20 @@ class NetworkManager:
                     "message": validation_error
                 }
             
-            # Path to the AccessPopup script
-            script_path = "/usr/bin/accesspopup"
+            settings_path = self._get_accesspopup_settings_path()
+            script_path = self._get_accesspopup_script_path()
             
-            # Make sure the script exists
-            if not os.path.isfile(script_path):
+            if not settings_path or not os.path.isfile(settings_path):
                 return {
                     "success": False,
-                    "message": "AccessPopup script not found"
+                    "message": "AccessPopup settings file not found"
                 }
             
             # Create a temporary file to store changes
             temp_file = "/tmp/accesspopup.tmp"
             changes_made = False
             
-            with open(script_path, "r") as f_in, open(temp_file, "w") as f_out:
+            with open(settings_path, "r", encoding="utf-8", errors="ignore") as f_in, open(temp_file, "w", encoding="utf-8") as f_out:
                 for line in f_in:
                     if ssid and line.strip().startswith("ap_ssid="):
                         f_out.write(f"ap_ssid='{ssid}'\n")
@@ -531,12 +551,12 @@ class NetworkManager:
                 os.remove(temp_file)
                 return {
                     "success": False,
-                    "message": "No matching settings found in AccessPopup script"
+                    "message": "No matching settings found in AccessPopup settings"
                 }
-            
-            # Move the temporary file to replace the original
+
+            # Move the temporary file to replace the original settings file
             returncode, stdout, stderr = self._run_command(
-                ["sudo", "mv", temp_file, script_path]
+                ["sudo", "mv", temp_file, settings_path]
             )
             
             if returncode != 0:
@@ -545,8 +565,12 @@ class NetworkManager:
                     "message": f"Failed to update AP settings: {stderr}"
                 }
             
-            # Make sure the script is executable
-            self._run_command(["sudo", "chmod", "+x", script_path])
+            if script_path:
+                self._run_command(["sudo", "chmod", "+x", script_path])
+
+            # AccessPopup only applies new AP credentials when the NetworkManager
+            # AP profile is recreated.
+            self._run_command(["sudo", "nmcli", "connection", "delete", "AccessPopup"], timeout=10)
             
             # If currently in AP mode, restart to apply changes
             if self._ap_mode_active:
@@ -584,7 +608,7 @@ class NetworkManager:
 
     @staticmethod
     def _validate_ap_credentials(ssid: Optional[str], password: Optional[str]) -> Optional[str]:
-        """Validate AP credentials before writing them into a shell script."""
+        """Validate AP credentials before writing them into AccessPopup settings."""
         for label, value in (("SSID", ssid), ("password", password)):
             if value is None:
                 continue
@@ -835,22 +859,19 @@ class NetworkManager:
         
         # Get AP information if in AP mode
         if self._ap_mode_active:
-            # Try to get AP details from the script
+            # Try to get AP details from AccessPopup settings
             try:
-                script_path = "/usr/bin/accesspopup"
-                if os.path.isfile(script_path):
-                    with open(script_path, "r") as f:
-                        content = f.read()
-                        
-                        # Extract AP SSID
-                        ssid_match = re.search(r"ap_ssid='([^']*)'", content)
-                        if ssid_match:
-                            status["ap_ssid"] = ssid_match.group(1)
-                        
-                        # Extract AP IP
-                        ip_match = re.search(r"ap_ip='([^']*)'", content)
-                        if ip_match:
-                            status["ap_ip"] = ip_match.group(1)
+                content = self._read_accesspopup_settings()
+                if content:
+                    # Extract AP SSID
+                    ssid_match = re.search(r"ap_ssid='([^']*)'", content)
+                    if ssid_match:
+                        status["ap_ssid"] = ssid_match.group(1)
+
+                    # Extract AP IP
+                    ip_match = re.search(r"ap_ip='([^']*)'", content)
+                    if ip_match:
+                        status["ap_ip"] = ip_match.group(1)
             except Exception as e:
                 self.logger.error(f"Error getting AP details: {e}")
 

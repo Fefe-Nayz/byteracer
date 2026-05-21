@@ -6,7 +6,22 @@ REPO_URL="${REPO_URL:-https://github.com/nayzflux/byteracer.git}"
 BRANCH="${BRANCH:-working-2}"
 TARGET_DIR="${TARGET_DIR:-/home/pi/ByteRacer}"
 PI_USER="${PI_USER:-pi}"
-INSTALL_ACCESSPOPUP="${INSTALL_ACCESSPOPUP:-false}"
+INSTALL_ACCESSPOPUP="${INSTALL_ACCESSPOPUP:-true}"
+ACCESSPOPUP_REPO="${ACCESSPOPUP_REPO:-https://github.com/RaspberryConnect/AccessPopup.git}"
+ACCESSPOPUP_SSID="${ACCESSPOPUP_SSID:-ByteRacer}"
+ACCESSPOPUP_PASSWORD="${ACCESSPOPUP_PASSWORD:-ByteRacerForever}"
+ACCESSPOPUP_IP="${ACCESSPOPUP_IP:-192.168.50.5/24}"
+ACCESSPOPUP_GATEWAY="${ACCESSPOPUP_GATEWAY:-192.168.50.254}"
+
+APP_PATHS=(
+    "/byteracer/"
+    "/eaglecontrol/"
+    "/relaytower/"
+    "/startup.sh"
+    "/README.md"
+    "/.gitattributes"
+    "/.gitignore"
+)
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -15,6 +30,15 @@ log() {
 run() {
     log "Executing: $*"
     "$@"
+}
+
+fail() {
+    log "ERROR: $*"
+    exit 1
+}
+
+run_required() {
+    run "$@" || fail "Command failed: $*"
 }
 
 require_pi_user() {
@@ -28,30 +52,64 @@ install_apt_packages() {
     log "Installing system packages"
     sudo apt-get update
     sudo apt-get install -y \
-        git curl ca-certificates jq screen sox libsox-fmt-all libttspico-utils \
+        git curl ca-certificates jq screen \
+        raspi-config i2c-tools espeak sox libsox-fmt-all \
+        libsdl2-dev libsdl2-mixer-dev \
         python3 python3-pip python3-dev python3-setuptools python3-wheel \
         python3-websockets python3-psutil python3-pygame python3-pyaudio \
         python3-numpy python3-pil portaudio19-dev \
         network-manager rfkill wireless-tools iw \
-        zram-tools
+        dnsmasq-base zram-tools
+
+    sudo apt-get install -y libttspico-utils || \
+        log "libttspico-utils is unavailable from apt on this OS; SunFounder installer may install pico2wave another way"
 }
 
 install_bun() {
-    if command -v bun >/dev/null 2>&1; then
-        log "Bun already installed: $(bun --version)"
+    local bun_bin="/home/${PI_USER}/.bun/bin/bun"
+
+    if [ -x "${bun_bin}" ]; then
+        log "Bun already installed: $(${bun_bin} --version)"
         return
     fi
 
     log "Installing Bun for ${PI_USER}"
     sudo -u "${PI_USER}" bash -lc 'curl -fsSL https://bun.sh/install | bash'
+    [ -x "${bun_bin}" ] || fail "Bun installation did not create ${bun_bin}"
 }
 
 enable_pi_interfaces() {
     log "Enabling Raspberry Pi interfaces where raspi-config is available"
     if command -v raspi-config >/dev/null 2>&1; then
         sudo raspi-config nonint do_i2c 0 || true
+        sudo raspi-config nonint do_spi 0 || true
         sudo raspi-config nonint do_ssh 0 || true
     fi
+}
+
+install_python_project() {
+    local project_dir="$1"
+    local project_name="$2"
+    local break_system_packages=""
+
+    if [ -f "${project_dir}/install.py" ]; then
+        log "Installing ${project_name} through install.py"
+        (cd "${project_dir}" && run sudo python3 install.py)
+        return
+    fi
+
+    if pip3 help install 2>/dev/null | grep -q -- "--break-system-packages"; then
+        break_system_packages="--break-system-packages"
+    fi
+
+    if [ -f "${project_dir}/pyproject.toml" ] || [ -f "${project_dir}/setup.py" ]; then
+        log "Installing ${project_name} through pip"
+        (cd "${project_dir}" && run sudo pip3 install ./ ${break_system_packages})
+        return
+    fi
+
+    log "No install.py, pyproject.toml or setup.py found for ${project_name} in ${project_dir}"
+    return 1
 }
 
 install_sunfounder_stack() {
@@ -61,17 +119,17 @@ install_sunfounder_stack() {
     if [ ! -d "${base}/robot-hat/.git" ]; then
         sudo -u "${PI_USER}" git clone -b v2.0 --depth=1 https://github.com/sunfounder/robot-hat.git "${base}/robot-hat"
     fi
-    (cd "${base}/robot-hat" && run sudo python3 setup.py install)
+    install_python_project "${base}/robot-hat" "robot-hat"
 
     if [ ! -d "${base}/vilib/.git" ]; then
         sudo -u "${PI_USER}" git clone -b picamera2 --depth=1 https://github.com/sunfounder/vilib.git "${base}/vilib"
     fi
-    (cd "${base}/vilib" && run sudo python3 install.py)
+    install_python_project "${base}/vilib" "vilib"
 
     if [ ! -d "${base}/picar-x/.git" ]; then
         sudo -u "${PI_USER}" git clone -b v2.0 --depth=1 https://github.com/sunfounder/picar-x.git "${base}/picar-x"
     fi
-    (cd "${base}/picar-x" && run sudo python3 setup.py install)
+    install_python_project "${base}/picar-x" "picar-x"
 }
 
 install_accesspopup_if_requested() {
@@ -80,28 +138,114 @@ install_accesspopup_if_requested() {
         return
     fi
 
-    if [ -x /usr/bin/accesspopup ]; then
-        log "AccessPopup already installed"
-        return
+    local src="/home/${PI_USER}/sunfounder-src/AccessPopup"
+    local wifi_interface="wlan0"
+
+    if command -v iw >/dev/null 2>&1; then
+        wifi_interface="$(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2; exit }')"
+        wifi_interface="${wifi_interface:-wlan0}"
     fi
 
-    local tmp="/tmp/AccessPopup"
-    rm -rf "${tmp}" /tmp/AccessPopup.tar.gz
-    curl -fsSL "https://www.raspberryconnect.com/images/scripts/AccessPopup.tar.gz" -o /tmp/AccessPopup.tar.gz
-    tar -xzf /tmp/AccessPopup.tar.gz -C /tmp
-    log "Run the AccessPopup installer manually if it prompts for interactive configuration: ${tmp}/installconfig.sh"
+    log "Installing AccessPopup for interface ${wifi_interface}"
+
+    sudo apt-get install -y iw dnsmasq-base
+    sudo systemctl enable --now NetworkManager.service || true
+
+    if systemctl is-active --quiet hostapd.service; then
+        log "Disabling hostapd because it conflicts with NetworkManager access points"
+        sudo systemctl disable --now hostapd.service || true
+    fi
+
+    if systemctl is-enabled --quiet dnsmasq.service; then
+        log "Disabling dnsmasq.service because AccessPopup uses dnsmasq-base through NetworkManager"
+        sudo systemctl disable --now dnsmasq.service || true
+    fi
+
+    if [ ! -d "${src}/.git" ]; then
+        sudo -u "${PI_USER}" git clone --depth=1 "${ACCESSPOPUP_REPO}" "${src}"
+    else
+        sudo -u "${PI_USER}" git -C "${src}" pull --ff-only || true
+    fi
+
+    [ -f "${src}/accesspopup" ] || fail "AccessPopup script not found in ${src}"
+    [ -f "${src}/accesspopup.conf" ] || fail "AccessPopup config not found in ${src}"
+
+    sudo install -m 0755 "${src}/accesspopup" /usr/local/bin/accesspopup
+    if [ ! -f /etc/accesspopup.conf ]; then
+        sudo install -m 0644 "${src}/accesspopup.conf" /etc/accesspopup.conf
+    fi
+
+    sudo sed -i \
+        -e "s/^wdev0=.*/wdev0='${wifi_interface}'/" \
+        -e "s/^ap_ssid=.*/ap_ssid='${ACCESSPOPUP_SSID}'/" \
+        -e "s/^ap_pw=.*/ap_pw='${ACCESSPOPUP_PASSWORD}'/" \
+        -e "s#^ap_ip=.*#ap_ip='${ACCESSPOPUP_IP}'#" \
+        -e "s#^ap_gate=.*#ap_gate='${ACCESSPOPUP_GATEWAY}'#" \
+        /etc/accesspopup.conf
+
+    sudo tee /etc/systemd/system/AccessPopup.service >/dev/null <<'EOF'
+[Unit]
+Description=Automatically creates a NetworkManager access point when no known WiFi is available
+After=NetworkManager.service network-online.target
+Wants=NetworkManager.service network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/accesspopup
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo tee /etc/systemd/system/AccessPopup.timer >/dev/null <<'EOF'
+[Unit]
+Description=Run AccessPopup network checks every 2 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=2min
+Unit=AccessPopup.service
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now AccessPopup.timer
+    sudo /usr/local/bin/accesspopup || log "AccessPopup first run failed; timer remains installed"
+    log "AccessPopup installed. SSID=${ACCESSPOPUP_SSID}, IP=${ACCESSPOPUP_IP}"
 }
 
 clone_app_only() {
     log "Installing app-only sparse checkout"
-    sudo -u "${PI_USER}" env REPO_URL="${REPO_URL}" BRANCH="${BRANCH}" TARGET_DIR="${TARGET_DIR}" \
-        bash "${TARGET_DIR}/byteracer/scripts/install_app_sparse.sh"
+
+    if [ -d "${TARGET_DIR}/.git" ]; then
+        sudo -u "${PI_USER}" git -C "${TARGET_DIR}" remote set-url origin "${REPO_URL}" || \
+            sudo -u "${PI_USER}" git -C "${TARGET_DIR}" remote add origin "${REPO_URL}" || return 1
+        sudo -u "${PI_USER}" git -C "${TARGET_DIR}" fetch --depth=1 origin "${BRANCH}" || return 1
+        sudo -u "${PI_USER}" git -C "${TARGET_DIR}" sparse-checkout init --no-cone || return 1
+        sudo -u "${PI_USER}" git -C "${TARGET_DIR}" sparse-checkout set --no-cone "${APP_PATHS[@]}" || return 1
+        sudo -u "${PI_USER}" git -C "${TARGET_DIR}" checkout -B "${BRANCH}" "origin/${BRANCH}" || return 1
+        return 0
+    fi
+
+    if [ -e "${TARGET_DIR}" ]; then
+        fail "${TARGET_DIR} already exists but is not a git checkout. Move it away before rerunning bootstrap."
+    fi
+
+    mkdir -p "$(dirname "${TARGET_DIR}")"
+    sudo -u "${PI_USER}" git clone --filter=blob:none --depth=1 --sparse -b "${BRANCH}" "${REPO_URL}" "${TARGET_DIR}" || return 1
+    sudo -u "${PI_USER}" git -C "${TARGET_DIR}" sparse-checkout set --no-cone "${APP_PATHS[@]}"
 }
 
 build_app() {
+    local bun_bin="/home/${PI_USER}/.bun/bin/bun"
+
+    [ -x "${bun_bin}" ] || fail "Bun executable not found at ${bun_bin}"
+
     log "Installing JS dependencies and building RelayTower"
-    sudo -u "${PI_USER}" env PATH="/home/${PI_USER}/.bun/bin:${PATH}" bash -lc "cd '${TARGET_DIR}/relaytower' && bun install && bun run build"
-    sudo -u "${PI_USER}" env PATH="/home/${PI_USER}/.bun/bin:${PATH}" bash -lc "cd '${TARGET_DIR}/eaglecontrol' && bun install"
+    sudo -u "${PI_USER}" bash -c "cd '${TARGET_DIR}/relaytower' && '${bun_bin}' install && '${bun_bin}' run build" || return 1
+    sudo -u "${PI_USER}" bash -c "cd '${TARGET_DIR}/eaglecontrol' && '${bun_bin}' install" || return 1
 }
 
 configure_sd_protection() {
@@ -134,30 +278,40 @@ EOF
 
 install_systemd_services() {
     log "Installing ByteRacer systemd services"
+    [ -f "${TARGET_DIR}/byteracer/scripts/install_systemd_services.sh" ] || \
+        fail "Missing ${TARGET_DIR}/byteracer/scripts/install_systemd_services.sh. Push the latest ByteRacer branch before running bootstrap."
     sudo -u "${PI_USER}" env BYTERACER_PATH="${TARGET_DIR}" BYTERACER_USER="${PI_USER}" \
         bash "${TARGET_DIR}/byteracer/scripts/install_systemd_services.sh"
 }
 
+verify_app_checkout() {
+    local required_files=(
+        "${TARGET_DIR}/startup.sh"
+        "${TARGET_DIR}/byteracer/scripts/common.sh"
+        "${TARGET_DIR}/byteracer/scripts/install_systemd_services.sh"
+        "${TARGET_DIR}/relaytower/package.json"
+        "${TARGET_DIR}/eaglecontrol/package.json"
+    )
+
+    for file in "${required_files[@]}"; do
+        [ -f "${file}" ] || fail "Required application file is missing after checkout: ${file}"
+    done
+}
+
 main() {
     require_pi_user
-    install_apt_packages
-    enable_pi_interfaces
+    install_apt_packages || fail "System package installation failed"
+    enable_pi_interfaces || true
     install_bun
-    install_sunfounder_stack
+    install_sunfounder_stack || fail "SunFounder stack installation failed"
 
-    if [ ! -d "${TARGET_DIR}/.git" ]; then
-        mkdir -p "$(dirname "${TARGET_DIR}")"
-        sudo -u "${PI_USER}" git clone --filter=blob:none --depth=1 --sparse -b "${BRANCH}" "${REPO_URL}" "${TARGET_DIR}"
-        sudo -u "${PI_USER}" git -C "${TARGET_DIR}" sparse-checkout set --no-cone \
-            /byteracer/ /eaglecontrol/ /relaytower/ /startup.sh /README.md /.gitattributes /.gitignore
-    else
-        clone_app_only
-    fi
+    clone_app_only || fail "Application sparse checkout update failed"
 
-    build_app
-    configure_sd_protection
-    install_systemd_services
-    install_accesspopup_if_requested
+    verify_app_checkout
+    build_app || fail "Application build failed"
+    configure_sd_protection || fail "SD protection configuration failed"
+    install_systemd_services || fail "Systemd service installation failed"
+    install_accesspopup_if_requested || log "AccessPopup installation failed; continuing without AccessPopup"
 
     log "Bootstrap complete. Reboot is recommended before first production run."
     log "After reboot: sudo systemctl start byteracer-stack.target"
