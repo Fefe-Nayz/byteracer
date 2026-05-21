@@ -1421,7 +1421,7 @@ export default function RobotSettings() {
                 <Input
                   value={
                     localSettings.github?.repo_url ||
-                    "https://github.com/nayzflux/byteracer.git"
+                    "https://github.com/Fefe-Nayz/byteracer.git"
                   }
                   onChange={(e) =>
                     updateSetting("github", "repo_url", e.target.value)
@@ -1433,7 +1433,7 @@ export default function RobotSettings() {
               <div>
                 <div className="mb-1 text-xs">Branch Name</div>
                 <Input
-                  value={localSettings.github?.branch || "working-2"}
+                  value={localSettings.github?.branch || "main"}
                   onChange={(e) =>
                     updateSetting("github", "branch", e.target.value)
                   }

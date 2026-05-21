@@ -92,8 +92,8 @@ class ConfigManager:
             
             # Github settings
             "github": {
-                "branch": "working-2",
-                "repo_url": "https://github.com/nayzflux/byteracer.git",
+                "branch": "main",
+                "repo_url": "https://github.com/Fefe-Nayz/byteracer.git",
                 "auto_update": True
             },
 
@@ -429,8 +429,8 @@ class ConfigManager:
             
             # Github settings
             "github": {
-                "branch": "working-2",
-                "repo_url": "https://github.com/nayzflux/byteracer.git",
+                "branch": "main",
+                "repo_url": "https://github.com/Fefe-Nayz/byteracer.git",
                 "auto_update": True
             },
 

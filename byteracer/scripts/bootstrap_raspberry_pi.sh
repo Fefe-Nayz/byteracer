@@ -2,8 +2,8 @@
 
 set -uo pipefail
 
-REPO_URL="${REPO_URL:-https://github.com/nayzflux/byteracer.git}"
-BRANCH="${BRANCH:-working-2}"
+REPO_URL="${REPO_URL:-https://github.com/Fefe-Nayz/byteracer.git}"
+BRANCH="${BRANCH:-main}"
 TARGET_DIR="${TARGET_DIR:-/home/pi/ByteRacer}"
 PI_USER="${PI_USER:-pi}"
 INSTALL_ACCESSPOPUP="${INSTALL_ACCESSPOPUP:-true}"
@@ -12,6 +12,13 @@ ACCESSPOPUP_SSID="${ACCESSPOPUP_SSID:-ByteRacer}"
 ACCESSPOPUP_PASSWORD="${ACCESSPOPUP_PASSWORD:-ByteRacerForever}"
 ACCESSPOPUP_IP="${ACCESSPOPUP_IP:-192.168.50.5/24}"
 ACCESSPOPUP_GATEWAY="${ACCESSPOPUP_GATEWAY:-192.168.50.254}"
+ROBOT_HAT_REPO="${ROBOT_HAT_REPO:-https://github.com/sunfounder/robot-hat.git}"
+ROBOT_HAT_BRANCH="${ROBOT_HAT_BRANCH:-2.5.x}"
+VILIB_REPO="${VILIB_REPO:-https://github.com/sunfounder/vilib.git}"
+VILIB_BRANCH="${VILIB_BRANCH:-main}"
+PICARX_REPO="${PICARX_REPO:-https://github.com/sunfounder/picar-x.git}"
+PICARX_BRANCH="${PICARX_BRANCH:-2.1.x}"
+INSTALL_I2SAMP="${INSTALL_I2SAMP:-true}"
 
 APP_PATHS=(
     "/byteracer/"
@@ -50,18 +57,21 @@ require_pi_user() {
 
 install_apt_packages() {
     log "Installing system packages"
-    sudo apt-get update
-    sudo apt-get install -y \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get update
+    sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
         git curl ca-certificates jq screen \
         raspi-config i2c-tools espeak sox libsox-fmt-all \
+        alsa-utils pulseaudio pulseaudio-utils \
         libsdl2-dev libsdl2-mixer-dev \
         python3 python3-pip python3-dev python3-setuptools python3-wheel \
+        python3-smbus \
         python3-websockets python3-psutil python3-pygame python3-pyaudio \
         python3-numpy python3-pil portaudio19-dev \
         network-manager rfkill wireless-tools iw \
         dnsmasq-base zram-tools
 
-    sudo apt-get install -y libttspico-utils || \
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libttspico-utils || \
         log "libttspico-utils is unavailable from apt on this OS; SunFounder installer may install pico2wave another way"
 }
 
@@ -112,24 +122,111 @@ install_python_project() {
     return 1
 }
 
+clone_or_update_repo() {
+    local repo_url="$1"
+    local branch="$2"
+    local destination="$3"
+    local name="$4"
+
+    if [ -d "${destination}/.git" ]; then
+        log "Updating ${name} to ${branch}"
+        sudo -u "${PI_USER}" git -C "${destination}" remote set-url origin "${repo_url}" || \
+            sudo -u "${PI_USER}" git -C "${destination}" remote add origin "${repo_url}" || return 1
+        sudo -u "${PI_USER}" git -C "${destination}" fetch --depth=1 origin "${branch}" || return 1
+        sudo -u "${PI_USER}" git -C "${destination}" checkout -B "${branch}" "origin/${branch}" || return 1
+        return 0
+    fi
+
+    if [ -e "${destination}" ]; then
+        log "${destination} exists but is not a git checkout"
+        return 1
+    fi
+
+    log "Cloning ${name} ${branch}"
+    sudo -u "${PI_USER}" git clone -b "${branch}" --depth=1 "${repo_url}" "${destination}"
+}
+
+install_i2s_audio() {
+    local robot_hat_dir="$1"
+    local runner="/usr/local/sbin/byteracer-run-i2samp.sh"
+
+    if [ "${INSTALL_I2SAMP}" != "true" ]; then
+        log "Skipping i2samp setup. Set INSTALL_I2SAMP=true to install it."
+        return 0
+    fi
+
+    if [ ! -f "${robot_hat_dir}/i2samp.sh" ]; then
+        log "i2samp.sh not found in ${robot_hat_dir}; skipping I2S setup"
+        return 1
+    fi
+
+    log "Installing I2S audio helper"
+    sudo tee "${runner}" >/dev/null <<EOF
+#!/bin/bash
+set -uo pipefail
+
+ROBOT_HAT_DIR="${robot_hat_dir}"
+SOURCE="\${ROBOT_HAT_DIR}/i2samp.sh"
+PATCHED="/tmp/byteracer-i2samp.sh"
+
+if [ ! -f "\${SOURCE}" ]; then
+    echo "Missing \${SOURCE}"
+    exit 1
+fi
+
+cp "\${SOURCE}" "\${PATCHED}"
+sed -i 's/if confirm "Do you wish to test speaker now?"; then/if false; then/' "\${PATCHED}"
+bash "\${PATCHED}" --no-deps
+status=\$?
+
+if [ "\${status}" -eq 0 ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl disable --now byteracer-i2samp-firstboot.service >/dev/null 2>&1 || true
+fi
+
+exit "\${status}"
+EOF
+    sudo chmod 0755 "${runner}"
+
+    sudo tee /etc/systemd/system/byteracer-i2samp-firstboot.service >/dev/null <<EOF
+[Unit]
+Description=Retry Robot HAT I2S audio setup after boot
+After=multi-user.target sound.target
+
+[Service]
+Type=oneshot
+ExecStart=${runner}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    sudo systemctl daemon-reload || true
+
+    if sudo "${runner}"; then
+        log "I2S audio setup completed"
+        sudo systemctl disable --now byteracer-i2samp-firstboot.service >/dev/null 2>&1 || true
+    else
+        log "I2S audio setup needs a reboot; enabling first-boot retry service"
+        sudo systemctl enable byteracer-i2samp-firstboot.service >/dev/null 2>&1 || true
+    fi
+}
+
 install_sunfounder_stack() {
     local base="/home/${PI_USER}/sunfounder-src"
+    local robot_hat_dir="${base}/robot-hat"
+    local vilib_dir="${base}/vilib"
+    local picarx_dir="${base}/picar-x"
+
     sudo -u "${PI_USER}" mkdir -p "${base}"
 
-    if [ ! -d "${base}/robot-hat/.git" ]; then
-        sudo -u "${PI_USER}" git clone -b v2.0 --depth=1 https://github.com/sunfounder/robot-hat.git "${base}/robot-hat"
-    fi
-    install_python_project "${base}/robot-hat" "robot-hat"
+    clone_or_update_repo "${ROBOT_HAT_REPO}" "${ROBOT_HAT_BRANCH}" "${robot_hat_dir}" "robot-hat" || return 1
+    install_python_project "${robot_hat_dir}" "robot-hat" || return 1
+    install_i2s_audio "${robot_hat_dir}" || log "I2S audio setup is not complete yet"
 
-    if [ ! -d "${base}/vilib/.git" ]; then
-        sudo -u "${PI_USER}" git clone -b picamera2 --depth=1 https://github.com/sunfounder/vilib.git "${base}/vilib"
-    fi
-    install_python_project "${base}/vilib" "vilib"
+    clone_or_update_repo "${VILIB_REPO}" "${VILIB_BRANCH}" "${vilib_dir}" "vilib" || return 1
+    install_python_project "${vilib_dir}" "vilib" || return 1
 
-    if [ ! -d "${base}/picar-x/.git" ]; then
-        sudo -u "${PI_USER}" git clone -b v2.0 --depth=1 https://github.com/sunfounder/picar-x.git "${base}/picar-x"
-    fi
-    install_python_project "${base}/picar-x" "picar-x"
+    clone_or_update_repo "${PICARX_REPO}" "${PICARX_BRANCH}" "${picarx_dir}" "picar-x" || return 1
+    install_python_project "${picarx_dir}" "picar-x" || return 1
 }
 
 install_accesspopup_if_requested() {
@@ -218,6 +315,7 @@ EOF
 
 clone_app_only() {
     log "Installing app-only sparse checkout"
+    log "Application source: ${REPO_URL} (${BRANCH})"
 
     if [ -d "${TARGET_DIR}/.git" ]; then
         sudo -u "${PI_USER}" git -C "${TARGET_DIR}" remote set-url origin "${REPO_URL}" || \
@@ -298,6 +396,39 @@ verify_app_checkout() {
     done
 }
 
+configure_app_repository_settings() {
+    local config_dir="${TARGET_DIR}/byteracer/config"
+    local config_file="${config_dir}/settings.json"
+
+    log "Configuring application update source"
+    sudo -u "${PI_USER}" mkdir -p "${config_dir}"
+    sudo -u "${PI_USER}" python3 - "${config_file}" "${REPO_URL}" "${BRANCH}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_file = Path(sys.argv[1])
+repo_url = sys.argv[2]
+branch = sys.argv[3]
+
+settings = {}
+if config_file.exists():
+    try:
+        settings = json.loads(config_file.read_text())
+    except json.JSONDecodeError:
+        settings = {}
+
+github = settings.setdefault("github", {})
+github["repo_url"] = repo_url
+github["branch"] = branch
+github.setdefault("auto_update", True)
+
+tmp_file = config_file.with_suffix(config_file.suffix + ".tmp")
+tmp_file.write_text(json.dumps(settings, indent=2) + "\n")
+tmp_file.replace(config_file)
+PY
+}
+
 main() {
     require_pi_user
     install_apt_packages || fail "System package installation failed"
@@ -308,6 +439,7 @@ main() {
     clone_app_only || fail "Application sparse checkout update failed"
 
     verify_app_checkout
+    configure_app_repository_settings || fail "Application repository configuration failed"
     build_app || fail "Application build failed"
     configure_sd_protection || fail "SD protection configuration failed"
     install_systemd_services || fail "Systemd service installation failed"

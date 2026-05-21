@@ -72,7 +72,9 @@ sudo apt autoremove -y
 ```bash
 sudo apt install -y \
   git curl jq screen mc sox libsox-fmt-all libttspico-utils \
+  raspi-config i2c-tools espeak alsa-utils pulseaudio pulseaudio-utils \
   python3 python3-pip python3-dev python3-setuptools python3-wheel \
+  python3-smbus \
   python3-websockets python3-psutil python3-pygame python3-pyaudio \
   python3-numpy python3-pil portaudio19-dev
 ```
@@ -91,16 +93,16 @@ Le script `byteracer/install.sh` du depot ne clone aujourd'hui que `picar-x`. Po
 
 ```bash
 cd ~/
-git clone -b v2.0 https://github.com/sunfounder/robot-hat.git
+git clone -b 2.5.x https://github.com/sunfounder/robot-hat.git --depth 1
 cd robot-hat
 sudo python3 install.py
 ```
 
-### 4.2 Installer `vilib` avec la branche `picamera2`
+### 4.2 Installer `vilib`
 
 ```bash
 cd ~/
-git clone -b picamera2 https://github.com/sunfounder/vilib.git
+git clone https://github.com/sunfounder/vilib.git --depth 1
 cd vilib
 sudo python3 install.py
 ```
@@ -109,7 +111,7 @@ sudo python3 install.py
 
 ```bash
 cd ~/
-git clone -b v2.0 https://github.com/sunfounder/picar-x.git --depth 1
+git clone -b 2.1.x https://github.com/sunfounder/picar-x.git --depth 1
 cd picar-x
 if [ -f install.py ]; then
   sudo python3 install.py
@@ -121,7 +123,7 @@ fi
 ### 4.4 Activer l'audio I2S fourni par SunFounder
 
 ```bash
-cd ~/picar-x
+cd ~/robot-hat
 sudo bash i2samp.sh
 ```
 
@@ -196,9 +198,9 @@ Si vous ne l'utilisez pas, vous pouvez faire tourner `relaytower` et `eaglecontr
 Le robot n'a pas besoin des documents lourds, presentations, videos et anciens modeles pour fonctionner. Utiliser un sparse checkout evite de telecharger et d'ecrire ces fichiers sur la carte SD.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nayzflux/byteracer/working-2/byteracer/scripts/install_app_sparse.sh -o install_app_sparse.sh
-REPO_URL=https://github.com/nayzflux/byteracer.git \
-BRANCH=working-2 \
+curl -fsSL https://raw.githubusercontent.com/Fefe-Nayz/byteracer/refs/heads/main/byteracer/scripts/install_app_sparse.sh -o install_app_sparse.sh
+REPO_URL=https://github.com/Fefe-Nayz/byteracer.git \
+BRANCH=main \
 TARGET_DIR=/home/pi/ByteRacer \
 bash install_app_sparse.sh
 ```
@@ -206,7 +208,7 @@ bash install_app_sparse.sh
 Depuis une machine neuve, le plus simple est d'utiliser le bootstrap complet:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nayzflux/byteracer/working-2/byteracer/scripts/bootstrap_raspberry_pi.sh -o bootstrap_raspberry_pi.sh
+curl -fsSL https://raw.githubusercontent.com/Fefe-Nayz/byteracer/refs/heads/main/byteracer/scripts/bootstrap_raspberry_pi.sh -o bootstrap_raspberry_pi.sh
 bash bootstrap_raspberry_pi.sh
 ```
 
@@ -215,6 +217,8 @@ Variables utiles:
 - `REPO_URL`: depot Git a utiliser;
 - `BRANCH`: branche ou tag a installer;
 - `TARGET_DIR`: dossier final, par defaut `/home/pi/ByteRacer`;
+- `ROBOT_HAT_BRANCH`, `VILIB_BRANCH`, `PICARX_BRANCH`: versions SunFounder, par defaut `2.5.x`, `main`, `2.1.x`;
+- `INSTALL_I2SAMP=false`: desactive l'installation automatique de l'audio I2S;
 - `INSTALL_ACCESSPOPUP=false`: desactive l'installation d'AccessPopup, installee par defaut;
 - `ACCESSPOPUP_SSID`, `ACCESSPOPUP_PASSWORD`, `ACCESSPOPUP_IP`: reglages du hotspot de secours.
 
@@ -493,7 +497,7 @@ cd ~/picar-x/example/calibration && sudo python3 calibration.py
 cd ~/picar-x/example/calibration && sudo python3 grayscale_calibration.py
 
 # installation projet
-cd /home/pi && git clone -b main https://github.com/nayzflux/byteracer.git ByteRacer
+cd /home/pi && git clone -b main https://github.com/Fefe-Nayz/byteracer.git ByteRacer
 cd /home/pi/ByteRacer/relaytower && bun install && bun run build
 cd /home/pi/ByteRacer/eaglecontrol && bun install
 cd /home/pi/ByteRacer/byteracer && sudo bash ./install.sh

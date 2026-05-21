@@ -16,8 +16,8 @@ log "Project path: ${BYTERACER_PATH}"
 log "Runtime user: ${BYTERACER_USER}"
 speak "Starting ByteRacer"
 
-REPO_URL="$(get_config ".github.repo_url" "https://github.com/nayzflux/byteracer.git")"
-BRANCH="$(get_config ".github.branch" "working-2")"
+REPO_URL="$(get_config ".github.repo_url" "https://github.com/Fefe-Nayz/byteracer.git")"
+BRANCH="$(get_config ".github.branch" "main")"
 AUTO_UPDATE="$(get_config ".github.auto_update" "true")"
 
 log "Repository: ${REPO_URL}"

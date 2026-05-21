@@ -14,8 +14,8 @@ setup_logging "${LOG_FILE}"
 log "========== UPDATE STARTED =========="
 speak "Checking for updates"
 
-BRANCH="$(get_config ".github.branch" "working-2")"
-REPO_URL="$(get_config ".github.repo_url" "https://github.com/nayzflux/byteracer.git")"
+BRANCH="$(get_config ".github.branch" "main")"
+REPO_URL="$(get_config ".github.repo_url" "https://github.com/Fefe-Nayz/byteracer.git")"
 
 log "Repository: ${REPO_URL}"
 log "Branch: ${BRANCH}"
