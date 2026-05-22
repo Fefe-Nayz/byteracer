@@ -19,6 +19,11 @@ VILIB_BRANCH="${VILIB_BRANCH:-main}"
 PICARX_REPO="${PICARX_REPO:-https://github.com/sunfounder/picar-x.git}"
 PICARX_BRANCH="${PICARX_BRANCH:-2.1.x}"
 INSTALL_I2SAMP="${INSTALL_I2SAMP:-true}"
+# Keep Raspberry Pi installs on CPU PyTorch; plain ultralytics can otherwise pull CUDA wheels.
+PYTORCH_CPU_NUMPY="${PYTORCH_CPU_NUMPY:-numpy==2.2.6}"
+PYTORCH_CPU_INDEX_URL="${PYTORCH_CPU_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
+PYTORCH_CPU_TORCH="${PYTORCH_CPU_TORCH:-torch==2.12.0+cpu}"
+PYTORCH_CPU_TORCHVISION="${PYTORCH_CPU_TORCHVISION:-torchvision==0.27.0+cpu}"
 
 APP_PATHS=(
     "/byteracer/"
@@ -359,10 +364,36 @@ install_python_app_deps() {
     fi
 
     sudo mkdir -p "${pip_tmp_dir}"
+    sudo find "${pip_tmp_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
     log "Installing ByteRacer Python dependencies"
     while IFS= read -r dep || [ -n "${dep}" ]; do
         dep="$(printf '%s' "${dep}" | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         [ -n "${dep}" ] || continue
+
+        case "${dep}" in
+            ultralytics*)
+                log "Installing pip NumPy wheel before PyTorch CPU"
+                if ! sudo env TMPDIR="${pip_tmp_dir}" python3 -m pip install --no-cache-dir \
+                    --ignore-installed \
+                    --only-binary=:all: \
+                    "${PYTORCH_CPU_NUMPY}" \
+                    ${break_system_packages}; then
+                    log "WARNING: NumPy wheel failed to install; skipping ultralytics"
+                    continue
+                fi
+
+                log "Installing PyTorch CPU wheels before ultralytics"
+                if ! sudo env TMPDIR="${pip_tmp_dir}" python3 -m pip install --no-cache-dir \
+                    --index-url "${PYTORCH_CPU_INDEX_URL}" \
+                    "${PYTORCH_CPU_TORCH}" \
+                    "${PYTORCH_CPU_TORCHVISION}" \
+                    ${break_system_packages}; then
+                    log "WARNING: PyTorch CPU dependency failed; skipping ultralytics to avoid CUDA wheel download"
+                    continue
+                fi
+                ;;
+        esac
+
         local pip_options=(--no-cache-dir)
         if [ "${dep}" = "openai" ]; then
             pip_options+=(--ignore-installed)

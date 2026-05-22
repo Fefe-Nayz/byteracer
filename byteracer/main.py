@@ -111,7 +111,7 @@ class ByteRacer:
             logging.error(f"Network bootstrap failed; continuing with current state: {e}")
         
         # Start TTS introduction
-        await self.tts_manager.say("ByteRacer robot controller started successfully", priority=1, blocking=True)
+        await self.tts_manager.say("Controleur ByteRacer demarre", priority=1, blocking=True)
         
         # Start IP announcement if no client is connected
         self.ip_speaking_task = asyncio.create_task(self.announce_ip_periodically())
@@ -143,7 +143,7 @@ class ByteRacer:
         self.px.set_cam_tilt_angle(0)
         
         # Announce shutdown
-        await self.tts_manager.say("ByteRacer shutting down", priority=2, blocking=True)
+        await self.tts_manager.say("Arret de ByteRacer", priority=2, blocking=True)
         
         # Stop managers in reverse order
         await self.log_manager.stop()
@@ -578,7 +578,7 @@ class ByteRacer:
                 # Handle text to speak
                 if "text" in data["data"]:
                     text = data["data"]["text"]
-                    language = data["data"].get("language", "en")
+                    language = data["data"].get("language", "fr-FR")
                     logging.info(f"Received TTS request: {text} in {language}")
                     await self.tts_manager.say(text, lang=language, priority=1)
                     await self.send_command_response({

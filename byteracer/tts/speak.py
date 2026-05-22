@@ -19,14 +19,18 @@ except ImportError:
     # Fallback if modules can't be imported
     ConfigManager = None
 
+DEFAULT_TTS_LANGUAGE = "fr-FR"
+
 def main():
     # Try to get config settings
     config_volume = None
+    config_language = DEFAULT_TTS_LANGUAGE
     if ConfigManager is not None:
         try:
             config = ConfigManager()
             # Use system_tts_volume by default for system notifications
             config_volume = config.get("sound.system_tts_volume")
+            config_language = config.get("sound.tts_language") or DEFAULT_TTS_LANGUAGE
             is_enabled = config.get("sound.tts_enabled")
             if not is_enabled:
                 config_volume = 0
@@ -37,7 +41,7 @@ def main():
     parser = argparse.ArgumentParser(description='Text-to-Speech for ByteRacer')
     parser.add_argument('text', help='Text to speak', nargs='?')
     parser.add_argument('-f', '--file', help='File to read text from')
-    parser.add_argument('-l', '--lang', help='Language for TTS (default: en-US)', default='en-US')
+    parser.add_argument('-l', '--lang', help=f'Language for TTS (default: {config_language})', default=config_language)
     parser.add_argument('-v', '--volume', help='Volume level 0-100 (default: from config or 100)', 
                        type=int, default=config_volume if config_volume is not None else 100)
     

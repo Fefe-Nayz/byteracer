@@ -36,7 +36,7 @@ class ConfigManager:
                 "sound_volume": 80,  # Master volume for sound effects
                 "tts_volume": 80,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_language": "en-US",
+                "tts_language": "fr-FR",
                 "tts_audio_gain": 6,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
@@ -373,7 +373,7 @@ class ConfigManager:
                 "sound_volume": 80,  # Master volume for sound effects
                 "tts_volume": 80,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_language": "en-US",
+                "tts_language": "fr-FR",
                 "tts_audio_gain": 6,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds

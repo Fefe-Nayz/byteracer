@@ -1,6 +1,7 @@
 websockets
 openai
 requests
+numpy==2.2.6
 SpeechRecognition
 sox
 ultralytics

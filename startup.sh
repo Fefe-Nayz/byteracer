@@ -14,7 +14,7 @@ setup_logging "${LOG_FILE}"
 log "========== BYTERACER STARTUP STARTED =========="
 log "Project path: ${BYTERACER_PATH}"
 log "Runtime user: ${BYTERACER_USER}"
-speak "Starting ByteRacer"
+speak "Demarrage de ByteRacer"
 
 REPO_URL="$(get_config ".github.repo_url" "https://github.com/Fefe-Nayz/byteracer.git")"
 BRANCH="$(get_config ".github.branch" "main")"
@@ -30,7 +30,7 @@ BUILD_NEEDED=false
 if [ "${AUTO_UPDATE}" = "true" ]; then
     log "Checking internet before update"
     if wait_for_internet 45 5; then
-        speak "Checking for updates"
+        speak "Recherche des mises a jour"
 
         if [ -d "${BYTERACER_PATH}/.git" ]; then
             git config --global --add safe.directory "${BYTERACER_PATH}" >/dev/null 2>&1 || true
@@ -44,7 +44,7 @@ if [ "${AUTO_UPDATE}" = "true" ]; then
 
                 if [ -n "${REMOTE}" ] && [ "${LOCAL}" != "${REMOTE}" ]; then
                     log "Update available: ${LOCAL} -> ${REMOTE}"
-                    speak "Installing software update"
+                    speak "Installation de la mise a jour"
 
                     CONFIG_BACKUP="$(mktemp -d /tmp/byteracer-config.XXXXXX)"
                     if [ -d "${BYTERACER_PATH}/byteracer/config" ]; then
@@ -58,7 +58,7 @@ if [ "${AUTO_UPDATE}" = "true" ]; then
                         BUILD_NEEDED=true
                     else
                         log "Git reset failed; continuing with local copy"
-                        speak "Update failed. Starting installed version."
+                        speak "Echec de la mise a jour. Demarrage de la version installee."
                     fi
 
                     rm -rf "${CONFIG_BACKUP}" 2>/dev/null || true
@@ -73,7 +73,7 @@ if [ "${AUTO_UPDATE}" = "true" ]; then
         fi
     else
         log "Internet unavailable; starting offline"
-        speak "No internet connection. Starting offline."
+        speak "Aucune connexion internet. Demarrage hors ligne."
     fi
 else
     log "Auto update disabled"
@@ -85,7 +85,7 @@ fi
 
 if [ "${BUILD_NEEDED}" = "true" ]; then
     log "Installing dependencies and building services where needed"
-    speak "Preparing services"
+    speak "Preparation des services"
     build_relaytower_if_needed "true" || log "RelayTower build failed; service start will still be attempted"
     install_eaglecontrol_deps || log "EagleControl dependency install failed; service start will still be attempted"
 else
@@ -94,12 +94,12 @@ else
 fi
 
 log "Starting services"
-speak "Starting services"
+speak "Demarrage des services"
 if start_byteracer_services "true"; then
-    speak "ByteRacer is ready"
+    speak "ByteRacer est pret"
     log "Services launched"
 else
-    speak "ByteRacer service startup failed"
+    speak "Echec du demarrage des services ByteRacer"
     log "At least one service failed to launch"
 fi
 

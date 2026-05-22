@@ -15,7 +15,7 @@ class TTSManager:
     Manages Text-to-Speech functionality with asynchronous operation.
     Uses pygame for audio playback exactly like the sound_manager - completely non-blocking.
     """
-    def __init__(self, sound_manager=None, lang="en-US", enabled=True, volume=80):
+    def __init__(self, sound_manager=None, lang="fr-FR", enabled=True, volume=80):
         self.lang = lang
         self.enabled = enabled
         self.volume = volume  # Master TTS volume
