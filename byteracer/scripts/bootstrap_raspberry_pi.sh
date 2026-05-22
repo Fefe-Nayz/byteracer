@@ -350,6 +350,7 @@ install_python_app_deps() {
     local requirements="${TARGET_DIR}/byteracer/requirements.txt"
     local break_system_packages=""
     local dep
+    local pip_tmp_dir="/var/tmp/byteracer-pip"
 
     [ -f "${requirements}" ] || fail "Missing Python requirements file: ${requirements}"
 
@@ -357,11 +358,16 @@ install_python_app_deps() {
         break_system_packages="--break-system-packages"
     fi
 
+    sudo mkdir -p "${pip_tmp_dir}"
     log "Installing ByteRacer Python dependencies"
     while IFS= read -r dep || [ -n "${dep}" ]; do
         dep="$(printf '%s' "${dep}" | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
         [ -n "${dep}" ] || continue
-        sudo python3 -m pip install "${dep}" ${break_system_packages} || \
+        local pip_options=(--no-cache-dir)
+        if [ "${dep}" = "openai" ]; then
+            pip_options+=(--ignore-installed)
+        fi
+        sudo env TMPDIR="${pip_tmp_dir}" python3 -m pip install "${pip_options[@]}" "${dep}" ${break_system_packages} || \
             log "WARNING: Python dependency failed to install: ${dep}"
     done < "${requirements}"
 }
