@@ -1,1 +1,7 @@
 websockets
+openai
+requests
+SpeechRecognition
+sox
+ultralytics
+ncnn

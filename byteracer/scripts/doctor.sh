@@ -29,6 +29,55 @@ command -v nmcli || true
 command -v screen || true
 echo
 
+echo "---- Python Imports ----"
+python3 - <<'PY'
+import importlib.util
+
+core = [
+    "websockets",
+    "psutil",
+    "openai",
+    "requests",
+    "speech_recognition",
+    "sox",
+    "picarx",
+    "robot_hat",
+    "vilib",
+    "picamera2",
+    "libcamera",
+    "cv2",
+    "numpy",
+    "PIL",
+    "pygame",
+    "pyaudio",
+    "flask",
+    "imutils",
+    "qrcode",
+    "pyzbar",
+    "readchar",
+    "smbus2",
+    "gpiozero",
+    "spidev",
+    "serial",
+    "ultralytics",
+    "ncnn",
+    "torch",
+    "google.protobuf",
+]
+
+optional_unsupported = [
+    "mediapipe",
+    "tflite_runtime",
+]
+
+for name in core:
+    print(f"{name}: {'OK' if importlib.util.find_spec(name) else 'MISSING'}")
+
+for name in optional_unsupported:
+    print(f"{name}: {'OK' if importlib.util.find_spec(name) else 'MISSING'} (optional/unsupported on Python 3.13)")
+PY
+echo
+
 echo "---- Network ----"
 ip -brief address 2>/dev/null || true
 nmcli -t -f NAME,DEVICE,TYPE connection show --active 2>/dev/null || true
@@ -54,6 +103,7 @@ echo
 echo "---- Systemd ----"
 if systemd_available; then
     systemctl --no-pager --plain status \
+        byteracer-startup.service \
         byteracer-eaglecontrol.service \
         byteracer-relaytower.service \
         byteracer-python.service 2>/dev/null || true

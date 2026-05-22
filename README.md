@@ -107,10 +107,11 @@ bash bootstrap_raspberry_pi.sh
 sudo reboot
 ```
 
-Apres redemarrage:
+Apres redemarrage, le demarrage applicatif est orchestre par `byteracer-startup.service`.
+Pour lancer manuellement sans redemarrer:
 
 ```bash
-sudo systemctl start byteracer-stack.target
+sudo systemctl start byteracer-startup.service
 bash /home/pi/ByteRacer/byteracer/scripts/doctor.sh
 ```
 

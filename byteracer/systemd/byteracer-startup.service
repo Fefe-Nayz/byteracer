@@ -1,0 +1,21 @@
+[Unit]
+Description=ByteRacer boot orchestrator
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=__BYTERACER_PATH__
+Environment=PATH=__BUN_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=BYTERACER_PATH=__BYTERACER_PATH__
+Environment=BYTERACER_USER=__BYTERACER_USER__
+Environment=BYTERACER_LOG_DIR=/tmp/byteracer/logs
+ExecStart=/bin/bash __BYTERACER_PATH__/startup.sh
+RemainAfterExit=yes
+TimeoutStartSec=0
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

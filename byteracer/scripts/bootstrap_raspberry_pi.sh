@@ -346,6 +346,82 @@ build_app() {
     sudo -u "${PI_USER}" bash -c "cd '${TARGET_DIR}/eaglecontrol' && '${bun_bin}' install" || return 1
 }
 
+install_python_app_deps() {
+    local requirements="${TARGET_DIR}/byteracer/requirements.txt"
+    local break_system_packages=""
+    local dep
+
+    [ -f "${requirements}" ] || fail "Missing Python requirements file: ${requirements}"
+
+    if python3 -m pip help install 2>/dev/null | grep -q -- "--break-system-packages"; then
+        break_system_packages="--break-system-packages"
+    fi
+
+    log "Installing ByteRacer Python dependencies"
+    while IFS= read -r dep || [ -n "${dep}" ]; do
+        dep="$(printf '%s' "${dep}" | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        [ -n "${dep}" ] || continue
+        sudo python3 -m pip install "${dep}" ${break_system_packages} || \
+            log "WARNING: Python dependency failed to install: ${dep}"
+    done < "${requirements}"
+}
+
+warn_python_stack() {
+    log "Checking ByteRacer Python import stack"
+    python3 - <<'PY'
+import importlib.util
+
+required = [
+    "websockets",
+    "psutil",
+    "openai",
+    "requests",
+    "speech_recognition",
+    "sox",
+    "picarx",
+    "robot_hat",
+    "vilib",
+    "picamera2",
+    "libcamera",
+    "cv2",
+    "numpy",
+    "PIL",
+    "pygame",
+    "pyaudio",
+    "flask",
+    "imutils",
+    "qrcode",
+    "pyzbar",
+    "readchar",
+    "smbus2",
+    "gpiozero",
+    "spidev",
+    "serial",
+    "ultralytics",
+    "ncnn",
+    "torch",
+    "google.protobuf",
+]
+
+optional_unsupported = [
+    "mediapipe",
+    "tflite_runtime",
+]
+
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+if missing:
+    print("WARNING: Missing Python modules:")
+    for name in missing:
+        print(f" - {name}")
+else:
+    print("Core Python modules are importable.")
+
+for name in optional_unsupported:
+    if importlib.util.find_spec(name) is None:
+        print(f"INFO: Optional unsupported module missing: {name}")
+PY
+}
+
 configure_sd_protection() {
     log "Configuring SD-card-friendly defaults"
 
@@ -387,6 +463,8 @@ verify_app_checkout() {
         "${TARGET_DIR}/startup.sh"
         "${TARGET_DIR}/byteracer/scripts/common.sh"
         "${TARGET_DIR}/byteracer/scripts/install_systemd_services.sh"
+        "${TARGET_DIR}/byteracer/systemd/byteracer-startup.service"
+        "${TARGET_DIR}/byteracer/requirements.txt"
         "${TARGET_DIR}/relaytower/package.json"
         "${TARGET_DIR}/eaglecontrol/package.json"
     )
@@ -440,13 +518,16 @@ main() {
 
     verify_app_checkout
     configure_app_repository_settings || fail "Application repository configuration failed"
+    install_python_app_deps || fail "Application Python dependency installation failed"
+    warn_python_stack || log "Python dependency check failed; continuing"
     build_app || fail "Application build failed"
     configure_sd_protection || fail "SD protection configuration failed"
     install_systemd_services || fail "Systemd service installation failed"
     install_accesspopup_if_requested || log "AccessPopup installation failed; continuing without AccessPopup"
 
     log "Bootstrap complete. Reboot is recommended before first production run."
-    log "After reboot: sudo systemctl start byteracer-stack.target"
+    log "After reboot: ByteRacer starts through byteracer-startup.service"
+    log "Manual start: sudo systemctl start byteracer-startup.service"
     log "Diagnostics: bash ${TARGET_DIR}/byteracer/scripts/doctor.sh"
 }
 

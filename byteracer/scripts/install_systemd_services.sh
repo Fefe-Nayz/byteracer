@@ -59,13 +59,16 @@ log "BUN_BIN=${BUN_BIN}"
 install_unit_template "${SYSTEMD_DIR}/byteracer-eaglecontrol.service" /etc/systemd/system/byteracer-eaglecontrol.service
 install_unit_template "${SYSTEMD_DIR}/byteracer-relaytower.service" /etc/systemd/system/byteracer-relaytower.service
 install_unit_template "${SYSTEMD_DIR}/byteracer-python.service" /etc/systemd/system/byteracer-python.service
+install_unit_template "${SYSTEMD_DIR}/byteracer-startup.service" /etc/systemd/system/byteracer-startup.service
 sudo install -m 0644 "${SYSTEMD_DIR}/byteracer-stack.target" /etc/systemd/system/byteracer-stack.target
 
 sudo systemctl daemon-reload
-sudo systemctl enable byteracer-stack.target
-sudo systemctl enable byteracer-eaglecontrol.service byteracer-relaytower.service byteracer-python.service
+sudo systemctl disable byteracer-stack.target >/dev/null 2>&1 || true
+sudo systemctl disable byteracer-eaglecontrol.service byteracer-relaytower.service byteracer-python.service >/dev/null 2>&1 || true
+sudo systemctl enable byteracer-startup.service
 
-log "Systemd services installed and enabled"
-log "Use: sudo systemctl start byteracer-stack.target"
-log "Use: sudo systemctl status byteracer-eaglecontrol byteracer-relaytower byteracer-python"
+log "Systemd services installed"
+log "Boot orchestrator enabled: byteracer-startup.service"
+log "Use: sudo systemctl start byteracer-startup.service"
+log "Use: sudo systemctl status byteracer-startup byteracer-eaglecontrol byteracer-relaytower byteracer-python"
 log "========== INSTALL SYSTEMD SERVICES COMPLETED =========="
