@@ -23,6 +23,8 @@ echo
 echo "---- Runtime Tools ----"
 command -v python3 || true
 python3 --version 2>/dev/null || true
+echo "ByteRacer Python: $(byteracer_python)"
+"$(byteracer_python)" --version 2>/dev/null || true
 command -v bun || true
 bun --version 2>/dev/null || true
 command -v nmcli || true
@@ -30,7 +32,7 @@ command -v screen || true
 echo
 
 echo "---- Python Imports ----"
-python3 - <<'PY'
+"$(byteracer_python)" - <<'PY'
 import importlib.util
 
 core = [
@@ -84,7 +86,7 @@ nmcli -t -f NAME,DEVICE,TYPE connection show --active 2>/dev/null || true
 echo
 
 echo "---- Ports ----"
-python3 - <<'PY'
+"$(byteracer_python)" - <<'PY'
 import socket
 
 for port in (3000, 3001, 9000):
@@ -113,7 +115,7 @@ fi
 echo
 
 echo "---- Processes ----"
-pgrep -af "python3 .*main.py|bun .*index.ts|bun .*server.ts|next start" || true
+pgrep -af "python[0-9.]* .*main.py|.venv/bin/python .*main.py|bun .*index.ts|bun .*server.ts|next start" || true
 echo
 
 echo "---- Recent Logs ----"

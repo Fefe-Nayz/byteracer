@@ -4,5 +4,5 @@ requests
 numpy==2.2.6
 SpeechRecognition
 sox
-ultralytics
-ncnn
+ultralytics==8.4.53
+ncnn==1.0.20260114

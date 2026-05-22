@@ -12,7 +12,7 @@ LOG_FILE="${BYTERACER_LOG_DIR}/restart_services.log"
 setup_logging "${LOG_FILE}"
 
 log "========== RESTART ALL SERVICES STARTED =========="
-speak "Restarting all ByteRacer services"
+speak "Redemarrage des services ByteRacer"
 
 chmod +x "${SCRIPT_DIR}/restart_websocket.sh" "${SCRIPT_DIR}/restart_web_server.sh" "${SCRIPT_DIR}/restart_python.sh" 2>/dev/null || true
 
@@ -29,10 +29,10 @@ screen_list
 
 if [ "${WEBSOCKET_EXIT}" -eq 0 ] && [ "${WEBSERVER_EXIT}" -eq 0 ] && [ "${PYTHON_EXIT}" -eq 0 ]; then
     log "All services restarted successfully"
-    speak "All services restarted"
+    speak "Services redemarres"
 else
     log "Restart failures: websocket=${WEBSOCKET_EXIT}, web=${WEBSERVER_EXIT}, python=${PYTHON_EXIT}"
-    speak "Some services failed to restart"
+    speak "Echec du redemarrage de certains services"
     exit 1
 fi
 

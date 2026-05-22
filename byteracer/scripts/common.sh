@@ -7,6 +7,8 @@
 export BYTERACER_PATH="${BYTERACER_PATH:-/home/pi/ByteRacer}"
 export BYTERACER_USER="${BYTERACER_USER:-pi}"
 export BYTERACER_LOG_DIR="${BYTERACER_LOG_DIR:-/tmp/byteracer/logs}"
+export BYTERACER_VENV="${BYTERACER_VENV:-${BYTERACER_PATH}/.venv}"
+export BYTERACER_PYTHON="${BYTERACER_PYTHON:-${BYTERACER_VENV}/bin/python}"
 
 if ! id "${BYTERACER_USER}" >/dev/null 2>&1; then
     BYTERACER_USER="$(id -un)"
@@ -16,6 +18,20 @@ export PATH="/home/pi/.bun/bin:${HOME}/.bun/bin:/usr/local/sbin:/usr/local/bin:/
 
 TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
 CONFIG_FILE="${BYTERACER_PATH}/byteracer/config/settings.json"
+
+byteracer_python() {
+    if [ -x "${BYTERACER_PYTHON}" ]; then
+        printf '%s\n' "${BYTERACER_PYTHON}"
+        return 0
+    fi
+
+    if [ -x "${BYTERACER_VENV}/bin/python" ]; then
+        printf '%s\n' "${BYTERACER_VENV}/bin/python"
+        return 0
+    fi
+
+    command -v python3 2>/dev/null || printf '%s\n' "python3"
+}
 
 timestamp() {
     date '+%Y-%m-%d %H:%M:%S'
@@ -33,13 +49,15 @@ setup_logging() {
 
 speak() {
     local text="$1"
+    local python_bin
+    python_bin="$(byteracer_python)"
 
-    if [ ! -f "${TTS_SCRIPT}" ] || ! command -v python3 >/dev/null 2>&1; then
+    if [ ! -f "${TTS_SCRIPT}" ] || [ -z "${python_bin}" ]; then
         log "TTS unavailable: ${text}"
         return 0
     fi
 
-    timeout 20s python3 "${TTS_SCRIPT}" "${text}" >/dev/null 2>&1 || \
+    timeout 20s "${python_bin}" "${TTS_SCRIPT}" "${text}" >/dev/null 2>&1 || \
         log "TTS failed or timed out: ${text}"
     return 0
 }
@@ -190,7 +208,7 @@ wait_for_port() {
     local port="$2"
     local timeout_seconds="${3:-20}"
 
-    python3 - "${host}" "${port}" "${timeout_seconds}" <<'PY'
+    "$(byteracer_python)" - "${host}" "${port}" "${timeout_seconds}" <<'PY'
 import socket
 import sys
 import time
@@ -211,7 +229,7 @@ PY
 }
 
 have_internet() {
-    python3 - <<'PY'
+    "$(byteracer_python)" - <<'PY'
 import socket
 import sys
 
@@ -246,13 +264,15 @@ wait_for_internet() {
 get_config() {
     local key="$1"
     local default="$2"
+    local python_bin
+    python_bin="$(byteracer_python)"
 
-    if [ ! -f "${CONFIG_FILE}" ] || ! command -v python3 >/dev/null 2>&1; then
+    if [ ! -f "${CONFIG_FILE}" ] || [ -z "${python_bin}" ]; then
         echo "${default}"
         return 0
     fi
 
-    python3 - "${CONFIG_FILE}" "${key}" "${default}" <<'PY'
+    "${python_bin}" - "${CONFIG_FILE}" "${key}" "${default}" <<'PY'
 import json
 import sys
 
@@ -321,7 +341,7 @@ start_byteracer_services() {
     log "Systemd units are not installed; using screen fallback"
 
     if [ "${restart_existing}" = "true" ]; then
-        stop_screen_session "byteracer" "python3 .*main.py"
+        stop_screen_session "byteracer" "python[0-9.]* .*main.py|.venv/bin/python .*main.py"
         stop_screen_session "relaytower" "bun .*server.ts|next start"
         stop_screen_session "eaglecontrol" "bun .*index.ts"
     fi
@@ -332,7 +352,9 @@ start_byteracer_services() {
     start_screen_session "relaytower" "${BYTERACER_PATH}/relaytower" "bun run start" || return 1
     wait_for_port "127.0.0.1" 3000 30 || log "RelayTower did not open port 3000 yet"
 
-    start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -E env PATH=${PATH} python3 main.py" || return 1
+    local python_bin
+    python_bin="$(byteracer_python)"
+    start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -E env PATH=${PATH} BYTERACER_PYTHON=${python_bin} ${python_bin} main.py" || return 1
     sleep 3
 
     log "Current screen sessions:"

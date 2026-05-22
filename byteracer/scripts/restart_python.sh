@@ -12,14 +12,14 @@ LOG_FILE="${BYTERACER_LOG_DIR}/restart_python.log"
 setup_logging "${LOG_FILE}"
 
 log "========== RESTART PYTHON STARTED =========="
-speak "Restarting robot controller"
+speak "Redemarrage du controleur robot"
 
 if systemd_unit_exists "byteracer-python.service"; then
     if restart_systemd_unit "byteracer-python.service"; then
         sleep 3
         if sudo systemctl is-active --quiet "byteracer-python.service"; then
             log "Python controller systemd service is active"
-            speak "Robot controller restarted"
+            speak "Controleur robot redemarre"
             log "========== RESTART PYTHON COMPLETED =========="
             exit 0
         fi
@@ -27,21 +27,22 @@ if systemd_unit_exists "byteracer-python.service"; then
     log "Systemd restart failed; trying screen fallback"
 fi
 
-stop_screen_session "byteracer" "python3 .*main.py"
+stop_screen_session "byteracer" "python[0-9.]* .*main.py|.venv/bin/python .*main.py"
 
-if start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -E env PATH=${PATH} python3 main.py"; then
+PYTHON_BIN="$(byteracer_python)"
+if start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -E env PATH=${PATH} BYTERACER_PYTHON=${PYTHON_BIN} ${PYTHON_BIN} main.py"; then
     sleep 3
-    if pgrep -f "python3 .*main.py" >/dev/null 2>&1; then
+    if pgrep -f "python[0-9.]* .*main.py|.venv/bin/python .*main.py" >/dev/null 2>&1; then
         log "Python controller process is running"
-        speak "Robot controller restarted"
+        speak "Controleur robot redemarre"
     else
         log "Python screen started but controller process was not found"
-        speak "Robot controller did not become ready"
+        speak "Le controleur robot n'est pas pret"
         exit 1
     fi
 else
     log "Failed to start Python screen session"
-    speak "Robot controller failed to start"
+    speak "Echec du demarrage du controleur robot"
     exit 1
 fi
 

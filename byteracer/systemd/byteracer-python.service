@@ -10,7 +10,8 @@ WorkingDirectory=__BYTERACER_PATH__/byteracer
 Environment=PATH=__BUN_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONUNBUFFERED=1
 Environment=BYTERACER_LOG_DIR=/tmp/byteracer/logs
-ExecStart=/usr/bin/python3 main.py
+Environment=BYTERACER_PYTHON=__PYTHON_BIN__
+ExecStart=__PYTHON_BIN__ main.py
 Restart=always
 RestartSec=5
 StandardOutput=journal

@@ -19,11 +19,6 @@ VILIB_BRANCH="${VILIB_BRANCH:-main}"
 PICARX_REPO="${PICARX_REPO:-https://github.com/sunfounder/picar-x.git}"
 PICARX_BRANCH="${PICARX_BRANCH:-2.1.x}"
 INSTALL_I2SAMP="${INSTALL_I2SAMP:-true}"
-# Keep Raspberry Pi installs on CPU PyTorch; plain ultralytics can otherwise pull CUDA wheels.
-PYTORCH_CPU_NUMPY="${PYTORCH_CPU_NUMPY:-numpy==2.2.6}"
-PYTORCH_CPU_INDEX_URL="${PYTORCH_CPU_INDEX_URL:-https://download.pytorch.org/whl/cpu}"
-PYTORCH_CPU_TORCH="${PYTORCH_CPU_TORCH:-torch==2.12.0+cpu}"
-PYTORCH_CPU_TORCHVISION="${PYTORCH_CPU_TORCHVISION:-torchvision==0.27.0+cpu}"
 
 APP_PATHS=(
     "/byteracer/"
@@ -69,7 +64,7 @@ install_apt_packages() {
         raspi-config i2c-tools espeak sox libsox-fmt-all \
         alsa-utils pulseaudio pulseaudio-utils \
         libsdl2-dev libsdl2-mixer-dev \
-        python3 python3-pip python3-dev python3-setuptools python3-wheel \
+        python3 python3-venv python3-pip python3-dev python3-setuptools python3-wheel \
         python3-smbus \
         python3-websockets python3-psutil python3-pygame python3-pyaudio \
         python3-numpy python3-pil portaudio19-dev \
@@ -352,60 +347,18 @@ build_app() {
 }
 
 install_python_app_deps() {
-    local requirements="${TARGET_DIR}/byteracer/requirements.txt"
-    local break_system_packages=""
-    local dep
-    local pip_tmp_dir="/var/tmp/byteracer-pip"
+    local setup_script="${TARGET_DIR}/byteracer/scripts/setup_python_env.sh"
 
-    [ -f "${requirements}" ] || fail "Missing Python requirements file: ${requirements}"
+    [ -f "${setup_script}" ] || fail "Missing Python environment setup script: ${setup_script}"
 
-    if python3 -m pip help install 2>/dev/null | grep -q -- "--break-system-packages"; then
-        break_system_packages="--break-system-packages"
-    fi
-
-    sudo mkdir -p "${pip_tmp_dir}"
-    sudo find "${pip_tmp_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
-    log "Installing ByteRacer Python dependencies"
-    while IFS= read -r dep || [ -n "${dep}" ]; do
-        dep="$(printf '%s' "${dep}" | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-        [ -n "${dep}" ] || continue
-
-        case "${dep}" in
-            ultralytics*)
-                log "Installing pip NumPy wheel before PyTorch CPU"
-                if ! sudo env TMPDIR="${pip_tmp_dir}" python3 -m pip install --no-cache-dir \
-                    --ignore-installed \
-                    --only-binary=:all: \
-                    "${PYTORCH_CPU_NUMPY}" \
-                    ${break_system_packages}; then
-                    log "WARNING: NumPy wheel failed to install; skipping ultralytics"
-                    continue
-                fi
-
-                log "Installing PyTorch CPU wheels before ultralytics"
-                if ! sudo env TMPDIR="${pip_tmp_dir}" python3 -m pip install --no-cache-dir \
-                    --index-url "${PYTORCH_CPU_INDEX_URL}" \
-                    "${PYTORCH_CPU_TORCH}" \
-                    "${PYTORCH_CPU_TORCHVISION}" \
-                    ${break_system_packages}; then
-                    log "WARNING: PyTorch CPU dependency failed; skipping ultralytics to avoid CUDA wheel download"
-                    continue
-                fi
-                ;;
-        esac
-
-        local pip_options=(--no-cache-dir)
-        if [ "${dep}" = "openai" ]; then
-            pip_options+=(--ignore-installed)
-        fi
-        sudo env TMPDIR="${pip_tmp_dir}" python3 -m pip install "${pip_options[@]}" "${dep}" ${break_system_packages} || \
-            log "WARNING: Python dependency failed to install: ${dep}"
-    done < "${requirements}"
+    log "Installing ByteRacer Python dependencies into isolated venv"
+    sudo env BYTERACER_PATH="${TARGET_DIR}" BYTERACER_USER="${PI_USER}" \
+        bash "${setup_script}"
 }
 
 warn_python_stack() {
     log "Checking ByteRacer Python import stack"
-    python3 - <<'PY'
+    "${TARGET_DIR}/.venv/bin/python" - <<'PY'
 import importlib.util
 
 required = [
@@ -500,6 +453,7 @@ verify_app_checkout() {
         "${TARGET_DIR}/startup.sh"
         "${TARGET_DIR}/byteracer/scripts/common.sh"
         "${TARGET_DIR}/byteracer/scripts/install_systemd_services.sh"
+        "${TARGET_DIR}/byteracer/scripts/setup_python_env.sh"
         "${TARGET_DIR}/byteracer/systemd/byteracer-startup.service"
         "${TARGET_DIR}/byteracer/requirements.txt"
         "${TARGET_DIR}/relaytower/package.json"

@@ -86,6 +86,7 @@ fi
 if [ "${BUILD_NEEDED}" = "true" ]; then
     log "Installing dependencies and building services where needed"
     speak "Preparation des services"
+    "${BYTERACER_PATH}/byteracer/scripts/setup_python_env.sh" || log "Python dependency install failed; service start will still be attempted"
     build_relaytower_if_needed "true" || log "RelayTower build failed; service start will still be attempted"
     install_eaglecontrol_deps || log "EagleControl dependency install failed; service start will still be attempted"
 else
