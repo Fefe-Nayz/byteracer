@@ -11,8 +11,9 @@ Environment=PATH=__BUN_DIR__:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/
 Environment=PYTHONUNBUFFERED=1
 Environment=BYTERACER_LOG_DIR=/tmp/byteracer/logs
 Environment=BYTERACER_PYTHON=__PYTHON_BIN__
+Environment=BYTERACER_USER=__BYTERACER_USER__
 ExecStart=__PYTHON_BIN__ main.py
-Restart=always
+Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal

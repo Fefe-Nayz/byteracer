@@ -4,6 +4,7 @@ import websockets
 import json
 import socket
 import os
+import getpass
 import subprocess
 import threading
 import psutil
@@ -29,14 +30,31 @@ from modules.led_manager import LEDManager
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
 SERVER_HOST = "127.0.0.1:3001"  # Default WebSocket server address
 
+def patch_getlogin_for_service_context():
+    """Make SunFounder libraries safe when launched by systemd without a TTY."""
+    try:
+        os.getlogin()
+    except OSError:
+        fallback_user = (
+            os.environ.get("BYTERACER_USER")
+            or os.environ.get("SUDO_USER")
+            or os.environ.get("USER")
+            or getpass.getuser()
+            or "pi"
+        )
+        os.getlogin = lambda: fallback_user
+        logging.info("Using os.getlogin fallback user: %s", fallback_user)
+
 class ByteRacer:
     """Main ByteRacer class that integrates all modules"""
     
     def __init__(self):
         # Initialize logging first
         self.log_manager = LogManager()
+        patch_getlogin_for_service_context()
         
         # Then initialize hardware
+        logging.info("Initializing PicarX hardware")
         self.px = Picarx()
         
         # Initialize config manager first to get camera settings
@@ -1748,7 +1766,7 @@ async def main():
             await robot.stop()
     
     except Exception as e:
-        logging.critical(f"Fatal error: {e}")
+        logging.critical("Fatal error: %s", e, exc_info=True)
         raise
 
 if __name__ == "__main__":
@@ -1759,5 +1777,6 @@ if __name__ == "__main__":
         print("\nShutting down gracefully...")
     except Exception as e:
         print(f"Fatal error: {e}")
+        sys.exit(1)
     finally:
         print("ByteRacer offline.")
