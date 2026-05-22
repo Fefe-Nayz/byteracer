@@ -45,6 +45,57 @@ def patch_getlogin_for_service_context():
         os.getlogin = lambda: fallback_user
         logging.info("Using os.getlogin fallback user: %s", fallback_user)
 
+class DisabledGPTManager:
+    """No-op GPT manager used when OpenAI credentials are not configured."""
+
+    def __init__(self, sensor_manager, reason="OpenAI API key is not configured"):
+        self.sensor_manager = sensor_manager
+        self.reason = reason
+        self.api_key = ""
+        self.model = None
+        self.active_processes = {}
+        self.is_processing = False
+        self.gpt_command_cancelled = False
+        self.conversation_cancelled = False
+        self.is_conversation_active = False
+        self.pause_threshold = 1.2
+
+    def set_pause_threshold(self, threshold):
+        self.pause_threshold = threshold
+
+    async def _send_gpt_status_update(self, websocket, status, message, additional_data=None):
+        if not websocket:
+            return
+        payload = {
+            "name": "gpt_status_update",
+            "data": {
+                "status": status,
+                "message": message,
+                **(additional_data or {}),
+            },
+            "createdAt": int(time.time() * 1000),
+        }
+        await websocket.send(json.dumps(payload))
+
+    async def process_gpt_command(self, prompt, use_camera=False, websocket=None, new_conversation=False, use_ai_voice=False, conversation_mode=False):
+        logging.warning("GPT command ignored: %s", self.reason)
+        await self._send_gpt_status_update(websocket, "error", self.reason)
+        if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
+            self.sensor_manager.robot_state = RobotState.STANDBY
+        return False
+
+    async def cancel_gpt_command(self, websocket=None, conversation_mode=False):
+        self.gpt_command_cancelled = True
+        self.conversation_cancelled = True
+        if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
+            self.sensor_manager.robot_state = RobotState.STANDBY
+        await self._send_gpt_status_update(websocket, "info", "GPT is not configured.")
+        return True
+
+    async def create_new_conversation(self, websocket=None):
+        await self._send_gpt_status_update(websocket, "error", self.reason)
+        return False
+
 class ByteRacer:
     """Main ByteRacer class that integrates all modules"""
     
@@ -86,7 +137,7 @@ class ByteRacer:
 
         self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager, self.led_manager)
         self.network_manager = NetworkManager()
-        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager, self.led_manager)
+        self.gpt_manager = self.create_gpt_manager()
         
         # Initialize audio manager for microphone streaming
         from modules.audio_manager import AudioManager
@@ -105,6 +156,21 @@ class ByteRacer:
         self.last_motion_update = time.time()
         
         logging.info("ByteRacer initialized")
+
+    def create_gpt_manager(self):
+        api_settings = self.config_manager.get("api")
+        api_key = os.environ.get("OPENAI_API_KEY") or api_settings.get("openai_api_key", "")
+        if not api_key:
+            reason = "OpenAI API key is not configured. GPT features are disabled."
+            logging.warning(reason)
+            return DisabledGPTManager(self.sensor_manager, reason)
+
+        try:
+            return GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager, self.led_manager)
+        except Exception as e:
+            reason = f"GPT initialization failed: {e}. GPT features are disabled."
+            logging.error(reason, exc_info=True)
+            return DisabledGPTManager(self.sensor_manager, reason)
     
     async def start(self):
         """Start all managers and begin operation"""
@@ -1302,10 +1368,8 @@ class ByteRacer:
             
             if "openai_api_key" in api:
                 self.config_manager.set("api.openai_api_key", api["openai_api_key"])
-                # Update GPT manager with new API key if it exists
-                if hasattr(self, 'gpt_manager'):
-                    self.gpt_manager.api_key = api["openai_api_key"]
-                    logging.info("Updated GPT manager with new API key")
+                self.gpt_manager = self.create_gpt_manager()
+                logging.info("Reloaded GPT manager after API settings update")
 
         if "ai" in settings:
             ai = settings["ai"]
