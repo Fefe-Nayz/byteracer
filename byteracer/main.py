@@ -45,57 +45,6 @@ def patch_getlogin_for_service_context():
         os.getlogin = lambda: fallback_user
         logging.info("Using os.getlogin fallback user: %s", fallback_user)
 
-class DisabledGPTManager:
-    """No-op GPT manager used when OpenAI credentials are not configured."""
-
-    def __init__(self, sensor_manager, reason="OpenAI API key is not configured"):
-        self.sensor_manager = sensor_manager
-        self.reason = reason
-        self.api_key = ""
-        self.model = None
-        self.active_processes = {}
-        self.is_processing = False
-        self.gpt_command_cancelled = False
-        self.conversation_cancelled = False
-        self.is_conversation_active = False
-        self.pause_threshold = 1.2
-
-    def set_pause_threshold(self, threshold):
-        self.pause_threshold = threshold
-
-    async def _send_gpt_status_update(self, websocket, status, message, additional_data=None):
-        if not websocket:
-            return
-        payload = {
-            "name": "gpt_status_update",
-            "data": {
-                "status": status,
-                "message": message,
-                **(additional_data or {}),
-            },
-            "createdAt": int(time.time() * 1000),
-        }
-        await websocket.send(json.dumps(payload))
-
-    async def process_gpt_command(self, prompt, use_camera=False, websocket=None, new_conversation=False, use_ai_voice=False, conversation_mode=False):
-        logging.warning("GPT command ignored: %s", self.reason)
-        await self._send_gpt_status_update(websocket, "error", self.reason)
-        if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
-            self.sensor_manager.robot_state = RobotState.STANDBY
-        return False
-
-    async def cancel_gpt_command(self, websocket=None, conversation_mode=False):
-        self.gpt_command_cancelled = True
-        self.conversation_cancelled = True
-        if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED:
-            self.sensor_manager.robot_state = RobotState.STANDBY
-        await self._send_gpt_status_update(websocket, "info", "GPT is not configured.")
-        return True
-
-    async def create_new_conversation(self, websocket=None):
-        await self._send_gpt_status_update(websocket, "error", self.reason)
-        return False
-
 class ByteRacer:
     """Main ByteRacer class that integrates all modules"""
     
@@ -137,7 +86,7 @@ class ByteRacer:
 
         self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager, self.led_manager)
         self.network_manager = NetworkManager()
-        self.gpt_manager = self.create_gpt_manager()
+        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager, self.led_manager)
         
         # Initialize audio manager for microphone streaming
         from modules.audio_manager import AudioManager
@@ -154,23 +103,9 @@ class ByteRacer:
         self.last_turn = 0
         self.last_acceleration = 0
         self.last_motion_update = time.time()
+        self._battery_warning_logged = False
         
         logging.info("ByteRacer initialized")
-
-    def create_gpt_manager(self):
-        api_settings = self.config_manager.get("api")
-        api_key = os.environ.get("OPENAI_API_KEY") or api_settings.get("openai_api_key", "")
-        if not api_key:
-            reason = "OpenAI API key is not configured. GPT features are disabled."
-            logging.warning(reason)
-            return DisabledGPTManager(self.sensor_manager, reason)
-
-        try:
-            return GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager, self.led_manager)
-        except Exception as e:
-            reason = f"GPT initialization failed: {e}. GPT features are disabled."
-            logging.error(reason, exc_info=True)
-            return DisabledGPTManager(self.sensor_manager, reason)
     
     async def start(self):
         """Start all managers and begin operation"""
@@ -657,6 +592,10 @@ class ByteRacer:
                 # Handle settings request
                 logging.info("Received settings request")
                 await self.send_settings_to_client()
+
+            elif data["name"] == "ai_models_request":
+                logging.info("Received AI model list request")
+                await self.send_ai_models()
             
             elif data["name"] == "speak_text":
                 # Handle text to speak
@@ -895,7 +834,7 @@ class ByteRacer:
         except json.JSONDecodeError:
             logging.warning(f"Received non-JSON message: {message}")
         except Exception as e:
-            logging.error(f"Error processing message: {e}")
+            logging.error("Error processing message: %s", e, exc_info=True)
     
     async def execute_network_action(self, action, data):
         """Execute network-related actions"""
@@ -1365,11 +1304,20 @@ class ByteRacer:
                 
         if "api" in settings:
             api = settings["api"]
+            api_changed = False
             
             if "openai_api_key" in api:
                 self.config_manager.set("api.openai_api_key", api["openai_api_key"])
-                self.gpt_manager = self.create_gpt_manager()
-                logging.info("Reloaded GPT manager after API settings update")
+                api_changed = True
+
+            if "model" in api and api["model"]:
+                self.config_manager.set("api.model", api["model"])
+                api_changed = True
+
+            if api_changed:
+                self.gpt_manager.reload_api_settings()
+                logging.info("Reloaded GPT manager API settings")
+                await self.send_ai_models()
 
         if "ai" in settings:
             ai = settings["ai"]
@@ -1495,6 +1443,34 @@ class ByteRacer:
         if not (self.sensor_manager.robot_state == RobotState.CIRCUIT_MODE or 
             self.sensor_manager.robot_state == RobotState.TRACKING_MODE):
             self.led_manager.blink(1, 0.5)  # Blink LED to indicate settings update
+
+    def run_admin_script(self, script_name):
+        """Start a maintenance script outside the request path."""
+        script_path = PROJECT_DIR / "byteracer" / "scripts" / script_name
+        if not script_path.exists():
+            logging.error("Missing admin script: %s", script_path)
+            return False
+
+        env = os.environ.copy()
+        env.setdefault("BYTERACER_PATH", str(PROJECT_DIR))
+        env.setdefault(
+            "BYTERACER_USER",
+            os.environ.get("SUDO_USER") or os.environ.get("USER") or getpass.getuser() or "pi"
+        )
+
+        try:
+            subprocess.Popen(
+                ["bash", str(script_path)],
+                cwd=PROJECT_DIR,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            return True
+        except Exception as e:
+            logging.error("Failed to start admin script %s: %s", script_name, e, exc_info=True)
+            return False
     
     async def execute_robot_command(self, command):
         """Handle system commands and provide feedback"""
@@ -1504,63 +1480,43 @@ class ByteRacer:
             if command == "restart_robot":
                 # Restart the entire system
                 await self.tts_manager.say("Restarting system. Please wait.", priority=1, blocking=True)
-                result = {"success": True, "message": "Rebooting system..."}
-                # Schedule system reboot after response is sent
-                threading.Timer(2.0, lambda: subprocess.run(["sudo", "reboot"], check=False)).start()
+                success = self.run_admin_script("reboot_robot.sh")
+                result = {
+                    "success": success,
+                    "message": "Reboot scheduled" if success else "Failed to schedule reboot"
+                }
                 
             elif command == "stop_robot":
                 # Shutdown the system
                 await self.tts_manager.say("Shutting down system. Goodbye!", priority=1, blocking=True)
-                result = {"success": True, "message": "Shutting down system..."}
-                threading.Timer(2.0, lambda: subprocess.run(["sudo", "shutdown", "-h", "now"], check=False)).start()
+                success = self.run_admin_script("shutdown_robot.sh")
+                result = {
+                    "success": success,
+                    "message": "Shutdown scheduled" if success else "Failed to schedule shutdown"
+                }
                 
             elif command == "restart_all_services":
-
-                result["success"] = True
-                result["message"] = "All services restarted"
-                # Restart all three services
-                subprocess.Popen(
-                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/restart_services.sh"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
+                success = self.run_admin_script("restart_services.sh")
+                result["success"] = success
+                result["message"] = "Service restart scheduled" if success else "Failed to schedule service restart"
                 
             elif command == "restart_websocket":
                 # Restart just the WebSocket service
-                success = subprocess.run(
-                    ["bash", "./byteracer/scripts/restart_websocket.sh"],
-                    cwd=PROJECT_DIR,
-                    check=False
-                ).returncode == 0
-                
+                success = self.run_admin_script("restart_websocket.sh")
                 result["success"] = success
-                result["message"] = "WebSocket service restarted" if success else "Failed to restart WebSocket service"
+                result["message"] = "WebSocket restart scheduled" if success else "Failed to schedule WebSocket restart"
                 
             elif command == "restart_web_server":
                 # Restart just the web server
-                success = subprocess.run(
-                    ["bash", "./byteracer/scripts/restart_web_server.sh"],
-                    cwd=PROJECT_DIR,
-                    check=False
-                ).returncode == 0
-                
+                success = self.run_admin_script("restart_web_server.sh")
                 result["success"] = success
-                result["message"] = "Web server restarted" if success else "Failed to restart web server"
+                result["message"] = "Web server restart scheduled" if success else "Failed to schedule web server restart"
                 
             elif command == "restart_python_service":
                 # Restart just the Python service
-
-                result["success"] = True
-                result["message"] = "Python service will restart"
-                
-                # Run restart_python.sh in a new session so it stays alive
-                subprocess.Popen(
-                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/restart_python.sh"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
+                success = self.run_admin_script("restart_python.sh")
+                result["success"] = success
+                result["message"] = "Python service restart scheduled" if success else "Failed to schedule Python service restart"
                 
             elif command == "restart_camera_feed":
                 # Restart camera feed
@@ -1572,16 +1528,9 @@ class ByteRacer:
                 
             elif command == "check_for_updates":
                 # Check for updates
-                
-                result["success"] = True
-                result["message"] = "Update check completed"
-
-                subprocess.Popen(
-                    ["bash", f"{PROJECT_DIR}/byteracer/scripts/update.sh"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
+                success = self.run_admin_script("update.sh")
+                result["success"] = success
+                result["message"] = "Update check scheduled" if success else "Failed to schedule update check"
                 
             elif command == "emergency_stop":
                 # Trigger emergency stop
@@ -1608,10 +1557,14 @@ class ByteRacer:
     
     def get_battery_level(self):
         """Get the current battery level"""
-        from robot_hat import get_battery_voltage
-        
-        # Get the battery voltage
-        voltage = get_battery_voltage()
+        try:
+            from robot_hat import get_battery_voltage
+            voltage = get_battery_voltage()
+        except Exception as e:
+            if not self._battery_warning_logged:
+                logging.warning("Battery voltage read failed; reporting unknown battery level: %s", e, exc_info=True)
+                self._battery_warning_logged = True
+            return None
         
         # Calculate the percentage based on the voltage range
         if voltage >= 7.8:
@@ -1623,6 +1576,7 @@ class ByteRacer:
         
         # Update sensor manager with battery level
         self.sensor_manager.update_battery_level(level)
+        self._battery_warning_logged = False
         
         return level
     
@@ -1730,6 +1684,24 @@ class ByteRacer:
                 logging.debug("Sent settings to client")
             except Exception as e:
                 logging.error(f"Error sending settings: {e}")
+
+    async def send_ai_models(self):
+        """Send available OpenAI model choices to the client."""
+        if self.websocket:
+            try:
+                model_payload = await self.gpt_manager.get_available_models()
+                await self.websocket.send(json.dumps({
+                    "name": "ai_models",
+                    "data": model_payload,
+                    "createdAt": int(time.time() * 1000)
+                }))
+                logging.info(
+                    "Sent %s AI models to client from %s",
+                    len(model_payload["models"]),
+                    model_payload["source"],
+                )
+            except Exception as e:
+                logging.error("Error sending AI model list: %s", e, exc_info=True)
     
     async def periodic_tasks(self):
         """Run periodic tasks like sensor updates"""

@@ -36,8 +36,10 @@ export default function RobotSettings() {
   const {
     status,
     settings,
+    aiModels,
     updateSettings,
     requestSettings,
+    requestAiModels,
     resetSettings,
     startCalibration,
     stopCalibration,
@@ -73,8 +75,9 @@ export default function RobotSettings() {
   useEffect(() => {
     if (status === "connected") {
       requestSettings();
+      requestAiModels();
     }
-  }, [status, requestSettings]);
+  }, [status, requestSettings, requestAiModels]);
 
   // If no settings or not connected, show placeholder
   if (!localSettings || status !== "connected") {
@@ -88,6 +91,34 @@ export default function RobotSettings() {
         </div>
       </Card>
     );
+  }
+
+  const fallbackAiModels = [
+    { id: "gpt-5.5", label: "GPT 5.5", isDefault: true },
+    { id: "gpt-5.4", label: "GPT 5.4", isDefault: false },
+    { id: "gpt-5.4-mini", label: "GPT 5.4 Mini", isDefault: false },
+    { id: "gpt-5.4-nano", label: "GPT 5.4 Nano", isDefault: false },
+    { id: "gpt-5.2", label: "GPT 5.2", isDefault: false },
+    { id: "gpt-5.1", label: "GPT 5.1", isDefault: false },
+    { id: "gpt-5", label: "GPT 5", isDefault: false },
+    { id: "gpt-4.1", label: "GPT 4.1", isDefault: false },
+    { id: "gpt-4.1-mini", label: "GPT 4.1 Mini", isDefault: false },
+    { id: "gpt-4o", label: "GPT 4o", isDefault: false },
+    { id: "gpt-4o-mini", label: "GPT 4o Mini", isDefault: false },
+    { id: "o4-mini", label: "O4 Mini", isDefault: false },
+    { id: "o3", label: "O3", isDefault: false },
+  ];
+  const selectedAiModel =
+    localSettings.api?.model || aiModels?.defaultModel || "gpt-5.5";
+  const aiModelOptions = [
+    ...(aiModels?.models?.length ? aiModels.models : fallbackAiModels),
+  ];
+  if (!aiModelOptions.some((model) => model.id === selectedAiModel)) {
+    aiModelOptions.unshift({
+      id: selectedAiModel,
+      label: selectedAiModel,
+      isDefault: false,
+    });
   }
 
   // Update a specific setting
@@ -1465,6 +1496,45 @@ export default function RobotSettings() {
             </div>
 
             <div className="grid grid-cols-1 gap-4">
+              <div>
+                <div className="mb-1 text-xs">AI Model</div>
+                <div className="flex gap-2">
+                  <Select
+                    value={selectedAiModel}
+                    onValueChange={(value) =>
+                      updateSetting("api", "model", value)
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {aiModelOptions.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          {model.label}
+                          {model.isDefault ? " (default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label="Refresh AI models"
+                    title="Refresh AI models"
+                    onClick={requestAiModels}
+                  >
+                    <Repeat className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {aiModels?.source === "openai"
+                    ? "Synced from OpenAI"
+                    : "Using fallback model list"}
+                </div>
+              </div>
+
               <div>
                 <div className="mb-1 text-xs">API Key</div>
                 <Input

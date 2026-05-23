@@ -27,6 +27,8 @@ export type WebSocketMessageType =
   | "battery_info"
   | "settings"
   | "settings_update"
+  | "ai_models_request"
+  | "ai_models"
   | "sensor_data"
   | "camera_status"
   | "speak_text"
@@ -186,6 +188,7 @@ export interface RobotSettings {
   };
   api: {
     openai_api_key: string;
+    model: string;
   };
   ai: {
     speak_pause_threshold: number;
@@ -213,6 +216,21 @@ export interface RobotSettings {
 export interface CommandResponse {
   success: boolean;
   message: string;
+}
+
+export interface AiModelOption {
+  id: string;
+  label: string;
+  isDefault: boolean;
+}
+
+export interface AiModelList {
+  models: AiModelOption[];
+  selectedModel: string;
+  defaultModel: string;
+  source: "openai" | "fallback";
+  error?: string | null;
+  updatedAt: number;
 }
 
 // Define GPT status update interface
@@ -281,6 +299,7 @@ interface WebSocketContextValue {
   sensorData: SensorData | null;
   cameraStatus: CameraStatus | null;
   settings: RobotSettings | null;
+  aiModels: AiModelList | null;
   commandResponse: CommandResponse | null;
   logs: LogMessage[];
   clearLogs: () => void;
@@ -293,6 +312,7 @@ interface WebSocketContextValue {
   sendRobotCommand: (command: RobotCommand) => void;
   requestBatteryLevel: () => void;
   requestSettings: () => void;
+  requestAiModels: () => void;
   updateSettings: (settings: Partial<RobotSettings>) => void;
   resetSettings: (section?: string) => void;
   speakText: (text: string, language: string) => void;
@@ -343,6 +363,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const [sensorData, setSensorData] = useState<SensorData | null>(null);
   const [cameraStatus, setCameraStatus] = useState<CameraStatus | null>(null);
   const [settings, setSettings] = useState<RobotSettings | null>(null);
+  const [aiModels, setAiModels] = useState<AiModelList | null>(null);
   const [commandResponse, setCommandResponse] =
     useState<CommandResponse | null>(null);
   const [logs, setLogs] = useState<LogMessage[]>([]);
@@ -560,6 +581,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
             }
             break;
 
+          case "ai_models":
+            setAiModels(event.data);
+            break;
+
           case "command_response":
             setCommandResponse(event.data);
             // Dispatch event for other components
@@ -757,6 +782,27 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       console.log("Settings request sent");
     } else {
       logError("Cannot send settings request", {
+        reason: "Socket not connected",
+        readyState: socket?.readyState,
+      });
+    }
+  }, [socket]);
+
+  const requestAiModels = useCallback(() => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const aiModelsRequestData = {
+        name: "ai_models_request",
+        data: {
+          timestamp: Date.now(),
+        },
+        createdAt: Date.now(),
+      };
+
+      socket.send(JSON.stringify(aiModelsRequestData));
+      trackWsMessage("sent", aiModelsRequestData);
+      console.log("AI model list request sent");
+    } else {
+      logError("Cannot send AI model list request", {
         reason: "Socket not connected",
         readyState: socket?.readyState,
       });
@@ -1287,6 +1333,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     sensorData,
     cameraStatus,
     settings,
+    aiModels,
     commandResponse,
     logs,
     clearLogs,
@@ -1296,6 +1343,7 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     sendRobotCommand,
     requestBatteryLevel,
     requestSettings,
+    requestAiModels,
     updateSettings,
     resetSettings,
     speakText,

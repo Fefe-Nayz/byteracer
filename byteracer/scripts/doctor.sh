@@ -122,6 +122,8 @@ echo "---- Recent Logs ----"
 for log_file in \
     "${BYTERACER_LOG_DIR}/startup.log" \
     "${BYTERACER_LOG_DIR}/restart_services.log" \
+    "${BYTERACER_LOG_DIR}/reboot_robot.log" \
+    "${BYTERACER_LOG_DIR}/shutdown_robot.log" \
     "${BYTERACER_LOG_DIR}/update.log" \
     "${BYTERACER_PATH}/byteracer/logs/startup.log"; do
     if [ -f "${log_file}" ]; then

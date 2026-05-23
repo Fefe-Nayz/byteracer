@@ -104,7 +104,8 @@ class ConfigManager:
 
             # API settings
             "api": {
-                "openai_api_key": ""
+                "openai_api_key": "",
+                "model": "gpt-5.5"
             },
             "ai": {
                 "speak_pause_threshold": 1.2,
@@ -440,7 +441,8 @@ class ConfigManager:
 
             # API settings
             "api": {
-                "openai_api_key": ""
+                "openai_api_key": "",
+                "model": "gpt-5.5"
             },
             "ai": {
                 "speak_pause_threshold": 1.2,

@@ -27,6 +27,37 @@ import json
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+DEFAULT_OPENAI_MODEL = "gpt-5.5"
+FALLBACK_OPENAI_MODELS = [
+    DEFAULT_OPENAI_MODEL,
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5",
+    "gpt-4.1",
+    "gpt-4.1-mini",
+    "gpt-4o",
+    "gpt-4o-mini",
+    "o4-mini",
+    "o3",
+]
+OPENAI_MODEL_EXCLUDE_MARKERS = (
+    "audio",
+    "dall-e",
+    "embedding",
+    "image",
+    "moderation",
+    "realtime",
+    "search",
+    "sora",
+    "tts",
+    "transcribe",
+    "whisper",
+)
+PROJECT_DIR = Path(__file__).resolve().parents[2]
+
 class ScriptCancelledException(Exception):
     """Raised when a custom script is cancelled."""
     pass
@@ -65,20 +96,11 @@ class GPTManager:
         self.led_manager = led_manager
 
         self.robot_state_enum = RobotState
-        
-        api_settings = self.config_manager.get("api")
-        self.api_key = os.environ.get("OPENAI_API_KEY") or api_settings.get("openai_api_key", "")
-        self.model = api_settings.get("model", "gpt-4.1-2025-04-14")
-        
-        if not self.api_key:
-            logger.warning("OPENAI_API_KEY not found in environment variables or settings")
-        
-        # Configure OpenAI client
-        self.client = AsyncOpenAI(
-            api_key=self.api_key,
-            base_url="https://api.openai.com/v1"
-        )
-        self.whisper_client = OpenAI(api_key=self.api_key)
+        self.api_key = ""
+        self.model = DEFAULT_OPENAI_MODEL
+        self.client = None
+        self.whisper_client = None
+        self.reload_api_settings()
         
         self.temp_dir = Path(tempfile.gettempdir()) / "byteracer_scripts"
         os.makedirs(self.temp_dir, exist_ok=True)
@@ -92,6 +114,136 @@ class GPTManager:
         self.is_conversation_active = False
         self.conversation_cancelled = False
         self.pause_threshold = 1.2
+
+    def reload_api_settings(self):
+        """
+        Reload OpenAI credentials and model from config/env without rebuilding
+        the rest of the robot stack.
+        """
+        api_settings = self.config_manager.get("api") or {}
+        self.api_key = os.environ.get("OPENAI_API_KEY") or api_settings.get("openai_api_key", "")
+        self.model = api_settings.get("model") or DEFAULT_OPENAI_MODEL
+
+        if not self.api_key:
+            self.client = None
+            self.whisper_client = None
+            logger.warning("OPENAI_API_KEY not found in environment variables or settings; GPT features are disabled")
+            return False
+
+        self.client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url="https://api.openai.com/v1"
+        )
+        self.whisper_client = OpenAI(api_key=self.api_key)
+        logger.info("OpenAI client configured with model %s", self.model)
+        return True
+
+    def is_openai_configured(self):
+        return bool(self.api_key and self.client)
+
+    @staticmethod
+    def is_gpt_capable_model(model_id):
+        normalized = model_id.lower()
+        if any(marker in normalized for marker in OPENAI_MODEL_EXCLUDE_MARKERS):
+            return False
+        return normalized.startswith(("gpt-", "o1", "o3", "o4"))
+
+    @staticmethod
+    def sort_ai_models(model_ids):
+        unique_models = sorted(set(model_ids))
+
+        def sort_key(model_id):
+            if model_id == DEFAULT_OPENAI_MODEL:
+                return (0, model_id)
+            if model_id.startswith("gpt-5"):
+                return (1, model_id)
+            if model_id.startswith("gpt-4.1"):
+                return (2, model_id)
+            if model_id.startswith("gpt-4o"):
+                return (3, model_id)
+            if model_id.startswith(("o1", "o3", "o4")):
+                return (4, model_id)
+            return (5, model_id)
+
+        return sorted(unique_models, key=sort_key)
+
+    @staticmethod
+    def model_label(model_id):
+        return model_id.replace("-", " ").upper()
+
+    async def get_available_models(self):
+        """
+        Return model choices for the settings UI.
+
+        Uses OpenAI's model catalog when credentials are configured, and falls
+        back to a bundled list when offline or unauthenticated.
+        """
+        api_settings = self.config_manager.get("api") or {}
+        selected_model = api_settings.get("model") or self.model or DEFAULT_OPENAI_MODEL
+        self.model = selected_model
+        model_ids = list(FALLBACK_OPENAI_MODELS)
+        source = "fallback"
+        error = None
+
+        if self.client:
+            try:
+                response = await self.client.models.list()
+                synced_model_ids = [
+                    model.id
+                    for model in response.data
+                    if hasattr(model, "id") and self.is_gpt_capable_model(model.id)
+                ]
+                if synced_model_ids:
+                    model_ids = synced_model_ids
+                    source = "openai"
+            except Exception as e:
+                error = str(e)
+                logger.warning("Unable to sync OpenAI model list, using fallback list: %s", e)
+
+        for required_model in (selected_model, DEFAULT_OPENAI_MODEL):
+            if required_model and required_model not in model_ids:
+                model_ids.insert(0, required_model)
+
+        sorted_models = self.sort_ai_models(model_ids)
+        return {
+            "models": [
+                {
+                    "id": model_id,
+                    "label": self.model_label(model_id),
+                    "isDefault": model_id == DEFAULT_OPENAI_MODEL,
+                }
+                for model_id in sorted_models
+            ],
+            "selectedModel": selected_model,
+            "defaultModel": DEFAULT_OPENAI_MODEL,
+            "source": source,
+            "error": error,
+            "updatedAt": int(time.time() * 1000),
+        }
+
+    def run_admin_script(self, script_name):
+        script_path = PROJECT_DIR / "byteracer" / "scripts" / script_name
+        if not script_path.exists():
+            logger.error("Missing admin script: %s", script_path)
+            return False
+
+        env = os.environ.copy()
+        env.setdefault("BYTERACER_PATH", str(PROJECT_DIR))
+        env.setdefault("BYTERACER_USER", os.environ.get("SUDO_USER") or os.environ.get("USER") or "pi")
+
+        try:
+            subprocess.Popen(
+                ["bash", str(script_path)],
+                cwd=PROJECT_DIR,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            return True
+        except Exception as e:
+            logger.error("Failed to start admin script %s: %s", script_name, e, exc_info=True)
+            return False
         
     def _listen_and_transcribe_blocking(self, mic_ready_callback=None) -> str:
         """
@@ -105,6 +257,10 @@ class GPTManager:
         Returns:
             str: Transcribed text, or empty string if cancelled.
         """
+        if not self.whisper_client:
+            logger.warning("Skipping transcription; OpenAI API key is not configured")
+            return ""
+
         # 1) set up recognizer exactly as before
         r = sr.Recognizer()
         r.dynamic_energy_adjustment_damping = 0.16
@@ -120,6 +276,9 @@ class GPTManager:
                 return ""
                 
             client = self.whisper_client
+            if not client:
+                logger.warning("Skipping transcription; OpenAI client is unavailable")
+                return ""
             wav = BytesIO(audio.get_wav_data()); wav.name = "speech.wav"
             res = client.audio.transcriptions.create(
                 model="whisper-1",
@@ -171,7 +330,10 @@ class GPTManager:
         raw = tts_dir / f"{stamp}_raw.wav"
         out = tts_dir / f"{stamp}_{volume_db}dB.wav"
 
-        client = OpenAI(api_key=self.api_key)
+        client = self.whisper_client
+        if not client:
+            raise RuntimeError("OpenAI API key not configured for AI voice synthesis")
+
         with client.audio.speech.with_streaming_response.create(
             model="gpt-4o-mini-tts",
             voice=voice,
@@ -193,7 +355,7 @@ class GPTManager:
         Returns:
             bool: True if successful, False otherwise.
         """
-        if not self.api_key:
+        if not self.is_openai_configured():
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", "OpenAI API key not configured.")
             return False
@@ -227,6 +389,12 @@ class GPTManager:
         Returns:
             bool: Success status.
         """
+        if not self.is_openai_configured():
+            await self.tts_manager.say("OpenAI API key not configured.", priority=1)
+            if websocket:
+                await self._send_gpt_status_update(websocket, "error", "API key missing")
+            return False
+
         # If we're in conversation mode, we need to reset the cancellation flag first
         self.conversation_cancelled = False
         if conversation_mode:
@@ -294,7 +462,7 @@ class GPTManager:
             self.gpt_command_cancelled = False
             self.is_processing = True
 
-            if not self.api_key:
+            if not self.is_openai_configured():
                 await self.tts_manager.say("OpenAI API key not configured.", priority=1)
                 if websocket:
                     await self._send_gpt_status_update(websocket, "error", "API key missing")
@@ -2356,72 +2524,40 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "restart_robot":
                 logger.info("Restart robot requested")
                 await self.tts_manager.say("Restarting system. Please wait.", priority=2, blocking=True)
-                import threading
-                threading.Timer(2.0, lambda: subprocess.run(["sudo", "reboot"], check=False)).start()
-                return True
+                return self.run_admin_script("reboot_robot.sh")
                 
             elif function_name == "shutdown_robot":
                 logger.info("Shutdown robot requested")
                 await self.tts_manager.say("Shutting down system. Goodbye!", priority=2, blocking=True)
-                import threading
-                threading.Timer(2.0, lambda: subprocess.run(["sudo", "shutdown", "-h", "now"], check=False)).start()
-                return True
+                return self.run_admin_script("shutdown_robot.sh")
             
             elif function_name == "restart_all_services":
                 logger.info("Restart all services requested")
                 await self.tts_manager.say("Restarting all services.", priority=1)
-                import threading, os
-                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                subprocess.Popen(
-                    ["bash", f"{project_dir}/byteracer/scripts/restart_services.sh"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
-                return True
+                return self.run_admin_script("restart_services.sh")
                 
             elif function_name == "restart_websocket":
                 logger.info("Restart websocket requested")
                 await self.tts_manager.say("Restarting websocket service.", priority=1)
-                import os
-                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                success = subprocess.run(
-                    ["bash", "./byteracer/scripts/restart_websocket.sh"],
-                    cwd=project_dir,
-                    check=False
-                ).returncode == 0
+                success = self.run_admin_script("restart_websocket.sh")
                 if not success:
-                    await self.tts_manager.say("Failed to restart websocket service.", priority=1)
+                    await self.tts_manager.say("Failed to schedule websocket restart.", priority=1)
                     logger.error("Failed to restart websocket service")
                 return success
                 
             elif function_name == "restart_web_server":
                 logger.info("Restart web server requested")
                 await self.tts_manager.say("Restarting web server.", priority=1)
-                import os
-                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                success = subprocess.run(
-                    ["bash", "./byteracer/scripts/restart_web_server.sh"],
-                    cwd=project_dir,
-                    check=False
-                ).returncode == 0
+                success = self.run_admin_script("restart_web_server.sh")
                 if not success:
-                    await self.tts_manager.say("Failed to restart web server.", priority=1)
+                    await self.tts_manager.say("Failed to schedule web server restart.", priority=1)
                     logger.error("Failed to restart web server")
                 return success
                 
             elif function_name == "restart_python_service":
                 logger.info("Restart Python service requested")
                 await self.tts_manager.say("Restarting Python service.", priority=1)
-                import os
-                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                subprocess.Popen(
-                    ["bash", f"{project_dir}/byteracer/scripts/restart_python.sh"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
-                return True
+                return self.run_admin_script("restart_python.sh")
                 
             elif function_name == "restart_camera_feed":
                 logger.info("Restart camera feed requested")
@@ -2435,15 +2571,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "check_for_updates":
                 logger.info("Check for updates requested")
                 await self.tts_manager.say("Checking for updates.", priority=1)
-                import os
-                project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
-                subprocess.Popen(
-                    ["bash", f"{project_dir}/byteracer/scripts/update.sh"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
-                return True
+                return self.run_admin_script("update.sh")
                 
             elif function_name == "emergency_stop":
                 logger.info("Emergency stop requested")

@@ -35,6 +35,8 @@ type WebSocketEventName =
   | "settings"            // For receiving settings from the robot
   | "settings_update"     // For sending settings changes to the robot
   | "reset_settings"      // For resetting settings to defaults
+  | "ai_models_request"   // For requesting available OpenAI models
+  | "ai_models"           // For receiving available OpenAI models
   | "sensor_data"         // For receiving sensor data
   | "camera_status"       // For receiving camera status
   | "speak_text"          // For sending text to be spoken
@@ -270,6 +272,17 @@ const wsHandlers = {
           console.log(`Settings reset request received for section: ${event.data.section || "all"}`);
           // Forward to all cars
           broadcastToType(message, "car", ws);
+          break;
+
+        case "ai_models_request":
+          console.log("AI model list requested");
+          broadcastToType(message, "car", ws);
+          break;
+
+        case "ai_models":
+          console.log(`AI model list received from ${event.data.source}`);
+          broadcastToType(message, "controller", ws);
+          broadcastToType(message, "viewer", ws);
           break;
 
         // Text to speak
