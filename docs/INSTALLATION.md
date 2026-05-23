@@ -412,7 +412,22 @@ Eviter `sudo chmod -R 777 /home/pi/ByteRacer/`. Si des permissions bloquent, cor
 
 ## 16. Installation du mode point d'acces / AccessPopup
 
-Les fonctions reseau du projet s'appuient sur `accesspopup` pour basculer le robot en point d'acces et exposer un portail de configuration.
+Les fonctions reseau du projet s'appuient sur `accesspopup` pour basculer le robot en point d'acces et exposer un portail de configuration. Le script `bootstrap_raspberry_pi.sh` installe et configure AccessPopup automatiquement (variable `INSTALL_ACCESSPOPUP=true` par defaut), et active aussi l'interface web d'AccessPopup (`ACCESSPOPUP_WEBGUI=true` par defaut).
+
+Quand aucun reseau Wi-Fi connu n'est disponible, le robot demarre son propre point d'acces avec ces parametres par defaut:
+
+- **SSID**: `ByteRacer` (variable `ACCESSPOPUP_SSID`);
+- **Mot de passe**: `Tipe2025` (variable `ACCESSPOPUP_PASSWORD`, minimum 8 caracteres);
+- **Adresse IP du robot sur ce reseau**: `192.168.50.5` (variable `ACCESSPOPUP_IP`).
+
+Une fois connecte au reseau Wi-Fi `ByteRacer` (mot de passe `Tipe2025`), ouvrir dans un navigateur:
+
+- **Interface ByteRacer**: `http://192.168.50.5:3000`;
+- **Portail de configuration AccessPopup** (changer le SSID/mot de passe ou rebasculer en Wi-Fi client): `http://192.168.50.5:8052` (variable `ACCESSPOPUP_WEBPORT`).
+
+> Le robot annonce egalement en vocal (TTS) le SSID du point d'acces, son adresse IP et le port `3000` a utiliser dans le navigateur, dans la langue configuree.
+
+Installation manuelle (si vous n'utilisez pas le bootstrap):
 
 ```bash
 cd /home/pi
@@ -425,15 +440,17 @@ sudo ./installconfig.sh
 Pendant l'installation:
 
 - choisir l'option `install`;
-- definir le nom du point d'acces;
-- definir le mot de passe du point d'acces.
+- definir le nom du point d'acces (`ByteRacer`);
+- definir le mot de passe du point d'acces (`Tipe2025`);
+- activer l'interface web via le menu additionnel (`8` puis `1`) pour exposer `http://192.168.50.5:8052`.
 
 ## 17. Check-list de verification finale
 
 Verifier les points suivants:
 
 - `screen -ls` affiche `eaglecontrol`, `relaytower` et `byteracer` si vous utilisez `startup.sh`;
-- `http://<ip_du_robot>:3000` sert l'interface;
+- `http://<ip_du_robot>:3000` sert l'interface (en mode point d'acces: `http://192.168.50.5:3000` apres connexion au Wi-Fi `ByteRacer` / mot de passe `Tipe2025`);
+- `http://192.168.50.5:8052` ouvre le portail AccessPopup en mode point d'acces;
 - `http://<ip_du_robot>:3001/stats` affiche au moins un client `car` quand Python est lance;
 - `http://<ip_du_robot>:9000/mjpg` renvoie un flux MJPEG;
 - la manette remonte dans l'onglet `Gamepad`;

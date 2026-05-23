@@ -120,15 +120,27 @@ def piper_voice_available(voice: str, data_dir: Path) -> bool:
 
 
 def _supertonic_executable(python_executable: str | None = None) -> str | None:
-    python_bin = Path(python_executable or sys.executable).resolve()
-    bin_dir = python_bin.parent
-    candidates = [
-        bin_dir / ("supertonic.exe" if os.name == "nt" else "supertonic"),
-        bin_dir / "supertonic",
-    ]
+    executable_name = "supertonic.exe" if os.name == "nt" else "supertonic"
+
+    candidates = []
+
+    # Do not resolve the venv python symlink: .resolve() can jump from
+    # .venv/bin/python to /usr/bin/python3, making us look for the CLI in
+    # /usr/bin instead of the venv where pip installed it.
+    if python_executable:
+        candidates.append(Path(python_executable).parent / executable_name)
+
+    candidates.append(Path(sys.executable).parent / executable_name)
+
+    # In a venv, sys.prefix/sys.exec_prefix point at the venv root.
+    candidates.append(Path(sys.prefix) / "bin" / executable_name)
+    candidates.append(Path(sys.exec_prefix) / "bin" / executable_name)
+
+    # ByteRacer default venv path.
+    candidates.append(PROJECT_DIR / ".venv" / "bin" / executable_name)
 
     for candidate in candidates:
-        if candidate.exists():
+        if candidate.exists() and os.access(candidate, os.X_OK):
             return str(candidate)
 
     return shutil.which("supertonic")

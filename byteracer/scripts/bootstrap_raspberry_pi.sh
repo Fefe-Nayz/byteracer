@@ -9,9 +9,11 @@ PI_USER="${PI_USER:-pi}"
 INSTALL_ACCESSPOPUP="${INSTALL_ACCESSPOPUP:-true}"
 ACCESSPOPUP_REPO="${ACCESSPOPUP_REPO:-https://github.com/RaspberryConnect/AccessPopup.git}"
 ACCESSPOPUP_SSID="${ACCESSPOPUP_SSID:-ByteRacer}"
-ACCESSPOPUP_PASSWORD="${ACCESSPOPUP_PASSWORD:-ByteRacerForever}"
+ACCESSPOPUP_PASSWORD="${ACCESSPOPUP_PASSWORD:-Tipe2025}"
 ACCESSPOPUP_IP="${ACCESSPOPUP_IP:-192.168.50.5/24}"
 ACCESSPOPUP_GATEWAY="${ACCESSPOPUP_GATEWAY:-192.168.50.254}"
+ACCESSPOPUP_WEBGUI="${ACCESSPOPUP_WEBGUI:-true}"
+ACCESSPOPUP_WEBPORT="${ACCESSPOPUP_WEBPORT:-8052}"
 ROBOT_HAT_REPO="${ROBOT_HAT_REPO:-https://github.com/sunfounder/robot-hat.git}"
 ROBOT_HAT_BRANCH="${ROBOT_HAT_BRANCH:-2.5.x}"
 VILIB_REPO="${VILIB_REPO:-https://github.com/sunfounder/vilib.git}"
@@ -311,6 +313,130 @@ EOF
     sudo systemctl enable --now AccessPopup.timer
     sudo /usr/local/bin/accesspopup || log "AccessPopup first run failed; timer remains installed"
     log "AccessPopup installed. SSID=${ACCESSPOPUP_SSID}, IP=${ACCESSPOPUP_IP}"
+
+    install_accesspopup_webgui "${src}" || log "AccessPopup web interface setup failed; continuing without it"
+}
+
+install_accesspopup_webgui() {
+    # Enable AccessPopup's optional web interface non-interactively. This mirrors
+    # what "installconfig.sh" option 8-1 (Web Interface enable) does, using the
+    # acpu_web files from the cloned AccessPopup repo.
+    local src="$1"
+    local web_path="/usr/local/bin/acpu_web"
+    local sysd_path="/etc/systemd/system"
+    local sudoers_file="/etc/sudoers.d/acpu"
+    local webback="acpu_web.service"
+    local webapp="acpu_web_app.service"
+    local webappsock="acpu_web_app.socket"
+
+    if [ "${ACCESSPOPUP_WEBGUI}" != "true" ]; then
+        log "Skipping AccessPopup web interface. Set ACCESSPOPUP_WEBGUI=true to enable it."
+        return 0
+    fi
+
+    if [ ! -d "${src}/acpu_web" ]; then
+        log "AccessPopup web interface files not found in ${src}/acpu_web; skipping web interface"
+        return 0
+    fi
+
+    log "Enabling AccessPopup web interface on port ${ACCESSPOPUP_WEBPORT}"
+
+    if ! sudo apt-get install -y python3-venv python3-pip; then
+        log "Could not install python3-venv/python3-pip; skipping web interface"
+        return 0
+    fi
+
+    # Restricted system user used by the web services.
+    if ! id acpu >/dev/null 2>&1; then
+        sudo useradd --system --no-create-home --shell /usr/sbin/nologin acpu || true
+    fi
+
+    # Sudoers rule letting the web backend toggle the network as the acpu user.
+    echo "acpu ALL=(ALL) NOPASSWD: /usr/bin/nmcli, /usr/sbin/iw, /usr/bin/tee, /etc/accesspopup.conf, /usr/local/bin/accesspopup" \
+        | sudo tee "${sudoers_file}" >/dev/null
+    sudo chmod 440 "${sudoers_file}"
+    if ! sudo visudo -cf "${sudoers_file}" >/dev/null 2>&1; then
+        log "Invalid sudoers file for acpu; removing and skipping web interface"
+        sudo rm -f "${sudoers_file}"
+        return 0
+    fi
+
+    if [ ! -d "${web_path}" ]; then
+        sudo mkdir -p "${web_path}"
+        sudo cp -rf "${src}/acpu_web/." "${web_path}/"
+        sudo python3 -m venv "${web_path}/venv"
+        if ! sudo "${web_path}/venv/bin/pip" install -r "${web_path}/requirements.txt"; then
+            log "pip install for AccessPopup web interface failed; skipping web interface"
+            return 0
+        fi
+        sudo chmod 755 "${web_path}/acpu_get_std.py" "${web_path}/pages/app.py" 2>/dev/null || true
+    fi
+
+    # Background actions service.
+    sudo tee "${sysd_path}/${webback}" >/dev/null <<'EOF'
+[Unit]
+Description=AccessPopup Webpage background actions script
+After=network.target
+
+[Service]
+Type=simple
+User=acpu
+Group=acpu
+ExecStart=/usr/local/bin/acpu_web/venv/bin/python3 /usr/local/bin/acpu_web/acpu_get_std.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+WorkingDirectory=/usr/local/bin
+ProtectSystem=full
+ReadWritePaths=/etc/accesspopup.conf
+ReadOnlyPaths=/usr/local/bin/acpu_web
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Web server service (socket-activated).
+    sudo tee "${sysd_path}/${webapp}" >/dev/null <<'EOF'
+[Unit]
+Description=ACPU Web Server for AccessPopup
+Requires=acpu_web_app.socket
+After=network.target
+Wants=acpu_web.service
+After=acpu_web.service
+
+[Service]
+User=acpu
+Group=acpu
+WorkingDirectory=/usr/local/bin/acpu_web/pages
+ExecStart=/usr/local/bin/acpu_web/venv/bin/uvicorn app:app --fd 3
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Listening socket (port is configurable).
+    sudo tee "${sysd_path}/${webappsock}" >/dev/null <<EOF
+[Unit]
+Description=Socket for AccessPopup Webpage actions script
+
+[Socket]
+ListenStream=0.0.0.0:${ACCESSPOPUP_WEBPORT}
+
+[Install]
+WantedBy=sockets.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable "${webback}" "${webappsock}" >/dev/null 2>&1 || true
+    sudo systemctl restart "${webback}" || log "Could not start ${webback}"
+    sudo systemctl restart "${webappsock}" || log "Could not start ${webappsock}"
+
+    local ap_ip_only="${ACCESSPOPUP_IP%%/*}"
+    log "AccessPopup web interface enabled. Reachable on the AP at http://${ap_ip_only}:${ACCESSPOPUP_WEBPORT}"
 }
 
 clone_app_only() {

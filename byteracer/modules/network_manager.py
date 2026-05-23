@@ -36,7 +36,7 @@ class NetworkManager:
         # Default AP settings
         self.ap_config = {
             "ssid": "ByteRacer",
-            "password": "ByteRacerForever",
+            "password": "Tipe2025",
             "ip": "192.168.50.5/24"
         }
         

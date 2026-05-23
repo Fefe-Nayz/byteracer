@@ -5,6 +5,7 @@ import json
 import socket
 import os
 import getpass
+import shutil
 import subprocess
 import threading
 import psutil
@@ -383,15 +384,24 @@ class ByteRacer:
                             await asyncio.sleep(15)
                             continue
                         
-                        # Prepare message based on mode
+                        # Announce using the localized catalog so the message
+                        # follows the configured TTS language.
                         if current_mode == "ap":
                             ap_name = network_status.get("ap_ssid", "ByteRacer")
-                            message = f"Access point mode active. Connect to WiFi network {ap_name}, then visit {current_ip} port {port} in your browser."
+                            await self.tts_manager.say_key(
+                                "network.announce_ap",
+                                priority=1,
+                                ssid=ap_name,
+                                ip=current_ip,
+                                port=port,
+                            )
                         else:
-                            message = f"WiFi mode active. My IP address is {current_ip}. Connect to {current_ip} port {port} in your browser."
-                        
-                        # Speak the message
-                        await self.tts_manager.say(message, priority=1)
+                            await self.tts_manager.say_key(
+                                "network.announce_wifi",
+                                priority=1,
+                                ip=current_ip,
+                                port=port,
+                            )
                         logging.info(f"Announced IP: {current_ip}, Mode: {current_mode}")
                     
                     # Wait before checking again
@@ -1472,6 +1482,40 @@ class ByteRacer:
             "BYTERACER_USER",
             os.environ.get("SUDO_USER") or os.environ.get("USER") or getpass.getuser() or "pi"
         )
+
+        # Prefer launching through a transient systemd unit. Several admin
+        # scripts restart byteracer-python.service - this very process. Because
+        # the script is spawned as our child, it stays inside the service's
+        # cgroup; restarting the service tears that cgroup down (default
+        # KillMode=control-group) and kills the script mid-restart, so the
+        # controller never comes back up. systemd-run hands the script to PID 1
+        # in its own unit, so it survives our restart. start_new_session is not
+        # enough: a new session is still part of our cgroup.
+        systemd_run = shutil.which("systemd-run")
+        if systemd_run and os.path.isdir("/run/systemd/system"):
+            unit_name = f"byteracer-admin-{script_path.stem}-{int(time.time())}"
+            command = [systemd_run, "--collect", "--quiet", f"--unit={unit_name}"]
+            for key in ("BYTERACER_PATH", "BYTERACER_USER", "BYTERACER_PYTHON", "BYTERACER_LOG_DIR", "PATH"):
+                if env.get(key):
+                    command.append(f"--setenv={key}={env[key]}")
+            command += ["bash", str(script_path)]
+            if hasattr(os, "geteuid") and os.geteuid() != 0:
+                command.insert(0, "sudo")
+
+            try:
+                subprocess.run(
+                    command,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=30,
+                )
+                return True
+            except Exception as e:
+                logging.warning(
+                    "systemd-run launch failed for %s (%s); falling back to a detached process",
+                    script_name, e,
+                )
 
         try:
             subprocess.Popen(

@@ -54,6 +54,15 @@ Autres extraits utiles:
 - `ws://<host>:3001/ws`: bus temps reel `EagleControl`
 - `http://<host>:3001/stats`: etat des connexions WebSocket
 - `http://<host>:9000/mjpg`: flux camera MJPEG
+- `http://192.168.50.5:8052`: portail AccessPopup (en mode point d'acces)
+
+### Point d'acces de secours
+
+Quand aucun Wi-Fi connu n'est disponible, le robot ouvre son propre point d'acces:
+
+- SSID: `ByteRacer`, mot de passe: `Tipe2025`;
+- interface ByteRacer: `http://192.168.50.5:3000`;
+- portail AccessPopup: `http://192.168.50.5:8052`.
 
 ## Fonctionnalites principales
 

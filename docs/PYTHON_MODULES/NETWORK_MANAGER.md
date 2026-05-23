@@ -26,6 +26,16 @@
 - `get_connection_status()`;
 - `restart_networking()`.
 
+## Parametres par defaut du point d'acces
+
+Si AccessPopup n'est pas encore configure, `NetworkManager` utilise ces valeurs:
+
+- SSID: `ByteRacer`;
+- mot de passe: `Tipe2025`;
+- IP: `192.168.50.5/24`.
+
+Apres connexion au Wi-Fi `ByteRacer`, l'interface ByteRacer est sur `http://192.168.50.5:3000` et le portail AccessPopup sur `http://192.168.50.5:8052`. Ces valeurs sont relues depuis `/etc/accesspopup.conf` au demarrage via `_load_ap_config()`.
+
 ## Dependances externes
 
 - `nmcli` / `NetworkManager`;
