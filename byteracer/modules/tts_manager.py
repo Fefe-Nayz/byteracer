@@ -7,6 +7,14 @@ import uuid
 import subprocess
 from pathlib import Path
 import pygame
+from modules.i18n import translate
+from modules.tts_backends import (
+    generate_tts_wav,
+    get_piper_data_dir,
+    get_supertonic_cache_dir,
+    piper_voice_for_language,
+    supertonic_voice_for_language,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,14 +23,28 @@ class TTSManager:
     Manages Text-to-Speech functionality with asynchronous operation.
     Uses pygame for audio playback exactly like the sound_manager - completely non-blocking.
     """
-    def __init__(self, sound_manager=None, lang="fr-FR", enabled=True, volume=80):
+    def __init__(
+        self,
+        sound_manager=None,
+        lang="en-US",
+        enabled=True,
+        volume=100,
+        engine="piper",
+        voice="auto",
+        piper_data_dir=None,
+        supertonic_cache_dir=None,
+    ):
         self.lang = lang
         self.enabled = enabled
         self.volume = volume  # Master TTS volume
-        self.user_tts_volume = 80  # Volume for user-triggered TTS
-        self.system_tts_volume = 90  # Volume for system/emergency TTS
-        self.emergency_tts_volume = 95  # Volume for emergency TTS
-        self.audio_gain = 6  # Default gain in dB to make TTS louder (will be overridden by settings)
+        self.engine = engine
+        self.voice = voice
+        self.piper_data_dir = str(get_piper_data_dir(piper_data_dir))
+        self.supertonic_cache_dir = str(get_supertonic_cache_dir(supertonic_cache_dir))
+        self.user_tts_volume = 100  # Volume for user-triggered TTS
+        self.system_tts_volume = 100  # Volume for system/emergency TTS
+        self.emergency_tts_volume = 100  # Volume for emergency TTS
+        self.audio_gain = 15  # Default gain in dB to make TTS louder (will be overridden by settings)
         self.sound_manager = sound_manager
         self._queue = asyncio.Queue()
         self._speaking = False
@@ -42,7 +64,13 @@ class TTSManager:
         # Clean up any leftover temp files
         self._clear_temp_files()
         
-        logger.info(f"TTS Manager initialized (lang={lang}, volume={volume})")
+        logger.info(
+            "TTS Manager initialized (engine=%s, lang=%s, voice=%s, volume=%s)",
+            self.engine,
+            self.lang,
+            self.voice,
+            self.volume,
+        )
     
     def _reserve_tts_channel(self):
         """Make sure we have a dedicated channel in pygame mixer for TTS"""
@@ -105,6 +133,16 @@ class TTSManager:
             # Then wait until the audio playback is actually complete
             while self.is_speaking():
                 await asyncio.sleep(0.1)
+
+    async def say_key(self, key, priority=1, blocking=False, lang=None, **params):
+        """Speak a localized system message by key."""
+        locale = lang or self.lang
+        await self.say(
+            translate(key, locale, **params),
+            priority=priority,
+            blocking=blocking,
+            lang=locale,
+        )
     
     async def _process_queue(self):
         """Process the TTS queue asynchronously"""
@@ -196,20 +234,32 @@ class TTSManager:
             # Generate the TTS wave file
             temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
             final_file = temp_file
-            pico_cmd = ["pico2wave", "-l", lang, "-w", temp_file, text]
-            logger.debug(f"Generating TTS for: '{text}'")
-            
-            # Generate the audio file
-            process = subprocess.Popen(pico_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            self._current_process = process
-            _, stderr = process.communicate()
-            result = process.returncode
-            self._current_process = None
-            
-            if result != 0:
-                error_text = stderr.decode(errors="replace") if stderr else "Unknown error"
-                logger.error(f"TTS pico2wave error: {error_text}")
+            if self.engine == "supertonic":
+                voice = supertonic_voice_for_language(lang, self.voice)
+            else:
+                voice = piper_voice_for_language(lang, self.voice)
+            logger.debug(
+                "Generating TTS with %s for lang=%s voice=%s: %r",
+                self.engine,
+                lang,
+                voice,
+                text,
+            )
+
+            engine_used = generate_tts_wav(
+                text,
+                lang,
+                temp_file,
+                engine=self.engine,
+                voice=self.voice,
+                data_dir=self.piper_data_dir,
+                supertonic_cache_dir=self.supertonic_cache_dir,
+            )
+
+            if not engine_used:
+                logger.error("TTS generation failed for engine=%s lang=%s", self.engine, lang)
                 return False
+            logger.debug("Generated TTS with %s", engine_used)
             
             # Apply volume adjustment if needed
             # Determine effective volume based on priority
@@ -230,7 +280,18 @@ class TTSManager:
                 
                 # Use sox to adjust volume and apply gain
                 vol_multiplier = max(0.0, min(1.0, effective_volume))
-                gain_cmd = ["sox", temp_file, volume_file, "vol", str(vol_multiplier), "gain", str(self.audio_gain)]
+                gain_cmd = [
+                    "sox",
+                    temp_file,
+                    volume_file,
+                    "gain",
+                    "-n",
+                    "-3",
+                    "vol",
+                    str(vol_multiplier),
+                    "gain",
+                    str(self.audio_gain),
+                ]
                 
                 process = subprocess.Popen(gain_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 self._current_process = process
@@ -415,6 +476,26 @@ class TTSManager:
         """Set the TTS language"""
         self.lang = lang
         logger.info(f"TTS language set to {lang}")
+
+    def set_engine(self, engine):
+        """Set the TTS engine. Supported values: piper, supertonic, pico, auto."""
+        self.engine = (engine or "piper").lower()
+        logger.info("TTS engine set to %s", self.engine)
+
+    def set_voice(self, voice):
+        """Set the engine-specific voice name or 'auto'."""
+        self.voice = voice or "auto"
+        logger.info("TTS voice set to %s", self.voice)
+
+    def set_piper_data_dir(self, data_dir):
+        """Set the Piper voice model directory."""
+        self.piper_data_dir = str(get_piper_data_dir(data_dir))
+        logger.info("Piper data dir set to %s", self.piper_data_dir)
+
+    def set_supertonic_cache_dir(self, cache_dir):
+        """Set the Supertonic model cache directory."""
+        self.supertonic_cache_dir = str(get_supertonic_cache_dir(cache_dir))
+        logger.info("Supertonic cache dir set to %s", self.supertonic_cache_dir)
         
     def set_volume(self, volume):
         """

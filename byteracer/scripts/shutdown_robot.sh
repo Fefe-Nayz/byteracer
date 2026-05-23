@@ -12,7 +12,7 @@ LOG_FILE="${BYTERACER_LOG_DIR}/shutdown_robot.log"
 setup_logging "${LOG_FILE}"
 
 log "========== SHUTDOWN ROBOT STARTED =========="
-speak "Arret du robot"
+speak_key "admin.shutdown"
 
 if systemd_available; then
     log "Scheduling poweroff through systemd"

@@ -18,7 +18,7 @@ export default function GamepadInputHandler() {
   } = useGamepadContext();
 
   const { status, sendGamepadState, playSound } = useWebSocket();
-  const [selectedSound, setSelectedSound] = useState<string>("fart");
+  const [selectedSound, setSelectedSound] = useState<string>("klaxon");
   const [lastUseState, setLastUseState] = useState<boolean>(false);
 
   // Track whether the "use" button was previously pressed

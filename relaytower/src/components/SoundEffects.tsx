@@ -9,7 +9,7 @@ import { useLocalStorage } from "@/hooks/useLocalStorage";
 export default function SoundEffects() {
   const [selectedSound, setSelectedSound] = useLocalStorage<string>(
     "gamepad-selected-sound",
-    "fart"
+    "klaxon"
   );
   const { status, playSound, stopSound, settings } = useWebSocket();
   const { toast } = useToast();
@@ -59,27 +59,9 @@ export default function SoundEffects() {
 
   // Define available sound effects
   const soundEffects = [
-    { id: "fart", name: "Fart", icon: "💨" },
     { id: "klaxon", name: "Klaxon", icon: "📢" },
+    { id: "klaxon-2", name: "Klaxon 2", icon: "📣" },
     { id: "alarm", name: "Alarm", icon: "🚨" },
-    { id: "wow", name: "Wow", icon: "🤩" },
-    { id: "laugh", name: "Laugh", icon: "😂" },
-    { id: "bruh", name: "Bruh", icon: "😑" },
-    { id: "nope", name: "Nope", icon: "❌" },
-    { id: "lingango", name: "Lingango", icon: "🗣️" },
-    // { id: "cailloux", name: "Cailloux", icon: "🪨" },
-    // { id: "fave", name: "Favéé", icon: "🎤" },
-    { id: "pipe", name: "Pipe", icon: "🔩" },
-    // { id: "tuile", name: "Une Tuile", icon: "🧱" },
-    // { id: "india", name: "India", icon: "🇮🇳" },
-    { id: "vine-boom", name: "Vine Boom", icon: "💥" },
-    { id: "tralalelo-tralala", name: "Tralalelo", icon: "🦈" },
-    { id: "get-out", name: "Get Out", icon: "🚪" },
-    // { id: "scream", name: "Scream", icon: "😱" },
-    // { id: "wtf", name: "WTF", icon: "🤯" },
-    { id: "rat-dance", name: "Rat Dance", icon: "🐀" },
-    // { id: "ph", name: "PH", icon: "🤨" },
-    // { id: "aurores", name: "Dragorores", icon: "🐉" },
   ];
 
   const soundEnabled = settings?.sound.enabled || false;

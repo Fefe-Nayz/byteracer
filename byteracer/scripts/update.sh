@@ -12,7 +12,7 @@ LOG_FILE="${BYTERACER_LOG_DIR}/update.log"
 setup_logging "${LOG_FILE}"
 
 log "========== UPDATE STARTED =========="
-speak "Recherche des mises a jour"
+speak_key "startup.check_updates"
 
 BRANCH="$(get_config ".github.branch" "main")"
 REPO_URL="$(get_config ".github.repo_url" "https://github.com/Fefe-Nayz/byteracer.git")"
@@ -22,7 +22,7 @@ log "Branch: ${BRANCH}"
 
 if [ ! -d "${BYTERACER_PATH}/.git" ]; then
     log "No git repository found at ${BYTERACER_PATH}"
-    speak "Echec de la mise a jour. Depot introuvable."
+    speak_key "update.repo_missing"
     exit 1
 fi
 
@@ -33,13 +33,13 @@ run_in_dir "${BYTERACER_PATH}" git remote set-url origin "${REPO_URL}" || \
 
 if ! wait_for_internet 30 5; then
     log "Internet unavailable; update skipped"
-    speak "Aucune connexion internet. Mise a jour ignoree."
+    speak_key "update.no_internet"
     exit 1
 fi
 
 if ! run_in_dir "${BYTERACER_PATH}" git fetch origin "${BRANCH}"; then
     log "Git fetch failed"
-    speak "Echec du telechargement de la mise a jour."
+    speak_key "update.download_failed"
     exit 1
 fi
 
@@ -48,7 +48,7 @@ REMOTE="$(cd "${BYTERACER_PATH}" && git rev-parse "origin/${BRANCH}" 2>/dev/null
 
 if [ -z "${REMOTE}" ]; then
     log "Remote branch origin/${BRANCH} not found"
-    speak "Echec de la mise a jour. Branche introuvable."
+    speak_key "update.branch_missing"
     exit 1
 fi
 
@@ -57,12 +57,12 @@ log "Remote commit: ${REMOTE}"
 
 if [ "${LOCAL}" = "${REMOTE}" ]; then
     log "Already up to date"
-    speak "ByteRacer est deja a jour."
+    speak_key "update.already_current"
     log "========== UPDATE COMPLETED: NO CHANGES =========="
     exit 0
 fi
 
-speak "Installation de la mise a jour"
+speak_key "update.installing"
 CONFIG_BACKUP="$(mktemp -d /tmp/byteracer-config.XXXXXX)"
 if [ -d "${BYTERACER_PATH}/byteracer/config" ]; then
     cp -a "${BYTERACER_PATH}/byteracer/config/." "${CONFIG_BACKUP}/" 2>/dev/null || true
@@ -72,7 +72,7 @@ if ! run_in_dir "${BYTERACER_PATH}" git reset --hard "origin/${BRANCH}"; then
     log "Git reset failed"
     cp -a "${CONFIG_BACKUP}/." "${BYTERACER_PATH}/byteracer/config/" 2>/dev/null || true
     rm -rf "${CONFIG_BACKUP}" 2>/dev/null || true
-    speak "Echec de la mise a jour."
+    speak_key "update.failed"
     exit 1
 fi
 
@@ -87,16 +87,16 @@ install_eaglecontrol_deps || BUILD_EXIT=$?
 
 if [ "${BUILD_EXIT}" -ne 0 ]; then
     log "Update downloaded, but dependency install or build failed"
-    speak "Mise a jour telechargee, mais installation incomplete."
+    speak_key "update.incomplete"
     exit 1
 fi
 
 log "Restarting services after update"
 if "${SCRIPT_DIR}/restart_services.sh"; then
-    speak "Mise a jour installee. ByteRacer est pret."
+    speak_key "update.installed_ready"
     log "========== UPDATE COMPLETED =========="
 else
     log "Update installed but service restart failed"
-    speak "Mise a jour installee, mais redemarrage en echec."
+    speak_key "update.installed_restart_failed"
     exit 1
 fi

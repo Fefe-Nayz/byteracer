@@ -60,7 +60,10 @@ export default function LogViewer({ maxHeight = "400px", className = "" }: LogVi
         <h3 className="text-lg font-medium">Robot Logs</h3>
         <div className="flex gap-2">
           
-          <Select value={filterLevel || ""} onValueChange={(value) => setFilterLevel(value || null)}>
+          <Select
+            value={filterLevel || "All"}
+            onValueChange={(value) => setFilterLevel(value === "All" ? null : value)}
+          >
             <SelectTrigger className="w-[140px] h-8 text-sm">
               <SelectValue placeholder="All Levels" />
             </SelectTrigger>

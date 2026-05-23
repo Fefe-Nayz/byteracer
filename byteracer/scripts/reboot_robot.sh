@@ -12,7 +12,7 @@ LOG_FILE="${BYTERACER_LOG_DIR}/reboot_robot.log"
 setup_logging "${LOG_FILE}"
 
 log "========== REBOOT ROBOT STARTED =========="
-speak "Redemarrage du robot"
+speak_key "admin.reboot"
 
 if systemd_available; then
     log "Scheduling reboot through systemd"

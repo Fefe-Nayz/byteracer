@@ -82,27 +82,9 @@ export default function RobotControls({
   // Available sounds
 
   const availableSounds = [
-    { id: "fart", name: "💨 Fart" },
-    { id: "klaxon", name: "📢 Klaxon" },
-    { id: "alarm", name: "🚨 Alarm" },
-    { id: "wow", name: "🤩 Wow" },
-    { id: "laugh", name: "😂 Laugh" },
-    { id: "bruh", name: "😑 Bruh" },
-    { id: "nope", name: "❌ Nope" },
-    { id: "lingango", name: "🗣️ Lingango" },
-    // { id: "cailloux", name: "🪨 Cailloux"},
-    // { id: "fave", name: "🎤 Favéé"},
-    { id: "pipe", name: "🔩 Pipe" },
-    // { id: "tuile", name: "🧱 Une Tuile"},
-    // { id: "india", name: "🇮🇳 India"},
-    { id: "vine-boom", name: "💥 Vine Boom" },
-    { id: "tralalelo-tralala", name: "🦈 Tralalelo" },
-    { id: "get-out", name: "🚪 Get Out" },
-    // { id:"scream", name: "😱 Scream"},
-    // { id:"wtf", name: "🤯 WTF"},
-    { id: "rat-dance", name: "🐀 Rat Dance" },
-    // { id:"ph", name: "🤨 PH"},
-    // { id:"aurores", name: "🐉 Dragorores"},
+    { id: "klaxon", name: "Klaxon" },
+    { id: "klaxon-2", name: "Klaxon 2" },
+    { id: "alarm", name: "Alarm" },
   ];
 
   // Handle command responses

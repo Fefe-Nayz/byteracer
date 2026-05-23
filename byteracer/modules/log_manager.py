@@ -130,13 +130,15 @@ class WebSocketLogHandler(logging.Handler):
             
     async def _send_log(self, message):
         """Coroutine to send a single log message via WebSocket"""
-        if self.websocket and hasattr(self.websocket, 'open') and self.websocket.open:
-            try:
-                await self.websocket.send(message)
-            except websockets.exceptions.ConnectionClosed:
-                pass  # Connection closed
-            except Exception as e:
-                print(f"Error sending log via WebSocket: {e}")
+        if not self.websocket:
+            return
+
+        try:
+            await self.websocket.send(message)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        except Exception as e:
+            print(f"Error sending log via WebSocket: {e}")
                 
     def close(self):
         """Close the handler"""

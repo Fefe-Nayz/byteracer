@@ -15,25 +15,37 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 try:
     from modules.config_manager import ConfigManager
+    from modules.i18n import translate
+    from modules.tts_backends import generate_tts_wav
 except ImportError:
     # Fallback if modules can't be imported
     ConfigManager = None
+    translate = None
+    generate_tts_wav = None
 
-DEFAULT_TTS_LANGUAGE = "fr-FR"
+DEFAULT_TTS_LANGUAGE = "en-US"
+DEFAULT_TTS_ENGINE = "piper"
+DEFAULT_TTS_VOICE = "auto"
 
 def main():
     # Try to get config settings
     config_volume = None
     config_language = DEFAULT_TTS_LANGUAGE
+    config_engine = DEFAULT_TTS_ENGINE
+    config_voice = DEFAULT_TTS_VOICE
+    config_gain = 15
     if ConfigManager is not None:
         try:
             config = ConfigManager()
             # Use system_tts_volume by default for system notifications
             config_volume = config.get("sound.system_tts_volume")
             config_language = config.get("sound.tts_language") or DEFAULT_TTS_LANGUAGE
+            config_engine = config.get("sound.tts_engine") or DEFAULT_TTS_ENGINE
+            config_voice = config.get("sound.tts_voice") or DEFAULT_TTS_VOICE
+            config_gain = config.get("sound.tts_audio_gain")
             is_enabled = config.get("sound.tts_enabled")
             if not is_enabled:
-                config_volume = 0
+                return 0
         except Exception as e:
             print(f"Warning: Could not load config settings: {e}", file=sys.stderr)
     
@@ -41,9 +53,14 @@ def main():
     parser = argparse.ArgumentParser(description='Text-to-Speech for ByteRacer')
     parser.add_argument('text', help='Text to speak', nargs='?')
     parser.add_argument('-f', '--file', help='File to read text from')
+    parser.add_argument('-k', '--key', help='Localized message key to speak')
+    parser.add_argument('-a', '--arg', action='append', default=[], help='Message parameter as key=value')
     parser.add_argument('-l', '--lang', help=f'Language for TTS (default: {config_language})', default=config_language)
+    parser.add_argument('-e', '--engine', help=f'TTS engine: piper, supertonic, pico, auto (default: {config_engine})', default=config_engine)
+    parser.add_argument('--voice', help=f'Engine-specific voice name or auto (default: {config_voice})', default=config_voice)
     parser.add_argument('-v', '--volume', help='Volume level 0-100 (default: from config or 100)', 
                        type=int, default=config_volume if config_volume is not None else 100)
+    parser.add_argument('-g', '--gain', help='Extra audio gain in dB', type=int, default=config_gain if config_gain is not None else 15)
     
     args = parser.parse_args()
     
@@ -52,14 +69,21 @@ def main():
         'en-US', 'en-GB', 'de-DE', 'es-ES', 'fr-FR', 'it-IT'
     ]
     
-    # Check if the requested language is supported
     if args.lang not in supported_langs:
-        print(f"Error: Language '{args.lang}' is not supported.", file=sys.stderr)
-        print(f"Supported languages: {', '.join(supported_langs)}", file=sys.stderr)
-        return 1
+        print(f"Warning: Language '{args.lang}' is not in the Pico/Piper preset list; backend will choose its own fallback.", file=sys.stderr)
     
     # Get text from file or command line
-    if args.file:
+    if args.key:
+        if translate is None:
+            print("Error: localized messages are unavailable.", file=sys.stderr)
+            return 1
+        params = {}
+        for item in args.arg:
+            if "=" in item:
+                key, value = item.split("=", 1)
+                params[key] = value
+        text = translate(args.key, args.lang, **params)
+    elif args.file:
         try:
             with open(args.file, 'r') as f:
                 text = f.read().strip()
@@ -84,18 +108,22 @@ def main():
         # Speak the text using direct commands instead of robot_hat
         print(f"Speaking: {text} (volume: {volume}%)")
         
-        # Generate wave file with pico2wave
-        result = subprocess.run(
-            ["pico2wave", "-l", args.lang, "-w", temp_file, text],
-            capture_output=True,
-            text=True,
+        if generate_tts_wav is None:
+            print("TTS backend is unavailable.", file=sys.stderr)
+            return 1
+        engine_used = generate_tts_wav(
+            text,
+            args.lang,
+            temp_file,
+            engine=args.engine,
+            voice=args.voice,
         )
-        if result.returncode != 0:
-            print(f"TTS error: {result.stderr}", file=sys.stderr)
+        if not engine_used:
+            print("TTS error: no configured engine could synthesize speech", file=sys.stderr)
             return 1
         
         # Apply volume adjustment if needed
-        if volume != 100:
+        if volume != 100 or args.gain:
             # Calculate volume multiplier (0-1 range for sox)
             vol_multiplier = max(0.0, min(1.0, volume / 100.0))
             
@@ -106,7 +134,18 @@ def main():
             print(f"Adjusting volume with sox: multiplier {vol_multiplier}")
             
             vol_result = subprocess.run(
-                ["sox", temp_file, volume_file, "vol", str(vol_multiplier)],
+                [
+                    "sox",
+                    temp_file,
+                    volume_file,
+                    "gain",
+                    "-n",
+                    "-3",
+                    "vol",
+                    str(vol_multiplier),
+                    "gain",
+                    str(args.gain),
+                ],
                 capture_output=True,
                 text=True,
             )

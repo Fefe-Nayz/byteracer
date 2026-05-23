@@ -130,7 +130,7 @@ class ByteRacer:
             logging.error(f"Network bootstrap failed; continuing with current state: {e}")
         
         # Start TTS introduction
-        await self.tts_manager.say("Controleur ByteRacer demarre", priority=1, blocking=True)
+        await self.tts_manager.say_key("robot.controller_started", priority=1, blocking=True)
         
         # Start IP announcement if no client is connected
         self.ip_speaking_task = asyncio.create_task(self.announce_ip_periodically())
@@ -162,7 +162,7 @@ class ByteRacer:
         self.px.set_cam_tilt_angle(0)
         
         # Announce shutdown
-        await self.tts_manager.say("Arret de ByteRacer", priority=2, blocking=True)
+        await self.tts_manager.say_key("robot.controller_stopping", priority=2, blocking=True)
         
         # Stop managers in reverse order
         await self.log_manager.stop()
@@ -205,6 +205,10 @@ class ByteRacer:
         # Apply TTS settings
         self.tts_manager.set_enabled(settings["sound"]["tts_enabled"])
         self.tts_manager.set_language(settings["sound"]["tts_language"])
+        if "tts_engine" in settings["sound"]:
+            self.tts_manager.set_engine(settings["sound"]["tts_engine"])
+        if "tts_voice" in settings["sound"]:
+            self.tts_manager.set_voice(settings["sound"]["tts_voice"])
         
         # Apply TTS volume settings
         self.tts_manager.set_volume(settings["sound"]["tts_volume"])
@@ -375,7 +379,7 @@ class ByteRacer:
                         previous_mode = current_mode
 
                         if not current_ip:
-                            await self.tts_manager.say("Network is still starting. Waiting for an IP address.", priority=1)
+                            await self.tts_manager.say_key("network.waiting_ip", priority=1)
                             await asyncio.sleep(15)
                             continue
                         
@@ -458,7 +462,7 @@ class ByteRacer:
                 # Announce reconnection attempts without spamming the speaker.
                 now = time.time()
                 if now - last_tts_warning > 60:
-                    await self.tts_manager.say("Connection to control server lost. Attempting to reconnect.", priority=1)
+                    await self.tts_manager.say_key("network.control_lost", priority=1)
                     last_tts_warning = now
                 
                 # Wait before retrying
@@ -723,7 +727,10 @@ class ByteRacer:
                 await self.send_settings_to_client()
                 
                 # Announce via TTS
-                await self.tts_manager.say(f"Settings reset to defaults{' for ' + section if section else ''}", priority=1)
+                if section:
+                    await self.tts_manager.say_key("settings.reset_section", priority=1, section=section)
+                else:
+                    await self.tts_manager.say_key("settings.reset", priority=1)
 
             elif data["name"] == "start_listening":
                 # Handle start listening request
@@ -849,7 +856,7 @@ class ByteRacer:
                     
                     # If successful, update the TTS
                     if result["success"]:
-                        await self.tts_manager.say(f"Connected to WiFi network {data['ssid']}", priority=1)
+                        await self.tts_manager.say_key("network.connected_wifi", priority=1, ssid=data["ssid"])
                 else:
                     result = {"success": False, "message": "Missing SSID or password"}
             
@@ -860,7 +867,7 @@ class ByteRacer:
                     )
                     
                     if result["success"]:
-                        await self.tts_manager.say(f"Saved WiFi network {data['ssid']}", priority=1)
+                        await self.tts_manager.say_key("network.saved_wifi", priority=1, ssid=data["ssid"])
                 else:
                     result = {"success": False, "message": "Missing SSID or password"}
             
@@ -869,7 +876,7 @@ class ByteRacer:
                     result = await self.network_manager.remove_wifi_network(data["ssid"])
                     
                     if result["success"]:
-                        await self.tts_manager.say(f"Removed WiFi network {data['ssid']}", priority=1)
+                        await self.tts_manager.say_key("network.removed_wifi", priority=1, ssid=data["ssid"])
                 else:
                     result = {"success": False, "message": "Missing SSID"}
             
@@ -881,7 +888,7 @@ class ByteRacer:
                     result = await self.network_manager.update_ap_settings(ssid, password)
                     
                     if result["success"]:
-                        await self.tts_manager.say("Access point settings updated", priority=1)
+                        await self.tts_manager.say_key("network.ap_updated", priority=1)
                 else:
                     result = {"success": False, "message": "No settings provided"}
             
@@ -894,7 +901,7 @@ class ByteRacer:
                         "success": True,
                         "message": "Switched to Access Point mode"
                     }
-                    await self.tts_manager.say("Switched to Access Point mode", priority=1)
+                    await self.tts_manager.say_key("network.ap_mode", priority=1)
                 else:
                     result = {
                         "success": False,
@@ -910,7 +917,7 @@ class ByteRacer:
                         "success": True,
                         "message": "Switched to WiFi client mode"
                     }
-                    await self.tts_manager.say("Switched to WiFi client mode", priority=1)
+                    await self.tts_manager.say_key("network.wifi_mode", priority=1)
                 else:
                     result = {
                         "success": False,
@@ -1101,15 +1108,15 @@ class ByteRacer:
 
         # Provide feedback via TTS - make sure to properly await the async call
         if emergency == EmergencyState.COLLISION_FRONT:
-            await self.tts_manager.say("Emergency. Obstacle detected ahead. Maintaining safe distance.", priority=2)
+            await self.tts_manager.say_key("emergency.obstacle", priority=2)
         elif emergency == EmergencyState.EDGE_DETECTED:
-            await self.tts_manager.say("Emergency. Edge detected. Backing up.", priority=2)
+            await self.tts_manager.say_key("emergency.edge", priority=2)
         elif emergency == EmergencyState.CLIENT_DISCONNECTED:
-            await self.tts_manager.say("Emergency stop. Client disconnected.", priority=2)
+            await self.tts_manager.say_key("emergency.client_disconnected", priority=2)
         elif emergency == EmergencyState.LOW_BATTERY:
-            await self.tts_manager.say(f"Warning. Battery level low. Please recharge soon.", priority=2)
+            await self.tts_manager.say_key("emergency.low_battery", priority=2)
         elif emergency == EmergencyState.MANUAL_STOP:
-            await self.tts_manager.say("Emergency stop activated.", priority=2)
+            await self.tts_manager.say_key("emergency.manual_stop", priority=2)
 
         # Play alert sound immediately
         self.sound_manager.play_alert("emergency")
@@ -1123,11 +1130,11 @@ class ByteRacer:
         
         if status['state'] == CameraState.ERROR.name:
             # Notify via TTS
-            await self.tts_manager.say("Camera error detected.", priority=1)
+            await self.tts_manager.say_key("camera.error", priority=1)
         
         elif status['state'] == CameraState.RESTARTING.name:
             # Notify via TTS
-            await self.tts_manager.say("Restarting camera.", priority=1)
+            await self.tts_manager.say_key("camera.restarting", priority=1)
         
         # Send status to client
         await self.send_camera_status_to_client()
@@ -1193,6 +1200,14 @@ class ByteRacer:
             if "tts_language" in sound:
                 self.config_manager.set("sound.tts_language", sound["tts_language"])
                 self.tts_manager.set_language(sound["tts_language"])
+
+            if "tts_engine" in sound:
+                self.config_manager.set("sound.tts_engine", sound["tts_engine"])
+                self.tts_manager.set_engine(sound["tts_engine"])
+
+            if "tts_voice" in sound:
+                self.config_manager.set("sound.tts_voice", sound["tts_voice"])
+                self.tts_manager.set_voice(sound["tts_voice"])
 
             if "driving_volume" in sound:
                 self.config_manager.set("sound.driving_volume", sound["driving_volume"])
@@ -1479,7 +1494,7 @@ class ByteRacer:
         try:
             if command == "restart_robot":
                 # Restart the entire system
-                await self.tts_manager.say("Restarting system. Please wait.", priority=1, blocking=True)
+                await self.tts_manager.say_key("admin.reboot", priority=1, blocking=True)
                 success = self.run_admin_script("reboot_robot.sh")
                 result = {
                     "success": success,
@@ -1488,7 +1503,7 @@ class ByteRacer:
                 
             elif command == "stop_robot":
                 # Shutdown the system
-                await self.tts_manager.say("Shutting down system. Goodbye!", priority=1, blocking=True)
+                await self.tts_manager.say_key("admin.shutdown", priority=1, blocking=True)
                 success = self.run_admin_script("shutdown_robot.sh")
                 result = {
                     "success": success,
@@ -1520,7 +1535,7 @@ class ByteRacer:
                 
             elif command == "restart_camera_feed":
                 # Restart camera feed
-                await self.tts_manager.say("Restarting camera feed.", priority=1)
+                await self.tts_manager.say_key("camera.feed_restarting", priority=1)
                 success = await self.camera_manager.restart()
                 
                 result["success"] = success

@@ -11,6 +11,12 @@ from robot_hat import Music
 
 logger = logging.getLogger(__name__)
 
+PUBLIC_CUSTOM_SOUNDS = {
+    "alarm": "Alarm",
+    "klaxon": "Klaxon",
+    "klaxon-2": "Klaxon 2",
+}
+
 class SoundManager:
     """
     Manages sound effects and music for the robot.
@@ -91,6 +97,8 @@ class SoundManager:
             return None
         
         sound_files = self.sounds.get(sound_type, [])
+        if sound_type == "custom":
+            sound_files = [f for f in sound_files if f.stem in PUBLIC_CUSTOM_SOUNDS]
         if not sound_files:
             logger.warning(f"No sounds available for category '{sound_type}'")
             return None
@@ -101,8 +109,8 @@ class SoundManager:
             if matching_files:
                 sound_file = matching_files[0]
             else:
-                logger.warning(f"Sound '{name}' not found in category '{sound_type}', using random sound")
-                sound_file = random.choice(sound_files)
+                logger.warning(f"Sound '{name}' not found or not allowed in category '{sound_type}'")
+                return None
         else:
             # Select a random sound from the category
             sound_file = random.choice(sound_files)
@@ -235,6 +243,15 @@ class SoundManager:
     def play_custom_sound(self, sound_name):
         """Play a custom sound by name"""
         return self.play_sound("custom", loop=False, name=sound_name) is not None
+
+    def get_public_custom_sounds(self):
+        """Return demo-safe custom sound options currently available on disk."""
+        available = {f.stem for f in self.sounds.get("custom", [])}
+        return [
+            {"id": sound_id, "label": label}
+            for sound_id, label in PUBLIC_CUSTOM_SOUNDS.items()
+            if sound_id in available
+        ]
     
     def play_voice_stream(self, file_path):
         """

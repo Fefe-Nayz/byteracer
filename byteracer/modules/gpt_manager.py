@@ -390,7 +390,7 @@ class GPTManager:
             bool: Success status.
         """
         if not self.is_openai_configured():
-            await self.tts_manager.say("OpenAI API key not configured.", priority=1)
+            await self.tts_manager.say_key("gpt.api_key_missing", priority=1)
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", "API key missing")
             return False
@@ -463,7 +463,7 @@ class GPTManager:
             self.is_processing = True
 
             if not self.is_openai_configured():
-                await self.tts_manager.say("OpenAI API key not configured.", priority=1)
+                await self.tts_manager.say_key("gpt.api_key_missing", priority=1)
                 if websocket:
                     await self._send_gpt_status_update(websocket, "error", "API key missing")
                 return False
@@ -491,11 +491,11 @@ class GPTManager:
                 if camera_status["state"] == "RUNNING":
                     image_data = await self._get_camera_image_for_api()
                     if not image_data:
-                        await self.tts_manager.say("Unable to access the camera feed. Processing without image.", priority=1)
+                        await self.tts_manager.say_key("gpt.camera_unavailable", priority=1)
                         if websocket:
                             await self._send_gpt_status_update(websocket, "warning", "Camera feed not available, proceeding without image")
                 else:
-                    await self.tts_manager.say("Camera is not active. Processing without image.", priority=1)
+                    await self.tts_manager.say_key("gpt.camera_inactive", priority=1)
                     if websocket:
                         await self._send_gpt_status_update(websocket, "warning", "Camera not active, proceeding without image")
             
@@ -729,7 +729,7 @@ AVAILABLE ACTIONS:
    
    For sound effects:
    • sound.play_sound("custom", sound_name): Plays a specific sound effect
-     - Available sounds: "alarm", "aurores", "bruh", etc. (see full list above)
+     - Available sounds: "alarm", "klaxon", "klaxon-2"
     
    For LED control:
     • led_manager.turn_on(): Turns on the LED
@@ -1011,9 +1011,7 @@ def _build_script_with_environment(script_code: str) -> str:
    
    Audio Functions:
    • play_sound(sound_name: string): Plays a sound effect
-   • Available sounds: "alarm", "aurores", "bruh", "cailloux", "fart", "get-out", "india", 
-     "klaxon", "klaxon-2", "laugh", "lingango", "nope", "ph", "pipe", "rat-dance", "scream", 
-     "tralalelo-tralala", "tuile", "vine-boom", "wow", "wtf"
+   • Available sounds: "alarm", "klaxon", "klaxon-2"
    • say(text: string, language: string): TTS output DO NOT use this function to respond to the user, only use it if you want to say something between actions for example
      Sound Settings:
    • set_sound_enabled(enabled: boolean): Master sound toggle
@@ -1193,7 +1191,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                                         return success
                                     except json.JSONDecodeError:
                                         logger.error(f"Failed to parse response as JSON: {content.text}")
-                                        await self.tts_manager.say("I couldn't understand my own response. Please try again.", priority=1)
+                                        await self.tts_manager.say_key("gpt.parse_failed", priority=1)
                                         
                                 elif content.type == "refusal":
                                     # Handle refusal case
@@ -1206,7 +1204,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                                         await self._send_gpt_status_update(websocket, "error", "Request refused by assistant")
                                     return False
                 
-                await self.tts_manager.say("I couldn't process your request properly. Please try again.", priority=1)
+                await self.tts_manager.say_key("gpt.request_failed", priority=1)
                 if websocket:
                     await self._send_gpt_status_update(websocket, "error", "Failed to get a proper response")
                 return False
@@ -1214,7 +1212,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             except Exception as e:
                 logger.error(f"Error calling OpenAI API: {e}")
                 logger.error(traceback.format_exc())
-                await self.tts_manager.say(f"I had trouble connecting to my brain: {str(e)}", priority=1)
+                await self.tts_manager.say_key("gpt.connection_failed", priority=1)
                 if websocket:
                     await self._send_gpt_status_update(websocket, "error", f"API error: {str(e)}")
                 return False
@@ -1222,7 +1220,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         except Exception as e:
             logger.error(f"Error processing GPT command: {e}")
             logger.error(traceback.format_exc())
-            await self.tts_manager.say(f"I encountered an error: {str(e)}", priority=1)
+            await self.tts_manager.say_key("gpt.error", priority=1)
             if websocket:
                 await self._send_gpt_status_update(websocket, "error", f"Error: {str(e)}")
             return False          
@@ -1530,7 +1528,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     )
                 return script_success
             else:
-                await self.tts_manager.say("No Python script provided.", priority=1)
+                await self.tts_manager.say_key("gpt.no_script", priority=1)
                 return False
           # Process predefined function actions
         if action_type == "predefined_function":
@@ -1564,10 +1562,10 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     return True
                 except Exception as e:
                     logger.error(f"Error executing predefined functions: {e}")
-                    await self.tts_manager.say("I encountered an error while executing functions.", priority=1)
+                    await self.tts_manager.say_key("gpt.function_error", priority=1)
                     return False
             else:
-                await self.tts_manager.say("No predefined functions specified.", priority=1)
+                await self.tts_manager.say_key("gpt.no_functions", priority=1)
                 return False
         
         # Process motor sequence actions
@@ -1602,14 +1600,14 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                         await asyncio.gather(*motor_tasks)
                         return True
                     else:
-                        await self.tts_manager.say("No valid motor sequences to execute.", priority=1)
+                        await self.tts_manager.say_key("gpt.no_motor_sequence", priority=1)
                         return False
                 except Exception as e:
                     logger.error(f"Error executing motor sequence: {e}")
-                    await self.tts_manager.say("I encountered an error with the motor sequence.", priority=1)
+                    await self.tts_manager.say_key("gpt.motor_sequence_error", priority=1)
                     return False
             else:
-                await self.tts_manager.say("Motor sequence is empty.", priority=1)
+                await self.tts_manager.say_key("gpt.motor_sequence_empty", priority=1)
                 return False
         
         # Text-only actions ("none" action type)
@@ -1618,7 +1616,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         
         # This should never happen due to validation above, but as a fallback
         else:
-            await self.tts_manager.say("Invalid action type specified.", priority=1)
+            await self.tts_manager.say_key("gpt.invalid_action", priority=1)
             return False
     
     async def _run_motor_sequence(self, motor: Dict[str, Any]) -> None:
@@ -1853,7 +1851,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                 # Get distance measurement
                 distance = self.px.get_distance()
                 # Report the distance via TTS
-                asyncio.create_task(self.tts_manager.say(f"Distance: {distance} centimeters", priority=1))
+                asyncio.create_task(self.tts_manager.say_key("sensor.distance", priority=1, distance=distance))
                 logger.info(f"Get distance: {distance} cm")
                 return True
                 
@@ -1896,15 +1894,11 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     logger.warning("No sound name provided")
                     return False
                     
-                valid_sounds = [
-                    "alarm", "aurores", "bruh", "cailloux", "fart", "fave", "get-out", 
-                    "india", "klaxon", "klaxon-2", "laugh", "lingango", "nope", "ph", 
-                    "pipe", "rat-dance", "scream", "tralalelo-tralala", "tuile", 
-                    "vine-boom", "wow", "wtf"
-                ]
+                valid_sounds = {"alarm", "klaxon", "klaxon-2"}
                 
                 if sound_name not in valid_sounds:
-                    logger.warning(f"Unknown sound: {sound_name}")                # Play anyway, in case it's a new sound that was added
+                    logger.warning(f"Unknown or non-demo-safe sound: {sound_name}")
+                    return False
                     
                 # Execute
                 self.sound_manager.play_sound("custom", name=sound_name)
@@ -2523,65 +2517,65 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             # SYSTEM FUNCTIONS
             elif function_name == "restart_robot":
                 logger.info("Restart robot requested")
-                await self.tts_manager.say("Restarting system. Please wait.", priority=2, blocking=True)
+                await self.tts_manager.say_key("admin.reboot", priority=2, blocking=True)
                 return self.run_admin_script("reboot_robot.sh")
                 
             elif function_name == "shutdown_robot":
                 logger.info("Shutdown robot requested")
-                await self.tts_manager.say("Shutting down system. Goodbye!", priority=2, blocking=True)
+                await self.tts_manager.say_key("admin.shutdown", priority=2, blocking=True)
                 return self.run_admin_script("shutdown_robot.sh")
             
             elif function_name == "restart_all_services":
                 logger.info("Restart all services requested")
-                await self.tts_manager.say("Restarting all services.", priority=1)
+                await self.tts_manager.say_key("admin.services_restart", priority=1)
                 return self.run_admin_script("restart_services.sh")
                 
             elif function_name == "restart_websocket":
                 logger.info("Restart websocket requested")
-                await self.tts_manager.say("Restarting websocket service.", priority=1)
+                await self.tts_manager.say_key("admin.websocket_restart", priority=1)
                 success = self.run_admin_script("restart_websocket.sh")
                 if not success:
-                    await self.tts_manager.say("Failed to schedule websocket restart.", priority=1)
+                    await self.tts_manager.say_key("admin.websocket_failed", priority=1)
                     logger.error("Failed to restart websocket service")
                 return success
                 
             elif function_name == "restart_web_server":
                 logger.info("Restart web server requested")
-                await self.tts_manager.say("Restarting web server.", priority=1)
+                await self.tts_manager.say_key("admin.web_restart", priority=1)
                 success = self.run_admin_script("restart_web_server.sh")
                 if not success:
-                    await self.tts_manager.say("Failed to schedule web server restart.", priority=1)
+                    await self.tts_manager.say_key("admin.web_failed", priority=1)
                     logger.error("Failed to restart web server")
                 return success
                 
             elif function_name == "restart_python_service":
                 logger.info("Restart Python service requested")
-                await self.tts_manager.say("Restarting Python service.", priority=1)
+                await self.tts_manager.say_key("admin.python_restart", priority=1)
                 return self.run_admin_script("restart_python.sh")
                 
             elif function_name == "restart_camera_feed":
                 logger.info("Restart camera feed requested")
-                await self.tts_manager.say("Restarting camera feed.", priority=1)
+                await self.tts_manager.say_key("camera.feed_restarting", priority=1)
                 success = await self.camera_manager.restart()
                 if not success:
-                    await self.tts_manager.say("Failed to restart camera feed.", priority=1)
+                    await self.tts_manager.say_key("camera.error", priority=1)
                     logger.error("Failed to restart camera feed")
                 return success
                 
             elif function_name == "check_for_updates":
                 logger.info("Check for updates requested")
-                await self.tts_manager.say("Checking for updates.", priority=1)
+                await self.tts_manager.say_key("startup.check_updates", priority=1)
                 return self.run_admin_script("update.sh")
                 
             elif function_name == "emergency_stop":
                 logger.info("Emergency stop requested")
-                await self.tts_manager.say("Emergency stop activated.", priority=2)
+                await self.tts_manager.say_key("emergency.manual_stop", priority=2)
                 self.sensor_manager.manual_emergency_stop()
                 return True
                 
             elif function_name == "clear_emergency":
                 logger.info("Clear emergency stop requested")
-                await self.tts_manager.say("Emergency stop cleared.", priority=1)
+                await self.tts_manager.say_key("emergency.cleared", priority=1)
                 self.sensor_manager.clear_manual_stop()
                 return True
 

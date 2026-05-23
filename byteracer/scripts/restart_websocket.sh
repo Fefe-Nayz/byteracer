@@ -12,12 +12,12 @@ LOG_FILE="${BYTERACER_LOG_DIR}/restart_websocket.log"
 setup_logging "${LOG_FILE}"
 
 log "========== RESTART WEBSOCKET STARTED =========="
-speak "Restarting WebSocket service"
+speak_key "admin.websocket_restart"
 
 if systemd_unit_exists "byteracer-eaglecontrol.service"; then
     if restart_systemd_unit "byteracer-eaglecontrol.service" && wait_for_port "127.0.0.1" 3001 20; then
         log "WebSocket service is listening on port 3001"
-        speak "WebSocket service restarted"
+        speak_key "admin.websocket_restarted"
         log "========== RESTART WEBSOCKET COMPLETED =========="
         exit 0
     fi
@@ -29,15 +29,15 @@ stop_screen_session "eaglecontrol" "bun .*index.ts"
 if start_screen_session "eaglecontrol" "${BYTERACER_PATH}/eaglecontrol" "bun run start"; then
     if wait_for_port "127.0.0.1" 3001 20; then
         log "WebSocket service is listening on port 3001"
-        speak "WebSocket service restarted"
+        speak_key "admin.websocket_restarted"
     else
         log "WebSocket screen started but port 3001 is not ready"
-        speak "WebSocket service did not become ready"
+        speak_key "admin.websocket_not_ready"
         exit 1
     fi
 else
     log "Failed to start WebSocket screen session"
-    speak "WebSocket service failed to start"
+    speak_key "admin.websocket_failed"
     exit 1
 fi
 

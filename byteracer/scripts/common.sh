@@ -62,6 +62,22 @@ speak() {
     return 0
 }
 
+speak_key() {
+    local key="$1"
+    shift || true
+    local python_bin
+    python_bin="$(byteracer_python)"
+
+    if [ ! -f "${TTS_SCRIPT}" ] || [ -z "${python_bin}" ]; then
+        log "TTS unavailable for key: ${key}"
+        return 0
+    fi
+
+    timeout 20s "${python_bin}" "${TTS_SCRIPT}" --key "${key}" "$@" >/dev/null 2>&1 || \
+        log "TTS failed or timed out for key: ${key}"
+    return 0
+}
+
 run_cmd() {
     log "Executing: $*"
     "$@"

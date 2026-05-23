@@ -120,6 +120,34 @@ export default function RobotSettings() {
       isDefault: false,
     });
   }
+  const ttsEngine = localSettings.sound.tts_engine || "piper";
+  const ttsVoice = localSettings.sound.tts_voice || "auto";
+  const piperVoices = [
+    { value: "auto", label: "Auto" },
+    { value: "en_US-lessac-medium", label: "English US - Lessac" },
+    { value: "en_GB-alan-medium", label: "English UK - Alan" },
+    { value: "fr_FR-siwis-medium", label: "French - Siwis" },
+  ];
+  const supertonicVoices = [
+    { value: "auto", label: "Auto" },
+    { value: "M1", label: "Supertonic M1" },
+    { value: "M2", label: "Supertonic M2" },
+    { value: "M3", label: "Supertonic M3" },
+    { value: "M4", label: "Supertonic M4" },
+    { value: "M5", label: "Supertonic M5" },
+    { value: "F1", label: "Supertonic F1" },
+    { value: "F2", label: "Supertonic F2" },
+    { value: "F3", label: "Supertonic F3" },
+    { value: "F4", label: "Supertonic F4" },
+    { value: "F5", label: "Supertonic F5" },
+  ];
+  const ttsVoiceOptions =
+    ttsEngine === "supertonic" ? supertonicVoices : piperVoices;
+  const selectedTtsVoice = ttsVoiceOptions.some(
+    (voice) => voice.value === ttsVoice
+  )
+    ? ttsVoice
+    : "auto";
 
   // Update a specific setting
   const updateSetting = (
@@ -996,6 +1024,52 @@ export default function RobotSettings() {
                     <SelectItem value="it-IT">Italian</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="mb-1 text-xs">TTS Engine</div>
+                  <Select
+                    value={ttsEngine}
+                    onValueChange={(value) => {
+                      updateSetting("sound", "tts_engine", value);
+                      updateSetting("sound", "tts_voice", "auto");
+                    }}
+                    disabled={!localSettings.sound.tts_enabled}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select engine" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="piper">Piper</SelectItem>
+                      <SelectItem value="supertonic">Supertonic</SelectItem>
+                      <SelectItem value="pico">Pico</SelectItem>
+                      <SelectItem value="auto">Auto</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <div className="mb-1 text-xs">TTS Voice</div>
+                  <Select
+                    value={selectedTtsVoice}
+                    onValueChange={(value) =>
+                      updateSetting("sound", "tts_voice", value)
+                    }
+                    disabled={!localSettings.sound.tts_enabled || ttsEngine === "pico"}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select voice" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ttsVoiceOptions.map((voice) => (
+                        <SelectItem key={voice.value} value={voice.value}>
+                          {voice.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
           </div>

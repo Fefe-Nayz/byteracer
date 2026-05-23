@@ -135,6 +135,8 @@ export interface RobotSettings {
     enabled: boolean;
     tts_enabled: boolean;
     tts_language: string;
+    tts_engine: "piper" | "supertonic" | "pico" | "auto";
+    tts_voice: string;
     volume: number;
     sound_volume: number;
     driving_volume: number;

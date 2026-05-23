@@ -1131,7 +1131,7 @@ class AICameraCameraManager:
                 
                 # Announce if TTS manager is available
                 if self.tts_manager:
-                    await self.tts_manager.say(f"{class_name.capitalize()} light detected", priority=1)
+                    await self.tts_manager.say_key("ai.light_detected", priority=1, name=class_name)
                 
                 logger.info(f"{class_name.upper()} LIGHT - Stopping robot")
                 
@@ -1164,7 +1164,7 @@ class AICameraCameraManager:
                     
                     # Announce if TTS manager is available
                     if self.tts_manager:
-                        await self.tts_manager.say("Green light detected", priority=1)
+                        await self.tts_manager.say_key("ai.green_light", priority=1)
                     
                     logger.info(f"GREEN LIGHT after stopping - Proceeding at {self.autonomous_speed*100:.1f}% speed")
                 elif prev_state != "Vert":
@@ -1176,7 +1176,7 @@ class AICameraCameraManager:
 
                     # Announce if TTS manager is available
                     if self.tts_manager:
-                        await self.tts_manager.say("Green light detected", priority=1)
+                        await self.tts_manager.say_key("ai.green_light", priority=1)
 
                     logger.info(f"GREEN LIGHT - Proceeding at {self.autonomous_speed*100:.1f}% speed")
         elif not self.waiting_for_green:
@@ -1230,7 +1230,7 @@ class AICameraCameraManager:
             
             # Announce if TTS manager is available
             if self.tts_manager:
-                await self.tts_manager.say("Stop sign detected", priority=1)
+                await self.tts_manager.say_key("ai.stop_sign", priority=1)
             
             logger.info(f"STOP SIGN - Stopping robot for {self.stop_sign_wait_time} seconds")
             
@@ -1259,7 +1259,7 @@ class AICameraCameraManager:
 
                 # Announce if TTS manager is available
                 if self.tts_manager:
-                    await self.tts_manager.say("Proceeding after stop", priority=1)
+                    await self.tts_manager.say_key("ai.proceed_after_stop", priority=1)
                 
                 logger.info(f"STOP SIGN - Waited {self.stop_sign_wait_time} seconds, now proceeding at {self.autonomous_speed*100:.1f}% speed")
         elif not self.waiting_at_stop_sign:
@@ -1329,7 +1329,7 @@ class AICameraCameraManager:
             
             # Announce if TTS manager is available
             if self.tts_manager:
-                await self.tts_manager.say("Right turn ahead", priority=1)
+                await self.tts_manager.say_key("ai.right_turn_ahead", priority=1)
         
         elif not is_close_enough and not self.right_turn_pending:
             # Not close enough yet, continue moving forward
@@ -1390,7 +1390,7 @@ class AICameraCameraManager:
             
             # Announce the turn
             if self.tts_manager:
-                await self.tts_manager.say("Turning right", priority=1)
+                await self.tts_manager.say_key("ai.turning_right", priority=1)
             
             logger.info("RIGHT TURN SIGN - Executing right turn now")
             # Stop forward movement before starting the turn
@@ -1472,7 +1472,7 @@ class AICameraCameraManager:
             
             # Announce the test if TTS is available
             if self.tts_manager:
-                await self.tts_manager.say("Testing right turn calibration", priority=1)
+                await self.tts_manager.say_key("ai.test_right_turn", priority=1)
             
             # Make sure we're stopped
             self.px.forward(0)
@@ -1514,7 +1514,7 @@ class AICameraCameraManager:
             
             # Announce completion if TTS is available
             if self.tts_manager:
-                await self.tts_manager.say("Turn calibration completed", priority=1)
+                await self.tts_manager.say_key("ai.turn_calibration_done", priority=1)
 
             logger.info(f"Check if the robot turned approximately 90 degrees in {self.right_turn_time} seconds.")
             logger.info("If not, adjust the turn parameters in _handle_right_turn_sign method.")
@@ -1632,7 +1632,7 @@ class AICameraCameraManager:
             
             # Announce if TTS manager is available
             if self.tts_manager:
-                asyncio.create_task(self.tts_manager.say("Starting continuous right turn", priority=1))
+                asyncio.create_task(self.tts_manager.say_key("ai.continuous_right_turn", priority=1))
                 
             return True
             
@@ -1678,7 +1678,7 @@ class AICameraCameraManager:
         # Announce if TTS manager is available
         if self.tts_manager:
             # Use create_task to avoid blocking since this isn't an async method
-            asyncio.create_task(self.tts_manager.say("Turn stopped", priority=1))
+            asyncio.create_task(self.tts_manager.say_key("ai.turn_stopped", priority=1))
             
         logger.info("Continuous turn stopped")
         return True
@@ -2047,7 +2047,7 @@ class AICameraCameraManager:
                 self.forward_with_balance(0.05)  # 5% speed
                 
                 # Announce test start
-                await self.tts_manager.say("Motor balance test started. Watch if robot drives straight.", priority=1)
+                await self.tts_manager.say_key("ai.motor_test_started", priority=1)
 
                     
                 return {
@@ -2064,7 +2064,7 @@ class AICameraCameraManager:
                 self.px.set_motor_speed(2, 0)
                 
                 # Announce test stop
-                await self.tts_manager.say("Motor balance test stopped. Adjust the motor balance slider if needed.", priority=1)
+                await self.tts_manager.say_key("ai.motor_test_stopped", priority=1)
                 return {
                     "status": "success",
                     "message": "Motor balance test stopped",

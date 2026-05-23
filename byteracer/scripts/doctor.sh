@@ -63,6 +63,8 @@ core = [
     "serial",
     "ultralytics",
     "ncnn",
+    "piper",
+    "supertonic",
     "torch",
     "google.protobuf",
 ]

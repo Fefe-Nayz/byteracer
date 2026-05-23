@@ -32,20 +32,22 @@ class ConfigManager:
             # Sound settings
             "sound": {
                 "enabled": True,
-                "volume": 80,  # Master volume for all audio
+                "volume": 100,  # Master volume for all audio
                 "sound_volume": 80,  # Master volume for sound effects
-                "tts_volume": 80,  # Master volume for all TTS
+                "tts_volume": 100,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_language": "fr-FR",
-                "tts_audio_gain": 6,  # Gain in dB to make TTS louder
+                "tts_language": "en-US",
+                "tts_engine": "piper",
+                "tts_voice": "auto",
+                "tts_audio_gain": 15,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
                 "alert_volume": 90,    # For emergency/alert sounds
                 "custom_volume": 80,   # For user-triggered sound effects
                 "voice_volume": 95,    # For push-to-talk voice streams
-                "user_tts_volume": 80, # For user-triggered TTS
-                "system_tts_volume": 90, # For system/emergency TTS
-                "emergency_tts_volume": 95, # For emergency TTS
+                "user_tts_volume": 100, # For user-triggered TTS
+                "system_tts_volume": 100, # For system/emergency TTS
+                "emergency_tts_volume": 100, # For emergency TTS
             },
             
             # Camera settings
@@ -54,7 +56,7 @@ class ConfigManager:
                 "hflip": False,
                 "local_display": False,
                 "web_display": True,
-                "camera_size": [1920, 1080],  # Default camera resolution [width, height]
+                "camera_size": [640, 480],  # Default camera resolution [width, height]
             },
             
             # Safety settings
@@ -76,8 +78,8 @@ class ConfigManager:
             # Drive settings
             "drive": {
                 "max_speed": 100,
-                "max_turn_angle": 30,
-                "acceleration_factor": 0.8,
+                "max_turn_angle": 100,
+                "acceleration_factor": 1,
                 "enhanced_turning": True,    # Enable differential steering for better turning
                 "turn_in_place": True,       # Allow turning in place when no forward/backward motion
             },
@@ -370,20 +372,22 @@ class ConfigManager:
             # Sound settings
             "sound": {
                 "enabled": True,
-                "volume": 80,  # Master volume for all audio
+                "volume": 100,  # Master volume for all audio
                 "sound_volume": 80,  # Master volume for sound effects
-                "tts_volume": 80,  # Master volume for all TTS
+                "tts_volume": 100,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_language": "fr-FR",
-                "tts_audio_gain": 6,  # Gain in dB to make TTS louder
+                "tts_language": "en-US",
+                "tts_engine": "piper",
+                "tts_voice": "auto",
+                "tts_audio_gain": 15,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
                 "alert_volume": 90,    # For emergency/alert sounds
                 "custom_volume": 80,   # For user-triggered sound effects
                 "voice_volume": 95,    # For push-to-talk voice streams
-                "user_tts_volume": 80, # For user-triggered TTS
-                "system_tts_volume": 90, # For system TTS
-                "emergency_tts_volume": 95, # For emergency TTS
+                "user_tts_volume": 100, # For user-triggered TTS
+                "system_tts_volume": 100, # For system TTS
+                "emergency_tts_volume": 100, # For emergency TTS
             },
             
             # Camera settings
@@ -392,7 +396,7 @@ class ConfigManager:
                 "hflip": False,
                 "local_display": False,
                 "web_display": True,
-                "camera_size": [1920, 1080],  # Default camera resolution
+                "camera_size": [640, 480],  # Default camera resolution
             },
             
             # Safety settings
@@ -414,8 +418,8 @@ class ConfigManager:
             # Drive settings
             "drive": {
                 "max_speed": 100,
-                "max_turn_angle": 30,
-                "acceleration_factor": 0.8,
+                "max_turn_angle": 100,
+                "acceleration_factor": 1,
                 "enhanced_turning": True,    # Enable differential steering for better turning
                 "turn_in_place": True,       # Allow turning in place when no forward/backward motion
             },
