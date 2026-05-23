@@ -14,13 +14,19 @@ setup_logging "${LOG_FILE}"
 log "========== SHUTDOWN ROBOT STARTED =========="
 speak_key "admin.shutdown"
 
+# Run the poweroff inline rather than detaching a background child. This script
+# is launched in its own systemd transient unit; a backgrounded grandchild
+# would be killed when the unit's main process exits (KillMode=control-group)
+# before it could trigger the poweroff. A short sleep lets the TTS finish.
+sleep 2
+
 if systemd_available; then
-    log "Scheduling poweroff through systemd"
-    nohup bash -c 'sleep 2; exec sudo systemctl poweroff' >/dev/null 2>&1 &
+    log "Powering off through systemd"
+    sudo systemctl poweroff
 else
-    log "Scheduling shutdown command"
-    nohup bash -c 'sleep 2; exec sudo shutdown -h now' >/dev/null 2>&1 &
+    log "Powering off through shutdown command"
+    sudo shutdown -h now
 fi
 
-log "Shutdown scheduled"
+log "Poweroff requested"
 log "========== SHUTDOWN ROBOT COMPLETED =========="

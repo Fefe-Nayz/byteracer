@@ -14,13 +14,19 @@ setup_logging "${LOG_FILE}"
 log "========== REBOOT ROBOT STARTED =========="
 speak_key "admin.reboot"
 
+# Run the reboot inline rather than detaching a background child. This script
+# is launched in its own systemd transient unit; a backgrounded grandchild
+# would be killed when the unit's main process exits (KillMode=control-group)
+# before it could trigger the reboot. A short sleep lets the TTS finish.
+sleep 2
+
 if systemd_available; then
-    log "Scheduling reboot through systemd"
-    nohup bash -c 'sleep 2; exec sudo systemctl reboot' >/dev/null 2>&1 &
+    log "Rebooting through systemd"
+    sudo systemctl reboot
 else
-    log "Scheduling reboot through reboot command"
-    nohup bash -c 'sleep 2; exec sudo reboot' >/dev/null 2>&1 &
+    log "Rebooting through reboot command"
+    sudo reboot
 fi
 
-log "Reboot scheduled"
+log "Reboot requested"
 log "========== REBOOT ROBOT COMPLETED =========="
