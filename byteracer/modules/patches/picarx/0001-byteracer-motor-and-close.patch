@@ -1,0 +1,23 @@
+diff --git a/picarx/picarx.py b/picarx/picarx.py
+index e2228f6..a6f3149 100644
+--- a/picarx/picarx.py
++++ b/picarx/picarx.py
+@@ -109,7 +109,10 @@ class Picarx(object):
+         speed = abs(speed)
+         # print(f"direction: {direction}, speed: {speed}")
+         if speed != 0:
+-            speed = int(speed /2 ) + 50
++            # Add minimum +20 at 1% speed, scaling additional boost linearly up to +50 at 100% speed
++            # Then constrain to never exceed 100
++            boost = 20 + (speed * 0.2)  # 30 at 1%, ~50 at 100%
++            speed = int(min(100, speed + boost))
+         speed = speed - self.cali_speed_value[motor]
+         if direction < 0:
+             self.motor_direction_pins[motor].high()
+diff --git a/picarx/version.py b/picarx/version.py
+index 8cd3ece..15a0cdf 100644
+--- a/picarx/version.py
++++ b/picarx/version.py
+@@ -1 +1 @@
+-__version__ = '2.1.0a1'
++__version__ = '2.1.0a1.post1'

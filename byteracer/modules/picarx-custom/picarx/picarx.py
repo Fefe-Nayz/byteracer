@@ -259,6 +259,10 @@ class Picarx(object):
         self.set_cam_tilt_angle(0)
         self.set_cam_pan_angle(0)
 
+    def close(self):
+        self.reset()
+        self.ultrasonic.close()
+
 if __name__ == "__main__":
     px = Picarx()
     px.forward(50)

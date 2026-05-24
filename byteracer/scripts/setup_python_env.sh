@@ -18,6 +18,10 @@ FORCE_PYTHON_DEPS="${FORCE_PYTHON_DEPS:-false}"
 PIPER_DATA_DIR="${BYTERACER_PIPER_DATA_DIR:-${BYTERACER_VENV}/piper-voices}"
 PIPER_VOICES="${PIPER_VOICES:-en_US-lessac-medium en_GB-alan-medium fr_FR-siwis-medium}"
 SUPERTONIC_CACHE_DIR="${SUPERTONIC_CACHE_DIR:-${BYTERACER_VENV}/supertonic-cache}"
+TTS_CACHE_DIR="${BYTERACER_TTS_CACHE_DIR:-${BYTERACER_VENV}/tts-cache}"
+CUSTOM_LIBS_LOCK="${BYTERACER_PATH}/byteracer/modules/custom-libs.lock.json"
+CUSTOM_LIBS_SYNC="${BYTERACER_PATH}/byteracer/scripts/sync_custom_libs.sh"
+CUSTOM_LIBS_PATCH_DIR="${BYTERACER_PATH}/byteracer/modules/patches"
 
 VENV_DIR="${BYTERACER_VENV}"
 PYTHON_BIN="${VENV_DIR}/bin/python"
@@ -45,6 +49,17 @@ dependency_signature() {
         printf '%s\n' "${PYTORCH_CPU_TORCHVISION}"
         printf '%s\n' "${PIPER_VOICES}"
         printf '%s\n' "${SUPERTONIC_CACHE_DIR}"
+        printf '%s\n' "${TTS_CACHE_DIR}"
+        sha256sum "${BYTERACER_PATH}/byteracer/modules/i18n.py" 2>/dev/null || true
+        sha256sum "${BYTERACER_PATH}/byteracer/modules/tts_backends.py" 2>/dev/null || true
+        sha256sum "${BYTERACER_PATH}/byteracer/modules/tts_cache.py" 2>/dev/null || true
+        sha256sum "${BYTERACER_PATH}/byteracer/tts/speak.py" 2>/dev/null || true
+        sha256sum "${CUSTOM_LIBS_LOCK}" 2>/dev/null || true
+        sha256sum "${CUSTOM_LIBS_SYNC}" 2>/dev/null || true
+        if [ -d "${CUSTOM_LIBS_PATCH_DIR}" ]; then
+            find "${CUSTOM_LIBS_PATCH_DIR}" -type f -name '*.patch' -print0 2>/dev/null | \
+                sort -z | xargs -0 -r sha256sum 2>/dev/null || true
+        fi
     } | sha256sum | awk '{ print $1 }'
 }
 
@@ -59,6 +74,9 @@ import ultralytics
 import ncnn
 import piper
 import supertonic
+import robot_hat
+import vilib
+import picarx
 from importlib.metadata import version
 
 print(f"numpy={numpy.__version__} {numpy.__file__}")
@@ -68,6 +86,9 @@ print(f"ultralytics={ultralytics.__version__}")
 print(f"ncnn={getattr(ncnn, '__version__', 'unknown')}")
 print("piper=OK")
 print(f"supertonic={version('supertonic')}")
+print(f"robot_hat={getattr(robot_hat, '__file__', 'unknown')}")
+print(f"vilib={getattr(vilib, '__file__', 'unknown')}")
+print(f"picarx={getattr(picarx, '__file__', 'unknown')}")
 PY
 }
 
@@ -181,21 +202,86 @@ install_supertonic_model() {
         }
 }
 
+sync_custom_libs() {
+    local modules_dir="${BYTERACER_PATH}/byteracer/modules"
+
+    if [ ! -f "${CUSTOM_LIBS_SYNC}" ]; then
+        log "Missing custom library sync script: ${CUSTOM_LIBS_SYNC}"
+        return 1
+    fi
+
+    if [ "$(id -u)" -eq 0 ]; then
+        sudo chown -R "${BYTERACER_USER}:${BYTERACER_USER}" \
+            "${modules_dir}/robot-hat-custom" \
+            "${modules_dir}/vilib-custom" \
+            "${modules_dir}/picarx-custom" 2>/dev/null || true
+    fi
+
+    log "Syncing ByteRacer custom library checkouts"
+    run_as_app_user env BYTERACER_PATH="${BYTERACER_PATH}" \
+        bash "${CUSTOM_LIBS_SYNC}" || return 1
+}
+
+install_custom_sunfounder_packages() {
+    local robot_hat_custom="${BYTERACER_PATH}/byteracer/modules/robot-hat-custom"
+    local vilib_custom="${BYTERACER_PATH}/byteracer/modules/vilib-custom"
+    local picarx_custom="${BYTERACER_PATH}/byteracer/modules/picarx-custom"
+    local project
+
+    for project in "${robot_hat_custom}" "${vilib_custom}" "${picarx_custom}"; do
+        if [ ! -d "${project}/.git" ]; then
+            log "Missing generated custom library checkout: ${project}"
+            return 1
+        fi
+    done
+
+    log "Installing ByteRacer robot-hat custom package into venv"
+    pip_install --no-cache-dir --force-reinstall --no-deps -e "${robot_hat_custom}" || return 1
+
+    log "Installing ByteRacer vilib custom package into venv"
+    pip_install --no-cache-dir --force-reinstall --no-deps -e "${vilib_custom}" || return 1
+
+    log "Installing ByteRacer picarx custom package into venv"
+    pip_install --no-cache-dir --force-reinstall --no-deps -e "${picarx_custom}" || return 1
+}
+
+pregenerate_static_tts_cache() {
+    mkdir -p "${TTS_CACHE_DIR}" 2>/dev/null || true
+    if [ "$(id -u)" -eq 0 ]; then
+        sudo chown -R "${BYTERACER_USER}:${BYTERACER_USER}" "${TTS_CACHE_DIR}" 2>/dev/null || true
+    fi
+
+    log "Pre-generating static TTS cache into ${TTS_CACHE_DIR}"
+    run_as_app_user env \
+        BYTERACER_PIPER_DATA_DIR="${PIPER_DATA_DIR}" \
+        SUPERTONIC_CACHE_DIR="${SUPERTONIC_CACHE_DIR}" \
+        BYTERACER_TTS_CACHE_DIR="${TTS_CACHE_DIR}" \
+        "${PYTHON_BIN}" "${BYTERACER_PATH}/byteracer/tts/speak.py" --pregenerate-static || \
+        log "WARNING: static TTS cache pre-generation failed"
+}
+
 main() {
     local current_signature previous_signature dep
 
     prepare_venv || return 1
+    sync_custom_libs || return 1
     current_signature="$(dependency_signature)"
     previous_signature="$(cat "${STAMP_FILE}" 2>/dev/null || true)"
 
     if [ "${FORCE_PYTHON_DEPS}" != "true" ] && [ "${current_signature}" = "${previous_signature}" ]; then
         if verify_python_stack >/dev/null 2>&1; then
+            install_custom_sunfounder_packages || return 1
             install_piper_voices
             install_supertonic_model
-            log "ByteRacer Python venv is already in sync"
-            return 0
+            pregenerate_static_tts_cache
+            if verify_python_stack >/dev/null 2>&1; then
+                log "ByteRacer Python venv is already in sync"
+                return 0
+            fi
+            log "ByteRacer Python venv verification failed after custom overrides; reinstalling dependencies"
+        else
+            log "ByteRacer Python venv verification failed; reinstalling dependencies"
         fi
-        log "ByteRacer Python venv verification failed; reinstalling dependencies"
     fi
 
     pip_install --upgrade pip setuptools wheel || return 1
@@ -212,6 +298,8 @@ main() {
 
     install_piper_voices
     install_supertonic_model
+    install_custom_sunfounder_packages || return 1
+    pregenerate_static_tts_cache
 
     log "Verifying ByteRacer Python venv"
     verify_python_stack || return 1

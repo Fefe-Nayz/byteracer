@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# whther print welcome message
+# whether print welcome message
 import os
 import logging
 
@@ -46,8 +46,8 @@ DEFAULLT_VIDEOS_PATH = '%s/Videos/vilib/'%user_home
 # utils
 # =================================================================
 def findContours(img):
-    _tuple = cv2.findContours(img, cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)      
-    # compatible with opencv3.x and openc4.x
+    _tuple = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)      
+    # compatible with opencv3.x and opencv4.x
     if len(_tuple) == 3:
         _, contours, hierarchy = _tuple
     else:
@@ -79,27 +79,24 @@ def get_png_frame():
 def get_qrcode():
     while Vilib.qrcode_img_encode is None:
          time.sleep(0.2)
-
     return Vilib.qrcode_img_encode
 
 def gen():
     """Video streaming generator function."""
-    while True:  
-        # start_time = time.time()
+    while True:
         frame = get_frame()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
         time.sleep(0.03)
-        # end_time = time.time() - start_time
-        # print('flask fps:%s'%int(1/end_time))
 
-@app.route('/mjpg') ## video
+@app.route('/mjpg')  # video
 def video_feed():
-    # from camera import Camera
-    """Video streaming route. Put this in the src attribute of an img tag."""
+    """Video streaming route. Put this in the src attribute of an <img> tag."""
     if Vilib.web_display_flag:
-        response = Response(gen(),
-                        mimetype='multipart/x-mixed-replace; boundary=frame') 
+        response = Response(
+            gen(),
+            mimetype='multipart/x-mixed-replace; boundary=frame'
+        )
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
     else:
@@ -110,18 +107,16 @@ def video_feed():
         html = f"<html><style>p{{white-space: pre-wrap;}}</style><body><p>{tip}</p></body></html>"
         return Response(html, mimetype='text/html')
 
-@app.route('/mjpg.jpg')  # jpg
+@app.route('/mjpg.jpg')  # single JPEG
 def video_feed_jpg():
-    # from camera import Camera
-    """Video streaming route. Put this in the src attribute of an img tag."""
+    """JPEG snapshot route."""
     response = Response(get_frame(), mimetype="image/jpeg")
     response.headers.add("Access-Control-Allow-Origin", "*")
     return response
 
-@app.route('/mjpg.png')  # png
+@app.route('/mjpg.png')  # single PNG
 def video_feed_png():
-    # from camera import Camera
-    """Video streaming route. Put this in the src attribute of an img tag."""
+    """PNG snapshot route."""
     response = Response(get_png_frame(), mimetype="image/png")
     response.headers.add("Access-Control-Allow-Origin", "*")
     return response
@@ -138,7 +133,7 @@ def qrcode_feed():
             var imgElement = document.getElementById('qrcode-img');
             imgElement.src = '/qrcode.png?' + new Date().getTime();  // Add timestamp to avoid caching
         }
-        var refreshInterval = 500;  // 2s
+        var refreshInterval = 500;
 
         window.onload = function() {
             refreshQRCode(); 
@@ -153,13 +148,10 @@ def qrcode_feed():
 '''
     return Response(qrcode_html, mimetype='text/html')
 
-
 @app.route("/qrcode.png")
 def qrcode_feed_png():
-    """Video streaming route. Put this in the src attribute of an img tag."""
+    """QR Code snapshot route."""
     if Vilib.web_qrcode_flag:
-        # response = Response(get_qrcode(),
-        #                 mimetype='multipart/x-mixed-replace; boundary=frame')
         response = Response(get_qrcode(), mimetype="image/png")
         response.headers.add("Access-Control-Allow-Origin", "*")
         return response
@@ -211,12 +203,15 @@ class Vilib(object):
     web_qrcode_flag = False
 
     draw_fps = False
-    fps_origin = (camera_width-105, 20)
+    fps_origin = (camera_width - 105, 20)
     fps_size = 0.6
     fps_color = (255, 255, 255)
 
     detect_obj_parameter = {}
-    color_detect_color = None
+    
+    # === MULTI-COLOR DETECTION: replaced color_detect_color with color_detect_list ===
+    color_detect_list = None
+
     face_detect_sw = False
     hands_detect_sw = False
     pose_detect_sw = False
@@ -232,61 +227,33 @@ class Vilib(object):
     # Custom drawing functions
     # =================================================================
     drawing_enabled = False
-    
+
     @staticmethod
     def enable_drawing():
-        """Enable the drawing of custom overlays on the camera feed."""
+        """Enable custom overlays on the camera feed."""
         Vilib.drawing_enabled = True
-        
+
     @staticmethod
     def disable_drawing():
-        """Disable the drawing of custom overlays on the camera feed."""
+        """Disable custom overlays on the camera feed."""
         Vilib.drawing_enabled = False
         reset_drawings()
-        
+
     @staticmethod
     def draw_rectangle(x, y, width, height, color=(0, 255, 0), thickness=2, label=None, label_color=None, font_scale=0.5, label_thickness=1, label_position='top'):
-        """
-        Add a rectangle to be drawn on the camera feed.
-        
-        Args:
-            x (int): Top-left x coordinate
-            y (int): Top-left y coordinate
-            width (int): Width of rectangle
-            height (int): Height of rectangle
-            color (tuple): BGR color tuple, e.g. (0, 255, 0) for green
-            thickness (int): Line thickness
-            label (str, optional): Text label to draw with the rectangle
-            label_color (tuple, optional): BGR color tuple for the label text, if None uses same as rectangle
-            font_scale (float, optional): Font scale for the label
-            label_thickness (int, optional): Text thickness for the label
-            label_position (str, optional): Position of label, either 'top' (above rectangle) or 'inside' (on top border)
-        """
+        """Queue a rectangle overlay on the camera feed."""
         add_rectangle(x, y, width, height, color, thickness, label, label_color, font_scale, label_thickness, label_position)
-        
+
     @staticmethod
     def draw_text(text, x, y, color=(0, 255, 0), font_scale=0.5, thickness=1):
-        """
-        Add text to be drawn on the camera feed.
-        
-        Args:
-            text (str): Text to display
-            x (int): Bottom-left x coordinate of text
-            y (int): Bottom-left y coordinate of text
-            color (tuple): BGR color tuple
-            font_scale (float): Font scale
-            thickness (int): Text thickness
-        """
+        """Queue a text overlay on the camera feed."""
         add_text(text, x, y, color, font_scale, thickness)
-        
+
     @staticmethod
     def clear_drawings():
-        """Clear all drawing requests."""
+        """Clear queued overlay requests."""
         reset_drawings()
 
-    # Set up our custom drawing module
-    drawing_enabled = False
-        
     @staticmethod
     def get_instance():
         return Vilib.picam2
@@ -301,122 +268,109 @@ class Vilib(object):
 
     @staticmethod
     def camera():
-        Vilib.camera_width = Vilib.camera_size[0]
-        Vilib.camera_height = Vilib.camera_size[1]
+        Vilib.camera_width, Vilib.camera_height = Vilib.camera_size
 
         picam2 = Vilib.picam2
-
         preview_config = picam2.preview_configuration
-        # preview_config.size = (800, 600)
+
+        # Adjust camera config
         preview_config.size = Vilib.camera_size
-        preview_config.format = 'RGB888'  # 'XRGB8888', 'XBGR8888', 'RGB888', 'BGR888', 'YUV420'
+        preview_config.format = 'RGB888'
         preview_config.transform = libcamera.Transform(
-                                        hflip=Vilib.camera_hflip,
-                                        vflip=Vilib.camera_vflip
-                                    )
+            hflip=Vilib.camera_hflip,
+            vflip=Vilib.camera_vflip
+        )
         preview_config.colour_space = libcamera.ColorSpace.Sycc()
         preview_config.buffer_count = 4
         preview_config.queue = True
-        # preview_config.raw = {'size': (2304, 1296)}
-        preview_config.controls = {'FrameRate': 60} # change picam2.capture_array() takes time
+        preview_config.controls = {'FrameRate': 60}
 
         try:
             picam2.start()
         except Exception as e:
             print(f"\033[38;5;1mError:\033[0m\n{e}")
-            print("\nPlease check whether the camera is connected well" +\
-                "You can use the \"libcamea-hello\" command to test the camera"
-                )
+            print("\nPlease check whether the camera is connected well.\n"
+                  "You can use the \"libcamera-hello\" command to test the camera.")
             exit(1)
         Vilib.camera_run = True
-        Vilib.fps_origin = (Vilib.camera_width-105, 20)
+
+        Vilib.fps_origin = (Vilib.camera_width - 105, 20)
         fps = 0
-        start_time = 0
+        start_time = time.time()
         framecount = 0
+
         try:
-            start_time = time.time()
             while True:
-                # ----------- extract image data ----------------
-                # st = time.time()
                 Vilib.img = picam2.capture_array()
-                # print(f'picam2.capture_array(): {time.time() - st:.6f}')
-                # st = time.time()
 
-                # ----------- image gains and effects ----------------
-
-                # ----------- image detection and recognition ----------------
+                # --- Run detection pipelines ---
                 Vilib.img = Vilib.color_detect_func(Vilib.img)
                 Vilib.img = Vilib.face_detect_func(Vilib.img)
                 Vilib.img = Vilib.traffic_detect_fuc(Vilib.img)
                 Vilib.img = Vilib.qrcode_detect_func(Vilib.img)
-
                 Vilib.img = Vilib.image_classify_fuc(Vilib.img)
                 Vilib.img = Vilib.object_detect_fuc(Vilib.img)
                 Vilib.img = Vilib.hands_detect_fuc(Vilib.img)
                 Vilib.img = Vilib.pose_detect_fuc(Vilib.img)
 
-                # Apply custom drawings from external modules
                 if Vilib.drawing_enabled:
                     Vilib.img = draw_overlay(Vilib.img)
 
-                # ----------- calculate fps and draw fps ----------------
-                # calculate fps
+                # --- Calculate FPS ---
                 framecount += 1
                 elapsed_time = float(time.time() - start_time)
-                if (elapsed_time > 1):
-                    fps = round(framecount/elapsed_time, 1)
+                if elapsed_time > 1:
+                    fps = round(framecount / elapsed_time, 1)
                     framecount = 0
                     start_time = time.time()
 
-                # print(f"elapsed_time: {elapsed_time}, fps: {fps}")
-
-                # draw fps
+                # --- Draw FPS if needed ---
                 if Vilib.draw_fps:
                     cv2.putText(
-                            # img, # image
-                            Vilib.img,
-                            f"FPS: {fps}", # text
-                            Vilib.fps_origin, # origin
-                            cv2.FONT_HERSHEY_SIMPLEX, # font
-                            Vilib.fps_size, # font_scale
-                            Vilib.fps_color, # font_color
-                            1, # thickness
-                            cv2.LINE_AA, # line_type: LINE_8 (default), LINE_4, LINE_AA
-                        )
+                        Vilib.img,
+                        f"FPS: {fps}",
+                        Vilib.fps_origin,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        Vilib.fps_size,
+                        Vilib.fps_color,
+                        1,
+                        cv2.LINE_AA
+                    )
 
-                # ---- copy img for flask --- 
-                # st = time.time()
+                # --- Copy for Flask streaming ---
                 Vilib.flask_img = Vilib.img
-                # print(f'vilib.flask_img: {time.time() - st:.6f}')
 
-                # ----------- display on desktop ----------------
-                if Vilib.imshow_flag == True:
+                # --- Local display ---
+                if Vilib.imshow_flag:
                     try:
-                        cv2.imshow(Vilib.Windows_Name, Vilib.img)
+                        try:
+                            prop = cv2.getWindowProperty(Vilib.Windows_Name, cv2.WND_PROP_VISIBLE)
+                            qrcode_prop = cv2.getWindowProperty(Vilib.qrcode_win_name, cv2.WND_PROP_VISIBLE)
+                            if prop < 1 or qrcode_prop < 1:
+                                break
+                        except:
+                            pass
 
+                        cv2.imshow(Vilib.Windows_Name, Vilib.img)
+                        # Also display a QR code window if needed
                         if Vilib.imshow_qrcode_flag and Vilib.qrcode_making_completed:
-                                Vilib.qrcode_making_completed = False
-                                cv2.imshow(Vilib.qrcode_win_name, Vilib.qrcode_img)
+                            Vilib.qrcode_making_completed = False
+                            cv2.imshow(Vilib.qrcode_win_name, Vilib.qrcode_img)
 
                         cv2.waitKey(1)
-                        if cv2.getWindowProperty(Vilib.Windows_Name, cv2.WND_PROP_VISIBLE) == 0:
-                            cv2.destroyWindow(Vilib.Windows_Name)
 
                     except Exception as e:
                         Vilib.imshow_flag = False
                         print(f"imshow failed:\n  {e}")
                         break
 
-                # ----------- exit ----------------
-                if Vilib.camera_run == False:
+                # --- Exit if camera_run = False ---
+                if not Vilib.camera_run:
                     break
 
-                # print(f'loop end: {time.time() - st:.6f}')
-                
         except KeyboardInterrupt as e:
             print(e)
         finally:
-            print('camera close')
             picam2.close()
             cv2.destroyAllWindows()
 
@@ -434,37 +388,39 @@ class Vilib(object):
 
     @staticmethod
     def camera_close():
-        if Vilib.camera_thread != None:
+        if Vilib.camera_thread is not None:
             Vilib.camera_run = False
             time.sleep(0.1)
 
     @staticmethod
     def display(local=True, web=True):
-        # cheack camera thread is_alive
-        if Vilib.camera_thread != None and Vilib.camera_thread.is_alive():
-            # check gui
-            if local == True:
+        """Enable local and/or web display for camera frames."""
+        # Check if camera is running
+        if (Vilib.camera_thread is not None) and Vilib.camera_thread.is_alive():
+            # Local (desktop) display
+            if local:
                 if 'DISPLAY' in os.environ.keys():
-                    Vilib.imshow_flag = True  
+                    Vilib.imshow_flag = True
                     print("Imgshow start ...")
                 else:
-                    Vilib.imshow_flag = False 
-                    print("Local display failed, because there is no gui.") 
-            # web video
-            if web == True:
+                    Vilib.imshow_flag = False
+                    print("Local display failed, because there is no GUI environment.")
+            # Web display
+            if web:
                 Vilib.web_display_flag = True
                 print("\nWeb display on:")
                 wlan0, eth0 = getIP()
-                if wlan0 != None:
+                if wlan0 is not None:
                     print(f"      http://{wlan0}:9000/mjpg")
-                if eth0 != None:
+                if eth0 is not None:
                     print(f"      http://{eth0}:9000/mjpg")
-                print() # new line
-
-                # ----------- flask_thread ----------------
-                if Vilib.flask_thread == None or Vilib.flask_thread.is_alive() == False:
+                print()
+                if (Vilib.flask_thread is None) or (not Vilib.flask_thread.is_alive()):
                     print('Starting web streaming ...')
-                    Vilib.flask_thread = threading.Thread(name='flask_thread',target=web_camera_start)
+                    Vilib.flask_thread = threading.Thread(
+                        name='flask_thread',
+                        target=web_camera_start
+                    )
                     Vilib.flask_thread.daemon = True
                     Vilib.flask_thread.start()
         else:
@@ -478,85 +434,72 @@ class Vilib(object):
             Vilib.fps_size = fps_size
         if fps_origin is not None:
             Vilib.fps_origin = fps_origin
-
         Vilib.draw_fps = True
 
     @staticmethod
     def hide_fps():
         Vilib.draw_fps = False
 
-    # take photo
+    # Take photo
     # =================================================================
     @staticmethod
     def take_photo(photo_name, path=DEFAULLT_PICTURES_PATH):
-        # ----- check path -----
+        # Check & create path
         if not os.path.exists(path):
-            # print('Path does not exist. Creating path now ... ')
             os.makedirs(name=path, mode=0o751, exist_ok=True)
-            time.sleep(0.01) 
-        # ----- save photo -----
+            time.sleep(0.01)
+        # Save photo
         status = False
         for _ in range(5):
-            if  Vilib.img is not None:
-                status = cv2.imwrite(path + '/' + photo_name +'.jpg', Vilib.img)
+            if Vilib.img is not None:
+                status = cv2.imwrite(path + '/' + photo_name + '.jpg', Vilib.img)
                 break
             else:
                 time.sleep(0.01)
-        else:
-            status = False
-
-        # if status:
-        #     print('The photo is saved as '+path+'/'+photo_name+'.jpg')
-        # else:
-        #     print('Photo save failed .. ')
-
         return status
 
-
-    # record video
+    # Record video
     # =================================================================
-    rec_video_set = {}
-
-    rec_video_set["fourcc"] = cv2.VideoWriter_fourcc(*'XVID') 
-    #rec_video_set["fourcc"] = cv2.cv.CV_FOURCC("D", "I", "B", " ") 
-
-    rec_video_set["fps"] = 30.0
-    rec_video_set["framesize"] = (640, 480)
-    rec_video_set["isColor"] = True
-
-    rec_video_set["name"] = "default"
-    rec_video_set["path"] = DEFAULLT_VIDEOS_PATH
-
-    rec_video_set["start_flag"] = False
-    rec_video_set["stop_flag"] =  False
-
+    rec_video_set = {
+        "fourcc": cv2.VideoWriter_fourcc(*'XVID'), 
+        "fps": 30.0,
+        "framesize": (640, 480),
+        "isColor": True,
+        "name": "default",
+        "path": DEFAULLT_VIDEOS_PATH,
+        "start_flag": False,
+        "stop_flag": False
+    }
     rec_thread = None
 
     @staticmethod
     def rec_video_work():
+        # Ensure path
         if not os.path.exists(Vilib.rec_video_set["path"]):
-            # print('Path does not exist. Creating path now ... ')
-            os.makedirs(name=Vilib.rec_video_set["path"],
-                        mode=0o751,
-                        exist_ok=True
-            )
+            os.makedirs(name=Vilib.rec_video_set["path"], mode=0o751, exist_ok=True)
             time.sleep(0.01)
-        video_out = cv2.VideoWriter(Vilib.rec_video_set["path"]+'/'+Vilib.rec_video_set["name"]+'.avi',
-                                    Vilib.rec_video_set["fourcc"], Vilib.rec_video_set["fps"], 
-                                    Vilib.rec_video_set["framesize"], Vilib.rec_video_set["isColor"])
+
+        # Create writer
+        filename = Vilib.rec_video_set["path"] + '/' + Vilib.rec_video_set["name"] + '.avi'
+        video_out = cv2.VideoWriter(
+            filename,
+            Vilib.rec_video_set["fourcc"],
+            Vilib.rec_video_set["fps"],
+            Vilib.rec_video_set["framesize"],
+            Vilib.rec_video_set["isColor"]
+        )
     
         while True:
-            if Vilib.rec_video_set["start_flag"] == True:
-                # video_out.write(Vilib.img_array[0])
+            if Vilib.rec_video_set["start_flag"]:
                 video_out.write(Vilib.img)
-            if Vilib.rec_video_set["stop_flag"] == True:
-                video_out.release() # note need to release the video writer
-                Vilib.rec_video_set["start_flag"] == False
+            if Vilib.rec_video_set["stop_flag"]:
+                video_out.release()
+                Vilib.rec_video_set["start_flag"] = False
                 break
 
     @staticmethod
     def rec_video_run():
-        if Vilib.rec_thread != None:
+        if Vilib.rec_thread is not None:
             Vilib.rec_video_stop()
         Vilib.rec_video_set["stop_flag"] = False
         Vilib.rec_thread = threading.Thread(name='rec_video', target=Vilib.rec_video_work)
@@ -565,7 +508,7 @@ class Vilib(object):
 
     @staticmethod
     def rec_video_start():
-        Vilib.rec_video_set["start_flag"] = True 
+        Vilib.rec_video_set["start_flag"] = True
         Vilib.rec_video_set["stop_flag"] = False
 
     @staticmethod
@@ -574,49 +517,83 @@ class Vilib(object):
 
     @staticmethod
     def rec_video_stop():
-        Vilib.rec_video_set["start_flag"] == False
+        Vilib.rec_video_set["start_flag"] = False
         Vilib.rec_video_set["stop_flag"] = True
-        if Vilib.rec_thread != None:
+        if Vilib.rec_thread is not None:
             Vilib.rec_thread.join(3)
             Vilib.rec_thread = None
 
-   # color detection
     # =================================================================
-    @staticmethod 
-    def color_detect(color="red"):
-        '''
-        :param color: could be red, green, blue, yellow , orange, purple
-        '''
-        Vilib.color_detect_color = color
+    # MULTI-COLOR DETECTION
+    # =================================================================
+    @staticmethod
+    def color_detect(colors=None):
+        """
+        Enable color detection on one or multiple colors.
+        
+        :param colors: string (e.g. "red") or list of strings (e.g. ["red","blue"]).
+                       If None or empty, detection is disabled.
+        """
         from .color_detection import color_detect_work, color_obj_parameter
+
+        if not colors:
+            # No color or empty => disable detection
+            Vilib.color_detect_list = None
+            return
+
+        # If only a single color string is provided, turn it into a list
+        if isinstance(colors, str):
+            Vilib.color_detect_list = [colors]
+        else:
+            # Assume it's already a list
+            Vilib.color_detect_list = colors
+
+        # We'll store the reference to the detection function
         Vilib.color_detect_work = color_detect_work
+        # color_obj_parameter is a dict { "red":{x:..., y:..., w:..., h:..., n:...}, "blue":{...}, ... }
         Vilib.color_obj_parameter = color_obj_parameter
-        Vilib.detect_obj_parameter['color_x'] = Vilib.color_obj_parameter['x']
-        Vilib.detect_obj_parameter['color_y'] = Vilib.color_obj_parameter['y']
-        Vilib.detect_obj_parameter['color_w'] = Vilib.color_obj_parameter['w']
-        Vilib.detect_obj_parameter['color_h'] = Vilib.color_obj_parameter['h']
-        Vilib.detect_obj_parameter['color_n'] = Vilib.color_obj_parameter['n']
+
+        # Also ensure we have placeholders in detect_obj_parameter for each color
+        for c in Vilib.color_detect_list:
+            if c not in color_obj_parameter:
+                color_obj_parameter[c] = {'x': 0, 'y': 0, 'w': 0, 'h': 0, 'n': 0}
+            Vilib.detect_obj_parameter[f'{c}_x'] = 0
+            Vilib.detect_obj_parameter[f'{c}_y'] = 0
+            Vilib.detect_obj_parameter[f'{c}_w'] = 0
+            Vilib.detect_obj_parameter[f'{c}_h'] = 0
+            Vilib.detect_obj_parameter[f'{c}_n'] = 0
 
     @staticmethod
     def color_detect_func(img):
-        if Vilib.color_detect_color is not None \
-            and Vilib.color_detect_color != 'close' \
-            and hasattr(Vilib, "color_detect_work"):
-            img = Vilib.color_detect_work(img, Vilib.camera_width, Vilib.camera_height, Vilib.color_detect_color)
-            Vilib.detect_obj_parameter['color_x'] = Vilib.color_obj_parameter['x']
-            Vilib.detect_obj_parameter['color_y'] = Vilib.color_obj_parameter['y']
-            Vilib.detect_obj_parameter['color_w'] = Vilib.color_obj_parameter['w']
-            Vilib.detect_obj_parameter['color_h'] = Vilib.color_obj_parameter['h']
-            Vilib.detect_obj_parameter['color_n'] = Vilib.color_obj_parameter['n']
+        """
+        Called inside the main camera loop to detect one or more colors.
+        """
+        if Vilib.color_detect_list and hasattr(Vilib, "color_detect_work"):
+            # color_detect_work can handle a list of colors
+            img = Vilib.color_detect_work(
+                img,
+                Vilib.camera_width,
+                Vilib.camera_height,
+                Vilib.color_detect_list
+            )
+            # For each color, copy updated results into detect_obj_parameter
+            for c in Vilib.color_detect_list:
+                param = Vilib.color_obj_parameter[c]
+                Vilib.detect_obj_parameter[f'{c}_x'] = param['x']
+                Vilib.detect_obj_parameter[f'{c}_y'] = param['y']
+                Vilib.detect_obj_parameter[f'{c}_w'] = param['w']
+                Vilib.detect_obj_parameter[f'{c}_h'] = param['h']
+                Vilib.detect_obj_parameter[f'{c}_n'] = param['n']
         return img
 
     @staticmethod
     def close_color_detection():
-        Vilib.color_detect_color = None
+        Vilib.color_detect_list = None
 
-  # face detection
     # =================================================================
-    @staticmethod   
+    # Face Detection
+    # =================================================================
+    @staticmethod
     def face_detect_switch(flag=False):
         Vilib.face_detect_sw = flag
         if Vilib.face_detect_sw:
@@ -641,11 +618,12 @@ class Vilib(object):
             Vilib.detect_obj_parameter['human_n'] = Vilib.face_obj_parameter['n']
         return img
 
-   # traffic sign detection
+    # =================================================================
+    # Traffic Sign Detection
     # =================================================================
     @staticmethod
     def traffic_detect_switch(flag=False):
-        Vilib.traffic_detect_sw  = flag
+        Vilib.traffic_detect_sw = flag
         if Vilib.traffic_detect_sw:
             from .traffic_sign_detection import traffic_sign_detect, traffic_sign_obj_parameter
             Vilib.traffic_detect_work = traffic_sign_detect
@@ -669,11 +647,12 @@ class Vilib(object):
             Vilib.detect_obj_parameter['traffic_sign_acc'] = Vilib.traffic_sign_obj_parameter['acc']
         return img
 
-    # qrcode recognition
+    # =================================================================
+    # QRCode Recognition
     # =================================================================
     @staticmethod
     def qrcode_detect_switch(flag=False):
-        Vilib.qrcode_detect_sw  = flag
+        Vilib.qrcode_detect_sw = flag
         if Vilib.qrcode_detect_sw:
             from .qrcode_recognition import qrcode_recognize, qrcode_obj_parameter
             Vilib.qrcode_recognize = qrcode_recognize
@@ -696,19 +675,20 @@ class Vilib(object):
             Vilib.detect_obj_parameter['qr_data'] = Vilib.qrcode_obj_parameter['data']
         return img
 
-    # qrcode making
+    # =================================================================
+    # QRCode Making (Render new QR code)
     # =================================================================
     @staticmethod
-    def make_qrcode(data, 
-                    path=None,
-                    version=1,
-                    box_size=10,
-                    border=4,
-                    fill_color=(132,  112, 255),
-                    back_color=(255, 255, 255)
-                    ):
-        import qrcode # https://github.com/lincolnloop/python-qrcode
-
+    def make_qrcode(
+        data,
+        path=None,
+        version=1,
+        box_size=10,
+        border=4,
+        fill_color=(132, 112, 255),
+        back_color=(255, 255, 255)
+    ):
+        import qrcode
         qr = qrcode.QRCode(
             version=version,
             error_correction=qrcode.constants.ERROR_CORRECT_L,
@@ -717,9 +697,9 @@ class Vilib(object):
         )
         qr.add_data(data)
         qr.make(fit=True)
-        qr_pil = qr.make_image(fill_color=fill_color,
-                            back_color=back_color)
-        if path != None:
+        qr_pil = qr.make_image(fill_color=fill_color, back_color=back_color)
+
+        if path is not None:
             qr_pil.save(path)
 
         Vilib.qrcode_img = cv2.cvtColor(np.array(qr_pil), cv2.COLOR_RGB2BGR)
@@ -728,8 +708,6 @@ class Vilib(object):
         if Vilib.web_qrcode_flag:
             Vilib.qrcode_img_encode = cv2.imencode('.jpg', Vilib.qrcode_img)[1].tobytes()
 
-
-
     @staticmethod
     def display_qrcode_work():
         while True:
@@ -737,56 +715,54 @@ class Vilib(object):
                 time.sleep(0.1)
                 continue
 
-            # ----------- display qrcode on desktop ----------------
-            if Vilib.imshow_qrcode_flag and Vilib.qrcode_making_completed :
-                    Vilib.qrcode_making_completed = False
-                    try:
-                        if len(Vilib.qrcode_img) > 10:
-                            cv2.imshow(Vilib.qrcode_win_name, Vilib.qrcode_img)
-                            cv2.waitKey(1)
-                            if cv2.getWindowProperty(Vilib.qrcode_win_name, cv2.WND_PROP_VISIBLE) == 0:
-                                cv2.destroyWindow(Vilib.qrcode_win_name)
-                    except Exception as e:
-                        Vilib.imshow_qrcode_flag = False
-                        print(f"imshow qrcode failed:\n  {e}")
-                        break
+            if Vilib.imshow_qrcode_flag and Vilib.qrcode_making_completed:
+                Vilib.qrcode_making_completed = False
+                try:
+                    if len(Vilib.qrcode_img) > 10:
+                        cv2.imshow(Vilib.qrcode_win_name, Vilib.qrcode_img)
+                        cv2.waitKey(1)
+                        if cv2.getWindowProperty(Vilib.qrcode_win_name, cv2.WND_PROP_VISIBLE) == 0:
+                            cv2.destroyWindow(Vilib.qrcode_win_name)
+                except Exception as e:
+                    Vilib.imshow_qrcode_flag = False
+                    print(f"imshow qrcode failed:\n  {e}")
+                    break
             time.sleep(0.1)
 
     @staticmethod
     def display_qrcode(local=True, web=True):
-        # check gui
-        if local == True:
+        if local:
             if 'DISPLAY' in os.environ.keys():
-                Vilib.imshow_qrcode_flag = True  
+                Vilib.imshow_qrcode_flag = True
                 print("Imgshow qrcode start ...")
             else:
-                Vilib.imshow_qrcode_flag = False 
-                print("Local display failed, because there is no gui.") 
-        # web video
-        if web == True:
+                Vilib.imshow_qrcode_flag = False
+                print("Local display failed, because there is no GUI environment.")
+        if web:
             Vilib.web_qrcode_flag = True
             print(f'QRcode display on:')
             wlan0, eth0 = getIP()
-            if wlan0 != None:
+            if wlan0 is not None:
                 print(f"      http://{wlan0}:9000/qrcode")
-            if eth0 != None:
+            if eth0 is not None:
                 print(f"      http://{eth0}:9000/qrcode")
-            print() # new line
-
-            # ----------- flask_thread ----------------
-            if Vilib.flask_thread == None or Vilib.flask_thread.is_alive() == False:
+            print()
+            if (Vilib.flask_thread is None) or (not Vilib.flask_thread.is_alive()):
                 print('Starting web streaming ...')
-                Vilib.flask_thread = threading.Thread(name='flask_thread',target=web_camera_start)
+                Vilib.flask_thread = threading.Thread(name='flask_thread', target=web_camera_start)
                 Vilib.flask_thread.daemon = True
                 Vilib.flask_thread.start()
 
-        if Vilib.qrcode_display_thread == None or Vilib.qrcode_display_thread.is_alive() == False:
-            Vilib.qrcode_display_thread = threading.Thread(name='qrcode_display',target=Vilib.display_qrcode_work)
+        if (Vilib.qrcode_display_thread is None) or (not Vilib.qrcode_display_thread.is_alive()):
+            Vilib.qrcode_display_thread = threading.Thread(
+                name='qrcode_display',
+                target=Vilib.display_qrcode_work
+            )
             Vilib.qrcode_display_thread.daemon = True
             Vilib.qrcode_display_thread.start()
 
-
-    # image classification
+    # =================================================================
+    # Image Classification
     # =================================================================
     @staticmethod
     def image_classify_switch(flag=False):
@@ -797,56 +773,61 @@ class Vilib(object):
     @staticmethod
     def image_classify_set_model(path):
         if not os.path.exists(path):
-            raise ValueError('incorrect model path ')          
+            raise ValueError('incorrect model path')
         Vilib.image_classification_model = path
 
     @staticmethod
     def image_classify_set_labels(path):
         if not os.path.exists(path):
-            raise ValueError('incorrect labels path ')  
+            raise ValueError('incorrect labels path')
         Vilib.image_classification_labels = path
 
     @staticmethod
     def image_classify_fuc(img):
-        if Vilib.image_classify_sw == True:
-            # print('classify_image starting')
+        if Vilib.image_classify_sw:
             from .image_classification import classify_image
-            img = classify_image(image=img,
-                                model=Vilib.image_classification_model,
-                                labels=Vilib.image_classification_labels)   
+            img = classify_image(
+                image=img,
+                model=Vilib.image_classification_model,
+                labels=Vilib.image_classification_labels
+            )
         return img
 
-    # objects detection
+    # =================================================================
+    # Objects Detection
     # =================================================================
     @staticmethod
     def object_detect_switch(flag=False):
         Vilib.objects_detect_sw = flag
-        from .objects_detection import object_detection_list_parameter
-        Vilib.object_detection_list_parameter = object_detection_list_parameter
+        if Vilib.objects_detect_sw == True:
+            from .objects_detection import object_detection_list_parameter
+            Vilib.object_detection_list_parameter = object_detection_list_parameter
 
     @staticmethod
     def object_detect_set_model(path):
         if not os.path.exists(path):
-            raise ValueError('incorrect model path ')    
+            raise ValueError('incorrect model path')
         Vilib.objects_detection_model = path
 
     @staticmethod
     def object_detect_set_labels(path):
         if not os.path.exists(path):
-            raise ValueError('incorrect labels path ')    
+            raise ValueError('incorrect labels path')
         Vilib.objects_detection_labels = path
 
     @staticmethod
     def object_detect_fuc(img):
-        if Vilib.objects_detect_sw == True:
-            # print('detect_objects starting')
+        if Vilib.objects_detect_sw:
             from .objects_detection import detect_objects
-            img = detect_objects(image=img,
-                                model=Vilib.objects_detection_model,
-                                labels=Vilib.objects_detection_labels)   
+            img = detect_objects(
+                image=img,
+                model=Vilib.objects_detection_model,
+                labels=Vilib.objects_detection_labels
+            )
         return img
 
-    # hands detection
+    # =================================================================
+    # Hands Detection
     # =================================================================
     @staticmethod
     def hands_detect_switch(flag=False):
@@ -856,11 +837,12 @@ class Vilib(object):
 
     @staticmethod
     def hands_detect_fuc(img):
-        if Vilib.hands_detect_sw == True:
-            img, Vilib.detect_obj_parameter['hands_joints'] = Vilib.detect_hands.work(image=img)   
+        if Vilib.hands_detect_sw:
+            img, Vilib.detect_obj_parameter['hands_joints'] = Vilib.detect_hands.work(image=img)
         return img
 
-    # pose detection
+    # =================================================================
+    # Pose Detection
     # =================================================================
     @staticmethod
     def pose_detect_switch(flag=False):
@@ -870,6 +852,6 @@ class Vilib(object):
 
     @staticmethod
     def pose_detect_fuc(img):
-        if Vilib.pose_detect_sw == True and hasattr(Vilib, "pose_detect"):
-            img, Vilib.detect_obj_parameter['body_joints'] = Vilib.pose_detect.work(image=img)   
+        if Vilib.pose_detect_sw and hasattr(Vilib, "pose_detect"):
+            img, Vilib.detect_obj_parameter['body_joints'] = Vilib.pose_detect.work(image=img)
         return img

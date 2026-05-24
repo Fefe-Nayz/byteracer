@@ -581,7 +581,9 @@ verify_app_checkout() {
         "${TARGET_DIR}/startup.sh"
         "${TARGET_DIR}/byteracer/scripts/common.sh"
         "${TARGET_DIR}/byteracer/scripts/install_systemd_services.sh"
+        "${TARGET_DIR}/byteracer/scripts/sync_custom_libs.sh"
         "${TARGET_DIR}/byteracer/scripts/setup_python_env.sh"
+        "${TARGET_DIR}/byteracer/modules/custom-libs.lock.json"
         "${TARGET_DIR}/byteracer/systemd/byteracer-startup.service"
         "${TARGET_DIR}/byteracer/requirements.txt"
         "${TARGET_DIR}/relaytower/package.json"
@@ -631,12 +633,12 @@ main() {
     install_apt_packages || fail "System package installation failed"
     enable_pi_interfaces || true
     install_bun
-    install_sunfounder_stack || fail "SunFounder stack installation failed"
 
     clone_app_only || fail "Application sparse checkout update failed"
 
     verify_app_checkout
     configure_app_repository_settings || fail "Application repository configuration failed"
+    install_sunfounder_stack || fail "SunFounder stack installation failed"
     install_python_app_deps || fail "Application Python dependency installation failed"
     warn_python_stack || log "Python dependency check failed; continuing"
     build_app || fail "Application build failed"

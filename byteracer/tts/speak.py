@@ -16,11 +16,19 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 try:
     from modules.config_manager import ConfigManager
     from modules.i18n import translate
+    from modules.tts_cache import (
+        generate_cached_tts_file,
+        is_static_message_key,
+        pregenerate_static_tts,
+    )
     from modules.tts_backends import generate_tts_wav
 except ImportError:
     # Fallback if modules can't be imported
     ConfigManager = None
     translate = None
+    generate_cached_tts_file = None
+    is_static_message_key = None
+    pregenerate_static_tts = None
     generate_tts_wav = None
 
 DEFAULT_TTS_LANGUAGE = "en-US"
@@ -34,6 +42,7 @@ def main():
     config_engine = DEFAULT_TTS_ENGINE
     config_voice = DEFAULT_TTS_VOICE
     config_gain = 15
+    tts_enabled = True
     if ConfigManager is not None:
         try:
             config = ConfigManager()
@@ -43,9 +52,7 @@ def main():
             config_engine = config.get("sound.tts_engine") or DEFAULT_TTS_ENGINE
             config_voice = config.get("sound.tts_voice") or DEFAULT_TTS_VOICE
             config_gain = config.get("sound.tts_audio_gain")
-            is_enabled = config.get("sound.tts_enabled")
-            if not is_enabled:
-                return 0
+            tts_enabled = config.get("sound.tts_enabled") is not False
         except Exception as e:
             print(f"Warning: Could not load config settings: {e}", file=sys.stderr)
     
@@ -61,8 +68,28 @@ def main():
     parser.add_argument('-v', '--volume', help='Volume level 0-100 (default: from config or 100)', 
                        type=int, default=config_volume if config_volume is not None else 100)
     parser.add_argument('-g', '--gain', help='Extra audio gain in dB', type=int, default=config_gain if config_gain is not None else 15)
+    parser.add_argument('--pregenerate-static', action='store_true', help='Generate cached audio for static localized messages')
+    parser.add_argument('--langs', default='en-US,fr-FR', help='Comma-separated locales for --pregenerate-static')
     
     args = parser.parse_args()
+
+    if args.pregenerate_static:
+        if pregenerate_static_tts is None:
+            print("TTS cache support is unavailable.", file=sys.stderr)
+            return 1
+        langs = [lang.strip() for lang in args.langs.split(",") if lang.strip()]
+        generated, failed = pregenerate_static_tts(
+            locales=langs,
+            engine=args.engine,
+            voice=args.voice,
+            volume_percent=max(0, min(100, args.volume)),
+            gain_db=args.gain,
+        )
+        print(f"Pregenerated static TTS files: {generated} ok, {failed} failed")
+        return 0 if failed == 0 else 1
+
+    if not tts_enabled:
+        return 0
     
     # Get supported languages (using robot_hat's functions)
     supported_langs = [
@@ -83,6 +110,7 @@ def main():
                 key, value = item.split("=", 1)
                 params[key] = value
         text = translate(args.key, args.lang, **params)
+        cache_static = not params and is_static_message_key is not None and is_static_message_key(args.key, args.lang)
     elif args.file:
         try:
             with open(args.file, 'r') as f:
@@ -90,8 +118,10 @@ def main():
         except Exception as e:
             print(f"Error reading file: {e}", file=sys.stderr)
             return 1
+        cache_static = False
     elif args.text:
         text = args.text
+        cache_static = False
     else:
         parser.print_help()
         return 1
@@ -108,22 +138,36 @@ def main():
         # Speak the text using direct commands instead of robot_hat
         print(f"Speaking: {text} (volume: {volume}%)")
         
-        if generate_tts_wav is None:
-            print("TTS backend is unavailable.", file=sys.stderr)
-            return 1
-        engine_used = generate_tts_wav(
-            text,
-            args.lang,
-            temp_file,
-            engine=args.engine,
-            voice=args.voice,
-        )
-        if not engine_used:
-            print("TTS error: no configured engine could synthesize speech", file=sys.stderr)
-            return 1
-        
+        play_file = None
+        if cache_static and generate_cached_tts_file is not None:
+            cached_file = generate_cached_tts_file(
+                text,
+                args.lang,
+                engine=args.engine,
+                voice=args.voice,
+                volume_percent=volume,
+                gain_db=args.gain,
+            )
+            if cached_file:
+                play_file = str(cached_file)
+
+        if play_file is None:
+            if generate_tts_wav is None:
+                print("TTS backend is unavailable.", file=sys.stderr)
+                return 1
+            engine_used = generate_tts_wav(
+                text,
+                args.lang,
+                temp_file,
+                engine=args.engine,
+                voice=args.voice,
+            )
+            if not engine_used:
+                print("TTS error: no configured engine could synthesize speech", file=sys.stderr)
+                return 1
+
         # Apply volume adjustment if needed
-        if volume != 100 or args.gain:
+        if play_file is None and (volume != 100 or args.gain):
             # Calculate volume multiplier (0-1 range for sox)
             vol_multiplier = max(0.0, min(1.0, volume / 100.0))
             
@@ -163,7 +207,7 @@ def main():
                     temp_file = None
                 except Exception as e:
                     print(f"Failed to remove original TTS file: {e}", file=sys.stderr)
-        else:
+        elif play_file is None:
             # Just play the original file at full volume
             play_file = temp_file
             if volume != 100:

@@ -48,6 +48,10 @@ VOLUME_DB = 3
 # https://platform.openai.com/docs/guides/text-to-speech/supported-languages
 TTS_VOICE = 'echo'
 
+# voice instructions for vibe
+# https://www.openai.fm/
+VOICE_INSTRUCTIONS = ""
+
 SOUND_EFFECT_ACTIONS = ["honking", "start engine"]
 
 # car init 
@@ -62,6 +66,7 @@ music = Music()
 
 led = Pin('LED')
 
+DEFAULT_HEAD_PAN = 0
 DEFAULT_HEAD_TILT = 20
 
 # Vilib start
@@ -229,6 +234,7 @@ def main():
 
     while True:
         if input_mode == 'voice':
+            my_car.set_cam_pan_angle(DEFAULT_HEAD_PAN)
             my_car.set_cam_tilt_angle(DEFAULT_HEAD_TILT)
 
             # listen
@@ -247,6 +253,7 @@ def main():
 
             # stt
             # ----------------------------------------------------------------
+            gray_print('stt ...')
             st = time.time()
             _result = openai_helper.stt(audio, language=LANGUAGE)
             gray_print(f"stt takes: {time.time() - st:.3f} s")
@@ -272,6 +279,7 @@ def main():
 
         # chat-gpt
         # ---------------------------------------------------------------- 
+        gray_print(f'thinking ...')
         response = {}
         st = time.time()
 
@@ -326,7 +334,7 @@ def main():
                 st = time.time()
                 _time = time.strftime("%y-%m-%d_%H-%M-%S", time.localtime())
                 _tts_f = f"./tts/{_time}_raw.wav"
-                _tts_status = openai_helper.text_to_speech(answer, _tts_f, TTS_VOICE, response_format='wav') # alloy, echo, fable, onyx, nova, and shimmer
+                _tts_status = openai_helper.text_to_speech(answer, _tts_f, TTS_VOICE, response_format='wav', instructions=VOICE_INSTRUCTIONS) # alloy, echo, fable, onyx, nova, and shimmer
                 if _tts_status:
                     tts_file = f"./tts/{_time}_{VOLUME_DB}dB.wav"
                     _tts_status = sox_volume(_tts_f, tts_file, VOLUME_DB)

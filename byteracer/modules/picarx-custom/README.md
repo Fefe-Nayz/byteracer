@@ -16,13 +16,37 @@ Picar-X Python library for Raspberry Pi.
   <https://docs.sunfounder.com/projects/picar-x-v20/en/latest/python/python_start/install_all_modules.html>
 
 ```bash
-git clone -b v2.0 https://github.com/sunfounder/picar-x.git
-cd picar-x
-sudo python3 setup.py install
+# Install robot_hat
+git clone --depth 1 -b 2.5.x https://github.com/sunfounder/robot-hat.git
+cd robot-hat
+sudo python3 install.py
 
+# Install vilib
+git clone --depth 1 https://github.com/sunfounder/vilib.git
+cd vilib
+sudo python3 install.py
+
+# Install picar-x
+git clone -b 2.1.x https://github.com/sunfounder/picar-x.git
+cd picar-x
+sudo pip3 install . --break
 ```
 
-## Trouble Shooting
+## Debug
+
+Debug command records
+
+```bash
+cd ~/picar-x && sudo pip3 install . --break --no-deps --no-build-isolation
+```
+
+## Debug records
+
+```bash
+sudo pip3 uninstall picar-x --break -y && cd ~/picar-x && sudo pip3 install . --break --no-deps --no-build-isolation
+sudo pip3 uninstall robot_hat --break -y && cd ~/robot-hat && sudo pip3 install . --break --no-deps --no-build-isolation
+sudo python3 ~/picar-x/examples/14_voice_active_car_gpt.py
+```
 
 ----------------------------------------------
 

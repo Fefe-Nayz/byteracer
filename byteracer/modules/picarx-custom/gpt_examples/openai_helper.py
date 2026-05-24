@@ -200,7 +200,7 @@ class OpenAiHelper():
             print(run.status)
 
 
-    def text_to_speech(self, text, output_file, voice='alloy', response_format="mp3", speed=1):
+    def text_to_speech(self, text, output_file, voice='alloy', response_format="mp3", speed=1, instructions=''):
         '''
         voice: alloy, echo, fable, onyx, nova, and shimmer
         '''
@@ -214,11 +214,12 @@ class OpenAiHelper():
 
             # tts
             with self.client.audio.speech.with_streaming_response.create(
-                model="tts-1",
+                model="gpt-4o-mini-tts",
                 voice=voice,
                 input=text,
                 response_format=response_format,
                 speed=speed,
+                instructions=instructions,
             ) as response:
                 response.stream_to_file(output_file)
 

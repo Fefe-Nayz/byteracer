@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 import pygame
 from modules.i18n import translate
+from modules.tts_cache import generate_cached_tts_file, is_static_message_key
 from modules.tts_backends import (
     generate_tts_wav,
     get_piper_data_dir,
@@ -121,7 +122,7 @@ class TTSManager:
             return
 
         # Put in queue with priority
-        await self._queue.put((priority, text, lang))
+        await self._queue.put((priority, text, lang, False))
         logger.debug(f"Added to TTS queue: '{text}' (priority {priority})")
         
         if blocking:
@@ -137,12 +138,25 @@ class TTSManager:
     async def say_key(self, key, priority=1, blocking=False, lang=None, **params):
         """Speak a localized system message by key."""
         locale = lang or self.lang
-        await self.say(
-            translate(key, locale, **params),
-            priority=priority,
-            blocking=blocking,
-            lang=locale,
+        text = translate(key, locale, **params)
+        cache_static = not params and is_static_message_key(key, locale)
+        if not self.enabled:
+            logger.debug("TTS disabled, skipping key: %s", key)
+            return
+
+        await self._queue.put((priority, text, locale, cache_static))
+        logger.debug(
+            "Added localized TTS key to queue: %s (priority %s, cached=%s)",
+            key,
+            priority,
+            cache_static,
         )
+
+        if blocking:
+            while self._queue.qsize() > 0:
+                await asyncio.sleep(0.1)
+            while self.is_speaking():
+                await asyncio.sleep(0.1)
     
     async def _process_queue(self):
         """Process the TTS queue asynchronously"""
@@ -153,7 +167,12 @@ class TTSManager:
                     await asyncio.sleep(0.1)
                     continue
                 
-                priority, text, lang = await self._queue.get()
+                item = await self._queue.get()
+                if len(item) == 3:
+                    priority, text, lang = item
+                    cache_static = False
+                else:
+                    priority, text, lang, cache_static = item
                 
                 with self._lock:
                     self._speaking = True
@@ -161,7 +180,7 @@ class TTSManager:
                 
                 # Generate the speech in a separate thread to avoid blocking
                 # Important: We DON'T wait for the playback to finish in this thread
-                await asyncio.to_thread(self._generate_and_play_speech, text, lang)
+                await asyncio.to_thread(self._generate_and_play_speech, text, lang, cache_static)
                 
                 # Mark as done IMMEDIATELY - don't wait for audio to finish
                 self._queue.task_done()
@@ -219,7 +238,7 @@ class TTSManager:
         # Clean up temporary files
         await asyncio.to_thread(self._cleanup_temp_files)
         
-    def _generate_and_play_speech(self, text, lang=None):
+    def _generate_and_play_speech(self, text, lang=None, cache_static=False):
         """Generate speech file and start playback - but don't wait for it to finish"""
         if lang is None:
             lang = self.lang
@@ -229,11 +248,23 @@ class TTSManager:
         
         temp_file = None
         final_file = None
+        cleanup_file = True
         
         try:
+            # Determine effective volume based on priority
+            # Priority 0: user-triggered TTS (lower priority)
+            # Priority 1: system TTS (medium priority)
+            # Priority 2+: emergency TTS (highest priority)
+            if self._current_priority >= 2:
+                priority_volume = self.emergency_tts_volume
+            elif self._current_priority == 1:
+                priority_volume = self.system_tts_volume
+            else:
+                priority_volume = self.user_tts_volume
+
+            effective_volume = (self.volume / 100.0) * (priority_volume / 100.0)
+
             # Generate the TTS wave file
-            temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
-            final_file = temp_file
             if self.engine == "supertonic":
                 voice = supertonic_voice_for_language(lang, self.voice)
             else:
@@ -246,36 +277,41 @@ class TTSManager:
                 text,
             )
 
-            engine_used = generate_tts_wav(
-                text,
-                lang,
-                temp_file,
-                engine=self.engine,
-                voice=self.voice,
-                data_dir=self.piper_data_dir,
-                supertonic_cache_dir=self.supertonic_cache_dir,
-            )
+            if cache_static:
+                cached_file = generate_cached_tts_file(
+                    text,
+                    lang,
+                    engine=self.engine,
+                    voice=self.voice,
+                    volume_percent=round(effective_volume * 100),
+                    gain_db=self.audio_gain,
+                    piper_data_dir=self.piper_data_dir,
+                    supertonic_cache_dir=self.supertonic_cache_dir,
+                )
+                if cached_file:
+                    final_file = str(cached_file)
+                    cleanup_file = False
+                    logger.debug("Using cached TTS file: %s", final_file)
 
-            if not engine_used:
-                logger.error("TTS generation failed for engine=%s lang=%s", self.engine, lang)
-                return False
-            logger.debug("Generated TTS with %s", engine_used)
-            
-            # Apply volume adjustment if needed
-            # Determine effective volume based on priority
-            # Priority 0: user-triggered TTS (lower priority)
-            # Priority 1: system TTS (medium priority)
-            # Priority 2+: emergency TTS (highest priority)
-            if self._current_priority >= 2:
-                priority_volume = self.emergency_tts_volume
-            elif self._current_priority == 1:
-                priority_volume = self.system_tts_volume
-            else:
-                priority_volume = self.user_tts_volume
-                
-            effective_volume = (self.volume / 100.0) * (priority_volume / 100.0)
-            
-            if effective_volume != 1.0 or self.audio_gain != 0:
+            if final_file is None:
+                temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
+                final_file = temp_file
+                engine_used = generate_tts_wav(
+                    text,
+                    lang,
+                    temp_file,
+                    engine=self.engine,
+                    voice=self.voice,
+                    data_dir=self.piper_data_dir,
+                    supertonic_cache_dir=self.supertonic_cache_dir,
+                )
+
+                if not engine_used:
+                    logger.error("TTS generation failed for engine=%s lang=%s", self.engine, lang)
+                    return False
+                logger.debug("Generated TTS with %s", engine_used)
+
+            if cleanup_file and (effective_volume != 1.0 or self.audio_gain != 0):
                 volume_file = f"/tmp/tts_vol_{uuid.uuid4().hex}.wav"
                 
                 # Use sox to adjust volume and apply gain
@@ -365,7 +401,8 @@ class TTSManager:
             # Schedule temp file cleanup after a delay
             # We can't delete the file immediately since it's being played
             # But we don't want to block waiting for playback to finish
-            self._schedule_file_cleanup(final_file, temp_file)
+            if cleanup_file:
+                self._schedule_file_cleanup(final_file, temp_file)
     
     def _schedule_file_cleanup(self, final_file, temp_file=None):
         """Schedule temp file cleanup after a delay - non-blocking"""

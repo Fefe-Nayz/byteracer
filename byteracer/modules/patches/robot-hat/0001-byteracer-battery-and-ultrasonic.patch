@@ -1,0 +1,45 @@
+diff --git a/robot_hat/device.py b/robot_hat/device.py
+index 4e7027f..dfa5cde 100644
+--- a/robot_hat/device.py
++++ b/robot_hat/device.py
+@@ -1,5 +1,7 @@
+ import os
+ 
++_adc_obj = None
++
+ class Devices():
+     HAT_DEVICE_TREE = "/proc/device-tree/"
+     HAT_UUIDs = [
+diff --git a/robot_hat/modules.py b/robot_hat/modules.py
+index 7c858c8..c4f249a 100644
+--- a/robot_hat/modules.py
++++ b/robot_hat/modules.py
+@@ -22,6 +22,7 @@ class Ultrasonic():
+         echo.close()
+         self.trig = Pin(trig._pin_num)
+         self.echo = Pin(echo._pin_num, mode=Pin.IN, pull=Pin.PULL_DOWN)
++        self.last_reading = 0
+ 
+     def _read(self):
+         self.trig.off()
+@@ -37,16 +38,17 @@ class Ultrasonic():
+         while self.echo.value() == 0:
+             pulse_start = time.time()
+             if pulse_start - timeout_start > self.timeout:
+-                return -1
++                return self.last_reading
+         while self.echo.value() == 1:
+             pulse_end = time.time()
+             if pulse_end - timeout_start > self.timeout:
+-                return -1
++                return self.last_reading
+         if pulse_start == 0 or pulse_end == 0:
+-            return -2
++            return self.last_reading
+ 
+         during = pulse_end - pulse_start
+         cm = round(during * self.SOUND_SPEED / 2 * 100, 2)
++        self.last_reading = cm
+         return cm
+ 
+     def read(self, times=10):

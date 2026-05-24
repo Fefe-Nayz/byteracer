@@ -1,0 +1,23 @@
+{
+  "robot-hat": {
+    "repo": "https://github.com/sunfounder/robot-hat.git",
+    "branch": "2.5.x",
+    "commit": "d856cfb67f06e69150bbbb58e750f1db3097c39d",
+    "target": "robot-hat-custom",
+    "patch_dir": "patches/robot-hat"
+  },
+  "vilib": {
+    "repo": "https://github.com/sunfounder/vilib.git",
+    "branch": "main",
+    "commit": "aa037d40a8ad6926a135de9c82018b320bc780af",
+    "target": "vilib-custom",
+    "patch_dir": "patches/vilib"
+  },
+  "picarx": {
+    "repo": "https://github.com/sunfounder/picar-x.git",
+    "branch": "2.1.x",
+    "commit": "6c5555f9e1b43c36f331c3a250c7bc55ee9d948b",
+    "target": "picarx-custom",
+    "patch_dir": "patches/picarx"
+  }
+}

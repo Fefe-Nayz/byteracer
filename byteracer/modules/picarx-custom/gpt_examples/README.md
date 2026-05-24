@@ -113,6 +113,12 @@ For certain Robot HATs, you might need to turn on the speaker switch with the co
 
     Config `TTS_VOICE` variable in the file `gpt_car.py` to select the TTS voice role counld be `"alloy, echo, fable, onyx, nova, and shimmer"`
 
+
+- Vibe (VOICE_INSTRUCTIONS)
+
+    Config `VOICE_INSTRUCTIONS` variable in the file `gpt_car.py` to change the vibe of voice.
+    </br>To_see: https://www.openai.fm/
+    
 ```python
 # openai assistant init
 # =================================================================
@@ -128,4 +134,18 @@ VOLUME_DB = 3
 # https://platform.openai.com/docs/guides/text-to-speech/supported-languages
 TTS_VOICE = 'echo'
 
+# voice instructions
+# https://www.openai.fm/
+VOICE_INSTRUCTIONS = ""
+
 ```
+
+----------------------------------------------------------------
+
+## Perset actions
+
+### Preset actions
+
+- `preset_actions.py` contains preset actions, such as `shake_head`, `nod`, `depressed`, `honking`, `start_engine`, etc. You can run this file to see the preset actions:</br>
+  `python3 preset_actions.py`
+

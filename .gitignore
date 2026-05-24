@@ -1,5 +1,9 @@
 byteracer/config/
 byteracer/logs/
+byteracer/modules/robot-hat-custom/
+byteracer/modules/vilib-custom/
+byteracer/modules/picarx-custom/
+byteracer/modules/*-custom.legacy.*/
 byteracer/scripts/*.log
 relaytower/.next/
 relaytower/out/

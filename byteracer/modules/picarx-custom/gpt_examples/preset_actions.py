@@ -1,7 +1,5 @@
 
 from time import sleep
-import random
-from math import sin, cos, pi
 
 def wave_hands(car):
     car.reset()
