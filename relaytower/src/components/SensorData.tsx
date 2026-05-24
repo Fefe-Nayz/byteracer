@@ -13,7 +13,8 @@ import {
   BatteryCharging,
   ShieldAlert,
   Cpu,
-  MemoryStick
+  MemoryStick,
+  Thermometer
 } from "lucide-react";
 
 export default function SensorData() {
@@ -162,6 +163,13 @@ export default function SensorData() {
     if (usage >= 80) return "bg-red-500";
     if (usage >= 60) return "bg-yellow-500";
     return "bg-green-500";
+  };
+
+  const getTemperatureColor = (temperature: number | null | undefined) => {
+    if (temperature === null || temperature === undefined) return "text-muted-foreground";
+    if (temperature >= 75) return "text-red-500";
+    if (temperature >= 65) return "text-yellow-500";
+    return "text-green-500";
   };
   
   // Helper to format emergency state message
@@ -456,6 +464,16 @@ export default function SensorData() {
             value={sensorData.cpuUsage || 0} 
             className={`h-2 mb-2 ${getResourceProgressColor(sensorData.cpuUsage || 0)}`}
           />
+
+          <div className="flex items-center mb-3">
+            <Thermometer className="h-5 w-5" />
+            <span className="text-sm font-medium ml-2">CPU Temperature:</span>
+            <span className={`ml-auto font-medium ${getTemperatureColor(sensorData.cpuTemperature)}`}>
+              {sensorData.cpuTemperature === null || sensorData.cpuTemperature === undefined
+                ? "N/A"
+                : `${sensorData.cpuTemperature.toFixed(1)}°C`}
+            </span>
+          </div>
           
           <div className="flex items-center mb-1">
             <MemoryStick className="h-5 w-5" />

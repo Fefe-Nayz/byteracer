@@ -1478,10 +1478,23 @@ class ByteRacer:
 
         env = os.environ.copy()
         env.setdefault("BYTERACER_PATH", str(PROJECT_DIR))
+        env.setdefault("BYTERACER_LOG_DIR", "/tmp/byteracer/logs")
         env.setdefault(
             "BYTERACER_USER",
             os.environ.get("SUDO_USER") or os.environ.get("USER") or getpass.getuser() or "pi"
         )
+        script_log = Path(env["BYTERACER_LOG_DIR"]) / f"{script_path.stem}.log"
+        try:
+            script_log.parent.mkdir(parents=True, exist_ok=True)
+            with open(script_log, "a", encoding="utf-8") as handle:
+                handle.write(
+                    f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+                    f"Scheduled by ByteRacer controller: {script_name}\n"
+                )
+        except Exception as e:
+            logging.warning("Could not write admin script schedule marker to %s: %s", script_log, e)
+
+        logging.info("Scheduling admin script %s; log=%s", script_name, script_log)
 
         # Prefer launching through a transient systemd unit. Several admin
         # scripts restart byteracer-python.service - this very process. Because
@@ -1494,11 +1507,20 @@ class ByteRacer:
         systemd_run = shutil.which("systemd-run")
         if systemd_run and os.path.isdir("/run/systemd/system"):
             unit_name = f"byteracer-admin-{script_path.stem}-{int(time.time())}"
-            command = [systemd_run, "--collect", "--quiet", f"--unit={unit_name}"]
+            bash_bin = shutil.which("bash") or "/bin/bash"
+            command = [
+                systemd_run,
+                "--collect",
+                "--quiet",
+                f"--unit={unit_name}",
+                f"--property=WorkingDirectory={PROJECT_DIR}",
+                f"--property=StandardOutput=append:{script_log}",
+                f"--property=StandardError=append:{script_log}",
+            ]
             for key in ("BYTERACER_PATH", "BYTERACER_USER", "BYTERACER_PYTHON", "BYTERACER_LOG_DIR", "PATH"):
                 if env.get(key):
                     command.append(f"--setenv={key}={env[key]}")
-            command += ["bash", str(script_path)]
+            command += [bash_bin, str(script_path)]
             if hasattr(os, "geteuid") and os.geteuid() != 0:
                 command = ["sudo", "-n", *command]
 
@@ -1506,30 +1528,43 @@ class ByteRacer:
                 subprocess.run(
                     command,
                     check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
                     timeout=30,
                 )
+                logging.info("Admin script %s started through systemd unit %s", script_name, unit_name)
                 return True
+            except subprocess.CalledProcessError as e:
+                details = (e.stderr or e.stdout or str(e)).strip()
+                logging.warning(
+                    "systemd-run launch failed for %s: %s; falling back to a detached process",
+                    script_name, details,
+                )
             except Exception as e:
                 logging.warning(
                     "systemd-run launch failed for %s (%s); falling back to a detached process",
                     script_name, e,
                 )
 
+        log_handle = None
         try:
+            log_handle = open(script_log, "a", encoding="utf-8", buffering=1)
             subprocess.Popen(
-                ["bash", str(script_path)],
+                [shutil.which("bash") or "/bin/bash", str(script_path)],
                 cwd=PROJECT_DIR,
                 env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
                 start_new_session=True
             )
+            logging.info("Admin script %s started as detached process", script_name)
             return True
         except Exception as e:
             logging.error("Failed to start admin script %s: %s", script_name, e, exc_info=True)
             return False
+        finally:
+            if log_handle:
+                log_handle.close()
     
     async def execute_robot_command(self, command):
         """Handle system commands and provide feedback"""
@@ -1611,6 +1646,8 @@ class ByteRacer:
         except Exception as e:
             logging.error(f"Error executing command {command}: {e}")
             result["message"] = f"Error: {str(e)}"
+
+        result["command"] = command
             
         return result
     
@@ -1638,6 +1675,25 @@ class ByteRacer:
         self._battery_warning_logged = False
         
         return level
+
+    def get_cpu_temperature(self):
+        """Return Raspberry Pi CPU temperature in Celsius when available."""
+        thermal_path = Path("/sys/class/thermal/thermal_zone0/temp")
+        try:
+            raw_value = thermal_path.read_text(encoding="utf-8").strip()
+            return round(int(raw_value) / 1000, 1)
+        except Exception:
+            pass
+
+        try:
+            for entries in psutil.sensors_temperatures().values():
+                for entry in entries:
+                    if entry.current is not None:
+                        return round(float(entry.current), 1)
+        except Exception:
+            pass
+
+        return None
     
     async def send_battery_info(self, level):
         """Send battery information to the client"""
@@ -1666,6 +1722,7 @@ class ByteRacer:
                 cpu_usage = psutil.cpu_percent()
                 ram = psutil.virtual_memory()
                 ram_usage = ram.percent
+                cpu_temperature = self.get_cpu_temperature()
                 
                 # Transform sensor data to match client expectations
                 transformed_data = {
@@ -1689,6 +1746,7 @@ class ByteRacer:
                     "turn": sensor_data["turn"],    # Add turn value
                     "acceleration": sensor_data["acceleration"],  # Add acceleration value
                     "cpuUsage": cpu_usage,  # Add CPU usage
+                    "cpuTemperature": cpu_temperature,
                     "ramUsage": ram_usage   # Add RAM usage
                 }
                 

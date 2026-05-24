@@ -103,6 +103,13 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
     if (usage >= 60) return "bg-yellow-400";
     return "bg-green-400";
   };
+
+  const getTemperatureColor = (temperature: number | null | undefined) => {
+    if (temperature === null || temperature === undefined) return "text-gray-400";
+    if (temperature >= 75) return "text-red-400";
+    if (temperature >= 65) return "text-yellow-400";
+    return "text-green-400";
+  };
   
   // Check if safety system is active
 //   const isSafetyActive = sensorData.isCollisionAvoidanceActive || sensorData.isEdgeDetectionActive;
@@ -270,7 +277,7 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
           </div>
           
           {/* Bottom row with CPU/RAM stats */}
-          <div className="grid grid-cols-2 gap-2 text-[10px]">
+          <div className="grid grid-cols-3 gap-2 text-[10px]">
             <div>
               <div className="flex justify-between">
                 <span>CPU</span>
@@ -282,6 +289,17 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
                 value={sensorData.cpuUsage || 0} 
                 className={`h-1 bg-gray-800 ${getResourceProgressColor(sensorData.cpuUsage || 0)}`}
               />
+            </div>
+            <div>
+              <div className="flex justify-between">
+                <span>Temp</span>
+                <span className={getTemperatureColor(sensorData.cpuTemperature)}>
+                  {sensorData.cpuTemperature === null || sensorData.cpuTemperature === undefined
+                    ? "N/A"
+                    : `${sensorData.cpuTemperature.toFixed(0)}°C`}
+                </span>
+              </div>
+              <div className="h-1 bg-gray-800 rounded-full" />
             </div>
             <div>
               <div className="flex justify-between">

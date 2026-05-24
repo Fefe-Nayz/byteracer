@@ -3,7 +3,7 @@ import { useWebSocket } from "@/contexts/WebSocketContext";
 import { useEffect } from "react";
 import { Card } from "./ui/card";
 import { Button } from "./ui/button";
-import { Battery } from "lucide-react";
+import { Battery, Thermometer } from "lucide-react";
 
 export default function WebSocketStatus() {
   const { 
@@ -11,6 +11,7 @@ export default function WebSocketStatus() {
     pingTime, 
     connect, 
     batteryLevel, 
+    sensorData,
     requestBatteryLevel,
     pythonStatus,
     requestPythonStatus
@@ -41,6 +42,14 @@ export default function WebSocketStatus() {
     if (batteryLevel > 50) return "bg-green-500";
     if (batteryLevel > 20) return "bg-yellow-500";
     return "bg-red-500";
+  };
+
+  const getTemperatureColor = () => {
+    const temperature = sensorData?.cpuTemperature;
+    if (temperature === null || temperature === undefined) return "text-muted-foreground";
+    if (temperature >= 75) return "text-red-500";
+    if (temperature >= 65) return "text-yellow-500";
+    return "text-green-500";
   };
 
   return (
@@ -102,6 +111,16 @@ export default function WebSocketStatus() {
               ></div>
             </div>
             <span className="ml-2 text-xs font-medium">{batteryLevel}%</span>
+          </div>
+        )}
+
+        {sensorData?.cpuTemperature !== null && sensorData?.cpuTemperature !== undefined && (
+          <div className="flex items-center mt-3 pt-2 border-t border-muted">
+            <Thermometer className="h-4 w-4 mr-2" />
+            <span className="text-sm font-medium">CPU Temp:</span>
+            <span className={`ml-2 text-xs font-medium ${getTemperatureColor()}`}>
+              {sensorData.cpuTemperature.toFixed(1)}°C
+            </span>
           </div>
         )}
 
