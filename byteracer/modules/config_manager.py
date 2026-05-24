@@ -36,9 +36,10 @@ class ConfigManager:
                 "sound_volume": 80,  # Master volume for sound effects
                 "tts_volume": 100,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_language": "en-US",
+                "tts_language": "fr-FR",
                 "tts_engine": "piper",
-                "tts_voice": "auto",
+                "tts_voice": "fr_FR-siwis-medium",
+                "tts_use_pico_for_uncached": False,
                 "tts_audio_gain": 15,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
@@ -116,6 +117,8 @@ class ConfigManager:
                 "yolo_confidence": 0.5,
                 "motor_balance": 0, # -50 to +50, negative for left bias, positive for right bias
                 "autonomous_speed": 0.05, # Default speed for autonomous driving (5%)
+                "turn_speed": 0.15, # Motor speed used during right-turn rotations (5-30%)
+                "circuit_camera_tilt": 12, # Default upward camera tilt when entering circuit mode
                 "wait_to_turn_time": 2.0, # Time to wait before turning after seeing a turn sign (seconds)
                 "stop_sign_wait_time": 2.0, # Time to wait at a stop sign (seconds)
                 "stop_sign_ignore_time": 3.0, # Time to ignore stop signs after stopping (seconds)
@@ -376,9 +379,10 @@ class ConfigManager:
                 "sound_volume": 80,  # Master volume for sound effects
                 "tts_volume": 100,  # Master volume for all TTS
                 "tts_enabled": True,
-                "tts_language": "en-US",
+                "tts_language": "fr-FR",
                 "tts_engine": "piper",
-                "tts_voice": "auto",
+                "tts_voice": "fr_FR-siwis-medium",
+                "tts_use_pico_for_uncached": False,
                 "tts_audio_gain": 15,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
@@ -455,6 +459,8 @@ class ConfigManager:
                 "yolo_confidence": 0.5,
                 "motor_balance": 0, # -50 to +50, negative for left bias, positive for right bias
                 "autonomous_speed": 0.05, # Default speed for autonomous driving (5%)
+                "turn_speed": 0.15, # Motor speed used during right-turn rotations (5-30%)
+                "circuit_camera_tilt": 12, # Default upward camera tilt when entering circuit mode
                 "wait_to_turn_time": 2.0, # Time to wait before turning after seeing a turn sign (seconds)
                 "stop_sign_wait_time": 2.0, # Time to wait at a stop sign (seconds)
                 "stop_sign_ignore_time": 3.0, # Time to ignore stop signs after stopping (seconds)

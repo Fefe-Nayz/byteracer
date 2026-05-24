@@ -30,6 +30,8 @@ import {
   BrainCircuit,
   ShieldAlert,
   Battery,
+  Play,
+  Square,
 } from "lucide-react";
 
 export default function RobotSettings() {
@@ -56,6 +58,7 @@ export default function RobotSettings() {
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const [isDriveTesting, setIsDriveTesting] = useState(false);
   const [lastCalibClick, setLastCalibClick] = useState<number | null>(null);
 
   // Update local settings when we get them from the server
@@ -344,15 +347,25 @@ export default function RobotSettings() {
             {/* Motor Calibration Buttons */}
             <div className="flex justify-between mt-4">
               <Button
-                variant="outline"
-                onClick={() => startTestCalibrateMotors()}
+                variant={isDriveTesting ? "secondary" : "outline"}
+                disabled={isDriveTesting}
+                onClick={() => {
+                  startTestCalibrateMotors();
+                  setIsDriveTesting(true);
+                }}
               >
+                <Play className="mr-2 h-4 w-4" />
                 Start Drive Test
               </Button>
               <Button
                 variant="destructive"
-                onClick={() => stopTestCalibrateMotors()}
+                disabled={!isDriveTesting}
+                onClick={() => {
+                  stopTestCalibrateMotors();
+                  setIsDriveTesting(false);
+                }}
               >
+                <Square className="mr-2 h-4 w-4" />
                 Stop Drive Test
               </Button>
             </div>
@@ -381,6 +394,30 @@ export default function RobotSettings() {
                 <span>Slow (1%)</span>
                 <span>Default (5%)</span>
                 <span>Fast (20%)</span>
+              </div>
+            </div>
+
+            {/* Turn Speed Setting */}
+            <div className="space-y-2 mt-4">
+              <div className="flex justify-between text-xs">
+                <span>Turn Speed</span>
+                <span>
+                  {((localSettings.ai.turn_speed || 0.15) * 100).toFixed(1)}%
+                </span>
+              </div>
+              <Slider
+                value={[(localSettings.ai.turn_speed || 0.15) * 100]}
+                min={5}
+                max={30}
+                step={1}
+                onValueChange={(value) =>
+                  updateSetting("ai", "turn_speed", value[0] / 100)
+                }
+              />
+              <div className="text-xs text-gray-500 flex justify-between">
+                <span>Safe (5%)</span>
+                <span>Default (15%)</span>
+                <span>Strong (30%)</span>
               </div>
             </div>
 
@@ -1070,6 +1107,17 @@ export default function RobotSettings() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="text-sm">Use Pico for uncached TTS</div>
+                <Switch
+                  checked={localSettings.sound.tts_use_pico_for_uncached ?? false}
+                  onCheckedChange={(checked) =>
+                    updateSetting("sound", "tts_use_pico_for_uncached", checked)
+                  }
+                  disabled={!localSettings.sound.tts_enabled || ttsEngine === "pico"}
+                />
               </div>
             </div>
           </div>

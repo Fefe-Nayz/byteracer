@@ -23,9 +23,10 @@ class SoundManager:
     Handles acceleration, braking, drift sounds, custom sound effects, and WebRTC audio playback.
     """
     def __init__(self, assets_dir=None, enabled=True, volume=100):
-        self.music_player = Music()
         self.enabled = enabled
         self.volume = max(0, min(100, volume))  # Master volume
+        self.music_player = None
+        self.audio_available = self._init_audio_backend()
         
         # Category-specific volumes (will be updated from config later)
         self.sound_volume = 80  # Sound effects master volume
@@ -43,9 +44,6 @@ class SoundManager:
         
         # Ensure assets directory exists
         self.assets_dir.mkdir(exist_ok=True)
-        
-        # Initialize pygame for sound effects
-        pygame.mixer.init()
         
         # Sound categories and their files
         self.sounds = {
@@ -68,6 +66,28 @@ class SoundManager:
         self.is_drifting = False
         
         logger.info(f"Sound Manager initialized with {sum(len(s) for s in self.sounds.values())} sounds")
+
+    def _init_audio_backend(self):
+        """Initialize pygame/robot-hat audio without making startup fatal."""
+        for attempt in range(1, 4):
+            try:
+                if not pygame.mixer.get_init():
+                    pygame.mixer.init()
+                try:
+                    self.music_player = Music()
+                except Exception as e:
+                    self.music_player = None
+                    logger.warning("robot-hat Music unavailable; sound effects can still run: %s", e)
+                return True
+            except Exception as e:
+                logger.warning("Audio backend initialization failed on attempt %s/3: %s", attempt, e)
+                time.sleep(0.5)
+
+        logger.error("Audio backend unavailable; sound effects are disabled until next restart")
+        return False
+
+    def _mixer_ready(self):
+        return self.audio_available and pygame.mixer.get_init() is not None
     
     def _load_sounds(self, category):
         """Load sound files from a category directory"""
@@ -93,7 +113,7 @@ class SoundManager:
             loop (bool): Whether to loop the sound
             name (str): Optional specific sound name to play
         """
-        if not self.enabled:
+        if not self.enabled or not self._mixer_ready():
             return None
         
         sound_files = self.sounds.get(sound_type, [])
@@ -162,6 +182,9 @@ class SoundManager:
             sound_type (str): Type of sound to stop
             channel_id (int): Specific channel ID to stop
         """
+        if not self._mixer_ready():
+            return False
+
         with self._lock:
             if channel_id is not None:
                 if 0 <= channel_id < pygame.mixer.get_num_channels():
@@ -260,7 +283,7 @@ class SoundManager:
         Args:
             file_path (str): Path to the temporary WAV file containing the voice data
         """
-        if not self.enabled:
+        if not self.enabled or not self._mixer_ready():
             return None
         
         # Stop any currently playing voice stream
@@ -302,7 +325,7 @@ class SoundManager:
         Returns:
             int or None: Channel ID if successful, None if failed
         """
-        if not self.enabled:
+        if not self.enabled or not self._mixer_ready():
             return None
         
         # Stop any currently playing voice stream
@@ -350,7 +373,7 @@ class SoundManager:
     
     def music_play(self, file_name):
         """Play music using the Music class from robot_hat"""
-        if not self.enabled:
+        if not self.enabled or not self._mixer_ready():
             return False
         
         try:
@@ -359,6 +382,8 @@ class SoundManager:
                 logger.warning(f"Music file not found: {file_path}")
                 return False
             
+            if not self.music_player:
+                return False
             self.music_player.music_play(file_path)
             logger.debug(f"Playing music: {file_name}")
             return True
@@ -369,6 +394,8 @@ class SoundManager:
     def music_stop(self):
         """Stop currently playing music"""
         try:
+            if not self.music_player:
+                return True
             self.music_player.music_stop()
             logger.debug("Stopped music")
             return True
@@ -426,6 +453,9 @@ class SoundManager:
     
     def _update_playing_sounds_volume(self):
         """Update volume of all currently playing sounds"""
+        if not self._mixer_ready():
+            return
+
         with self._lock:
             for sound_type, channels in self.current_sounds.items():
                 category_volume = self._get_category_volume(sound_type)
@@ -442,5 +472,6 @@ class SoundManager:
         self.stop_sound()  # Stop all sound effects
         self.music_stop()  # Stop music
         
-        pygame.mixer.quit()
+        if pygame.mixer.get_init():
+            pygame.mixer.quit()
         logger.info("Sound Manager shutdown")

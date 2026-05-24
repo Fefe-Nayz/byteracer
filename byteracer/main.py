@@ -13,6 +13,24 @@ import sys
 from pathlib import Path
 import logging
 
+BYTERACER_PACKAGE_DIR = Path(__file__).resolve().parent
+
+
+def prefer_custom_sunfounder_libraries():
+    """Make generated custom SunFounder checkouts shadow system packages."""
+    custom_roots = [
+        BYTERACER_PACKAGE_DIR / "modules" / "robot-hat-custom",
+        BYTERACER_PACKAGE_DIR / "modules" / "vilib-custom",
+        BYTERACER_PACKAGE_DIR / "modules" / "picarx-custom",
+    ]
+    for path in reversed(custom_roots):
+        path_str = str(path)
+        if path.is_dir() and path_str not in sys.path:
+            sys.path.insert(0, path_str)
+
+
+prefer_custom_sunfounder_libraries()
+
 # Import PicarX hardware interface
 from picarx import Picarx
 # Import the custom modules
@@ -175,6 +193,25 @@ class ByteRacer:
         await self.audio_manager.stop()
         
         logging.info("ByteRacer stopped")
+
+    def stop_robot_motion(self, reason=""):
+        """Force the drive train into a neutral state."""
+        if reason:
+            logging.info(f"Stopping robot motion: {reason}")
+
+        self.last_speed = 0
+        self.last_turn = 0
+        self.last_acceleration = 0
+        self.last_motion_update = time.time()
+
+        if hasattr(self, "aicamera_manager") and self.aicamera_manager:
+            self.aicamera_manager.stop_motion()
+            return
+
+        self.px.forward(0)
+        self.px.set_motor_speed(1, 0)
+        self.px.set_motor_speed(2, 0)
+        self.px.set_dir_servo_angle(0)
     
     async def apply_config_settings(self):
         """Apply settings from config manager to all components"""
@@ -210,6 +247,8 @@ class ByteRacer:
             self.tts_manager.set_engine(settings["sound"]["tts_engine"])
         if "tts_voice" in settings["sound"]:
             self.tts_manager.set_voice(settings["sound"]["tts_voice"])
+        if "tts_use_pico_for_uncached" in settings["sound"]:
+            self.tts_manager.set_use_pico_for_uncached(settings["sound"]["tts_use_pico_for_uncached"])
         
         # Apply TTS volume settings
         self.tts_manager.set_volume(settings["sound"]["tts_volume"])
@@ -255,6 +294,12 @@ class ByteRacer:
         # Apply new autonomous driving settings if available
         if "autonomous_speed" in settings["ai"]:
             self.aicamera_manager.set_autonomous_speed(settings["ai"]["autonomous_speed"])
+
+        if "turn_speed" in settings["ai"]:
+            self.aicamera_manager.set_turn_speed(settings["ai"]["turn_speed"])
+
+        if "circuit_camera_tilt" in settings["ai"]:
+            self.aicamera_manager.set_circuit_camera_tilt(settings["ai"]["circuit_camera_tilt"])
             
         if "wait_to_turn_time" in settings["ai"]:
             self.aicamera_manager.set_wait_to_turn_time(settings["ai"]["wait_to_turn_time"])
@@ -310,19 +355,23 @@ class ByteRacer:
             self.aicamera_manager.start_face_following()
         else:
             self.aicamera_manager.stop_face_following()
+            self.stop_robot_motion("tracking mode disabled")
 
         if modes.get("circuit_mode_enabled"):
             self.sensor_manager.set_circuit_mode(True)
+            self.aicamera_manager.set_circuit_camera_pose()
             self.aicamera_manager.start_color_control()
             self.aicamera_manager.start_traffic_sign_detection()
         else:
             self.aicamera_manager.stop_color_control()
             self.aicamera_manager.stop_traffic_sign_detection()
+            self.stop_robot_motion("circuit mode disabled")
 
         if modes.get("demo_mode_enabled"):
             self.sensor_manager.set_demo_mode(True)
         elif modes.get("normal_mode_enabled", True):
             self.sensor_manager.set_normal_mode(True)
+            self.stop_robot_motion("normal mode enabled")
         
         # Apply LED settings if available
         if "led" in settings and "enabled" in settings["led"]:
@@ -455,6 +504,7 @@ class ByteRacer:
                         except websockets.exceptions.ConnectionClosed:
                             logging.warning("WebSocket connection closed")
                             self.sensor_manager.robot_state = RobotState.STANDBY
+                            self.stop_robot_motion("websocket connection closed")
                             
                             # Update sensor manager about client disconnect
                             # self.sensor_manager.update_client_status(False, True)
@@ -464,6 +514,7 @@ class ByteRacer:
                 logging.error(f"WebSocket connection error: {e}")
                 self.websocket = None
                 self.sensor_manager.robot_state = RobotState.STANDBY
+                self.stop_robot_motion("websocket connection error")
                 
                 # Update sensor manager about client disconnect
                 # self.sensor_manager.update_client_status(False, True)
@@ -555,6 +606,7 @@ class ByteRacer:
                 # Update sensor manager about client disconnect
                 self.sensor_manager.robot_state = RobotState.STANDBY
                 self.sensor_manager.robot_state.setConnected(False)
+                self.stop_robot_motion("controller disconnected")
                 
                 # Update sensor manager about client disconnect
                 # self.sensor_manager.update_client_status(False, True)
@@ -564,6 +616,11 @@ class ByteRacer:
                 # Check if robot is in GPT controlled state - completely ignore input if it is
                 if self.sensor_manager.robot_state == RobotState.GPT_CONTROLLED or self.sensor_manager.robot_state == RobotState.TRACKING_MODE or self.sensor_manager.robot_state == RobotState.DEMO_MODE or self.sensor_manager.robot_state == RobotState.CIRCUIT_MODE:
                     logging.info("Completely ignoring gamepad input while in GPT controlled state")
+                    return
+
+                if data["data"].get("connected") is False:
+                    self.stop_robot_motion("gamepad input reported no active controller")
+                    self.sensor_manager.robot_state = RobotState.STANDBY
                     return
                     
                 # Handle gamepad input
@@ -1161,6 +1218,7 @@ class ByteRacer:
                     self.aicamera_manager.start_face_following()
                 else:   
                     self.aicamera_manager.stop_face_following()
+                    self.stop_robot_motion("tracking mode disabled")
             
             if "circuit_mode_enabled" in modes:
                 self.config_manager.set("modes.circuit_mode_enabled", modes["circuit_mode_enabled"])
@@ -1168,11 +1226,13 @@ class ByteRacer:
                 
                 if modes["circuit_mode_enabled"]:
                     self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
+                    self.aicamera_manager.set_circuit_camera_pose()
                     self.aicamera_manager.start_color_control()
                     self.aicamera_manager.start_traffic_sign_detection()
                 else:   
                     self.aicamera_manager.stop_color_control()
                     self.aicamera_manager.stop_traffic_sign_detection()
+                    self.stop_robot_motion("circuit mode disabled")
 
             if "demo_mode_enabled" in modes:
                 self.config_manager.set("modes.demo_mode_enabled", modes["demo_mode_enabled"])
@@ -1185,6 +1245,7 @@ class ByteRacer:
                 self.sensor_manager.set_normal_mode(modes["normal_mode_enabled"])
                 if modes["normal_mode_enabled"]:
                     self.sensor_manager.robot_state = RobotState.STANDBY
+                    self.stop_robot_motion("normal mode enabled")
         if "sound" in settings:
             sound = settings["sound"]
             if "enabled" in sound:
@@ -1218,6 +1279,10 @@ class ByteRacer:
             if "tts_voice" in sound:
                 self.config_manager.set("sound.tts_voice", sound["tts_voice"])
                 self.tts_manager.set_voice(sound["tts_voice"])
+
+            if "tts_use_pico_for_uncached" in sound:
+                self.config_manager.set("sound.tts_use_pico_for_uncached", sound["tts_use_pico_for_uncached"])
+                self.tts_manager.set_use_pico_for_uncached(sound["tts_use_pico_for_uncached"])
 
             if "driving_volume" in sound:
                 self.config_manager.set("sound.driving_volume", sound["driving_volume"])
@@ -1369,6 +1434,14 @@ class ByteRacer:
             if "autonomous_speed" in ai:
                 self.config_manager.set("ai.autonomous_speed", ai["autonomous_speed"])
                 self.aicamera_manager.set_autonomous_speed(ai["autonomous_speed"])
+
+            if "turn_speed" in ai:
+                self.config_manager.set("ai.turn_speed", ai["turn_speed"])
+                self.aicamera_manager.set_turn_speed(ai["turn_speed"])
+
+            if "circuit_camera_tilt" in ai:
+                self.config_manager.set("ai.circuit_camera_tilt", ai["circuit_camera_tilt"])
+                self.aicamera_manager.set_circuit_camera_tilt(ai["circuit_camera_tilt"])
             
             if "wait_to_turn_time" in ai:
                 self.config_manager.set("ai.wait_to_turn_time", ai["wait_to_turn_time"])

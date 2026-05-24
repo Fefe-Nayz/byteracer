@@ -31,9 +31,9 @@ except ImportError:
     pregenerate_static_tts = None
     generate_tts_wav = None
 
-DEFAULT_TTS_LANGUAGE = "en-US"
+DEFAULT_TTS_LANGUAGE = "fr-FR"
 DEFAULT_TTS_ENGINE = "piper"
-DEFAULT_TTS_VOICE = "auto"
+DEFAULT_TTS_VOICE = "fr_FR-siwis-medium"
 
 def main():
     # Try to get config settings
@@ -42,6 +42,7 @@ def main():
     config_engine = DEFAULT_TTS_ENGINE
     config_voice = DEFAULT_TTS_VOICE
     config_gain = 15
+    config_use_pico_for_uncached = False
     tts_enabled = True
     if ConfigManager is not None:
         try:
@@ -52,6 +53,7 @@ def main():
             config_engine = config.get("sound.tts_engine") or DEFAULT_TTS_ENGINE
             config_voice = config.get("sound.tts_voice") or DEFAULT_TTS_VOICE
             config_gain = config.get("sound.tts_audio_gain")
+            config_use_pico_for_uncached = bool(config.get("sound.tts_use_pico_for_uncached"))
             tts_enabled = config.get("sound.tts_enabled") is not False
         except Exception as e:
             print(f"Warning: Could not load config settings: {e}", file=sys.stderr)
@@ -68,6 +70,7 @@ def main():
     parser.add_argument('-v', '--volume', help='Volume level 0-100 (default: from config or 100)', 
                        type=int, default=config_volume if config_volume is not None else 100)
     parser.add_argument('-g', '--gain', help='Extra audio gain in dB', type=int, default=config_gain if config_gain is not None else 15)
+    parser.add_argument('--use-pico-for-uncached', action='store_true', default=config_use_pico_for_uncached, help='Use pico2wave for non-cached text')
     parser.add_argument('--pregenerate-static', action='store_true', help='Generate cached audio for static localized messages')
     parser.add_argument('--langs', default='en-US,fr-FR', help='Comma-separated locales for --pregenerate-static')
     
@@ -155,11 +158,12 @@ def main():
             if generate_tts_wav is None:
                 print("TTS backend is unavailable.", file=sys.stderr)
                 return 1
+            runtime_engine = "pico" if args.use_pico_for_uncached else args.engine
             engine_used = generate_tts_wav(
                 text,
                 args.lang,
                 temp_file,
-                engine=args.engine,
+                engine=runtime_engine,
                 voice=args.voice,
             )
             if not engine_used:

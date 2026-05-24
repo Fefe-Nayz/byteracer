@@ -65,6 +65,8 @@ dependency_signature() {
 
 verify_python_stack() {
     "${PYTHON_BIN}" - <<'PY'
+import importlib.util
+from pathlib import Path
 import numpy
 numpy.zeros((1,), dtype=float)
 
@@ -74,10 +76,20 @@ import ultralytics
 import ncnn
 import piper
 import supertonic
-import robot_hat
-import vilib
-import picarx
 from importlib.metadata import version
+
+expected_custom = {
+    "robot_hat": "robot-hat-custom",
+    "vilib": "vilib-custom",
+    "picarx": "picarx-custom",
+}
+resolved = {}
+for package, marker in expected_custom.items():
+    spec = importlib.util.find_spec(package)
+    origin = str(Path(spec.origin).resolve()) if spec and spec.origin else ""
+    if marker not in origin:
+        raise RuntimeError(f"{package} resolved to {origin!r}, expected custom checkout containing {marker!r}")
+    resolved[package] = origin
 
 print(f"numpy={numpy.__version__} {numpy.__file__}")
 print(f"torch={torch.__version__}")
@@ -86,9 +98,8 @@ print(f"ultralytics={ultralytics.__version__}")
 print(f"ncnn={getattr(ncnn, '__version__', 'unknown')}")
 print("piper=OK")
 print(f"supertonic={version('supertonic')}")
-print(f"robot_hat={getattr(robot_hat, '__file__', 'unknown')}")
-print(f"vilib={getattr(vilib, '__file__', 'unknown')}")
-print(f"picarx={getattr(picarx, '__file__', 'unknown')}")
+for package, origin in resolved.items():
+    print(f"{package}={origin}")
 PY
 }
 
@@ -243,6 +254,35 @@ install_custom_sunfounder_packages() {
 
     log "Installing ByteRacer picarx custom package into venv"
     pip_install --no-cache-dir --force-reinstall --no-deps -e "${picarx_custom}" || return 1
+
+    write_custom_libs_pth || return 1
+}
+
+write_custom_libs_pth() {
+    local robot_hat_custom="${BYTERACER_PATH}/byteracer/modules/robot-hat-custom"
+    local vilib_custom="${BYTERACER_PATH}/byteracer/modules/vilib-custom"
+    local picarx_custom="${BYTERACER_PATH}/byteracer/modules/picarx-custom"
+
+    log "Writing custom library import priority file"
+    run_as_app_user env \
+        ROBOT_HAT_CUSTOM="${robot_hat_custom}" \
+        VILIB_CUSTOM="${vilib_custom}" \
+        PICARX_CUSTOM="${picarx_custom}" \
+        "${PYTHON_BIN}" - <<'PY'
+import os
+import site
+from pathlib import Path
+
+site_packages = Path(site.getsitepackages()[0])
+pth_file = site_packages / "byteracer-custom-libs.pth"
+paths = [
+    os.environ["ROBOT_HAT_CUSTOM"],
+    os.environ["VILIB_CUSTOM"],
+    os.environ["PICARX_CUSTOM"],
+]
+pth_file.write_text("\n".join(paths) + "\n", encoding="utf-8")
+print(pth_file)
+PY
 }
 
 pregenerate_static_tts_cache() {
@@ -256,7 +296,12 @@ pregenerate_static_tts_cache() {
         BYTERACER_PIPER_DATA_DIR="${PIPER_DATA_DIR}" \
         SUPERTONIC_CACHE_DIR="${SUPERTONIC_CACHE_DIR}" \
         BYTERACER_TTS_CACHE_DIR="${TTS_CACHE_DIR}" \
-        "${PYTHON_BIN}" "${BYTERACER_PATH}/byteracer/tts/speak.py" --pregenerate-static || \
+        "${PYTHON_BIN}" "${BYTERACER_PATH}/byteracer/tts/speak.py" \
+            --pregenerate-static \
+            --langs fr-FR \
+            --lang fr-FR \
+            --engine piper \
+            --voice fr_FR-siwis-medium || \
         log "WARNING: static TTS cache pre-generation failed"
 }
 

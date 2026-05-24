@@ -27,11 +27,12 @@ class TTSManager:
     def __init__(
         self,
         sound_manager=None,
-        lang="en-US",
+        lang="fr-FR",
         enabled=True,
         volume=100,
         engine="piper",
-        voice="auto",
+        voice="fr_FR-siwis-medium",
+        use_pico_for_uncached=False,
         piper_data_dir=None,
         supertonic_cache_dir=None,
     ):
@@ -40,6 +41,7 @@ class TTSManager:
         self.volume = volume  # Master TTS volume
         self.engine = engine
         self.voice = voice
+        self.use_pico_for_uncached = bool(use_pico_for_uncached)
         self.piper_data_dir = str(get_piper_data_dir(piper_data_dir))
         self.supertonic_cache_dir = str(get_supertonic_cache_dir(supertonic_cache_dir))
         self.user_tts_volume = 100  # Volume for user-triggered TTS
@@ -54,6 +56,7 @@ class TTSManager:
         self._running = True
         self._task = None
         self._current_process = None
+        self.audio_available = True
         
         # TTS pygame setup
         self._reserve_tts_channel()
@@ -66,17 +69,23 @@ class TTSManager:
         self._clear_temp_files()
         
         logger.info(
-            "TTS Manager initialized (engine=%s, lang=%s, voice=%s, volume=%s)",
+            "TTS Manager initialized (engine=%s, lang=%s, voice=%s, volume=%s, pico_uncached=%s)",
             self.engine,
             self.lang,
             self.voice,
             self.volume,
+            self.use_pico_for_uncached,
         )
     
     def _reserve_tts_channel(self):
         """Make sure we have a dedicated channel in pygame mixer for TTS"""
-        if not pygame.mixer.get_init():
-            pygame.mixer.init()
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+        except Exception as e:
+            self.audio_available = False
+            logger.error("TTS audio backend unavailable; TTS playback disabled until next restart: %s", e)
+            return
         
         # Reserve the last channel for TTS
         self.tts_channel_max = pygame.mixer.get_num_channels() - 1
@@ -117,7 +126,7 @@ class TTSManager:
 
         if lang is None:
             lang = self.lang
-        if not self.enabled:
+        if not self.enabled or not self.audio_available:
             logger.debug(f"TTS disabled, skipping: '{text}'")
             return
 
@@ -140,7 +149,7 @@ class TTSManager:
         locale = lang or self.lang
         text = translate(key, locale, **params)
         cache_static = not params and is_static_message_key(key, locale)
-        if not self.enabled:
+        if not self.enabled or not self.audio_available:
             logger.debug("TTS disabled, skipping key: %s", key)
             return
 
@@ -167,7 +176,8 @@ class TTSManager:
                     await asyncio.sleep(0.1)
                     continue
                 
-                item = await self._queue.get()
+                queue = self._queue
+                item = await queue.get()
                 if len(item) == 3:
                     priority, text, lang = item
                     cache_static = False
@@ -183,7 +193,7 @@ class TTSManager:
                 await asyncio.to_thread(self._generate_and_play_speech, text, lang, cache_static)
                 
                 # Mark as done IMMEDIATELY - don't wait for audio to finish
-                self._queue.task_done()
+                queue.task_done()
                 
                 # Reset speaking state for next item in queue
                 with self._lock:
@@ -243,7 +253,7 @@ class TTSManager:
         if lang is None:
             lang = self.lang
 
-        if not self.enabled:
+        if not self.enabled or not self.audio_available:
             return False
         
         temp_file = None
@@ -296,18 +306,19 @@ class TTSManager:
             if final_file is None:
                 temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
                 final_file = temp_file
+                runtime_engine = "pico" if self.use_pico_for_uncached else self.engine
                 engine_used = generate_tts_wav(
                     text,
                     lang,
                     temp_file,
-                    engine=self.engine,
+                    engine=runtime_engine,
                     voice=self.voice,
                     data_dir=self.piper_data_dir,
                     supertonic_cache_dir=self.supertonic_cache_dir,
                 )
 
                 if not engine_used:
-                    logger.error("TTS generation failed for engine=%s lang=%s", self.engine, lang)
+                    logger.error("TTS generation failed for engine=%s lang=%s", runtime_engine, lang)
                     return False
                 logger.debug("Generated TTS with %s", engine_used)
 
@@ -487,8 +498,6 @@ class TTSManager:
                     except Exception:
                         break
                 
-                # Create a new queue with remaining items
-                self._queue = asyncio.Queue()
                 for item in remaining:
                     self._queue.put_nowait(item)
             else:
@@ -523,6 +532,11 @@ class TTSManager:
         """Set the engine-specific voice name or 'auto'."""
         self.voice = voice or "auto"
         logger.info("TTS voice set to %s", self.voice)
+
+    def set_use_pico_for_uncached(self, enabled):
+        """Use pico2wave directly for dynamic/non-cached TTS messages."""
+        self.use_pico_for_uncached = bool(enabled)
+        logger.info("Pico fallback for uncached TTS set to %s", self.use_pico_for_uncached)
 
     def set_piper_data_dir(self, data_dir):
         """Set the Piper voice model directory."""

@@ -622,6 +622,12 @@ github["repo_url"] = repo_url
 github["branch"] = branch
 github.setdefault("auto_update", True)
 
+sound = settings.setdefault("sound", {})
+sound.setdefault("tts_language", "fr-FR")
+sound.setdefault("tts_engine", "piper")
+sound.setdefault("tts_voice", "fr_FR-siwis-medium")
+sound.setdefault("tts_use_pico_for_uncached", False)
+
 tmp_file = config_file.with_suffix(config_file.suffix + ".tmp")
 tmp_file.write_text(json.dumps(settings, indent=2) + "\n")
 tmp_file.replace(config_file)

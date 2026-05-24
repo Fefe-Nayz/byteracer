@@ -91,12 +91,16 @@ class AICameraCameraManager:
         self.executing_right_turn = False
         self.right_turn_time = 2.0  # Duration of a right turn in seconds, can be adjusted for calibration
         self.right_turn_pending = False  # New flag to track if a right turn is pending
+        self._right_turn_lock = threading.Lock()
         
         # Continuous turning state
         self.continuous_turning = False  # Flag to track if continuous turning is active
 
         # Initialize speed and timing configuration from config or use defaults
         self.autonomous_speed = self.config_manager.get("ai.autonomous_speed") or 0.05  # Default 5% speed
+        self.turn_speed = self.config_manager.get("ai.turn_speed") or 0.15  # Default 15% turn speed
+        circuit_camera_tilt = self.config_manager.get("ai.circuit_camera_tilt")
+        self.circuit_camera_tilt = 12 if circuit_camera_tilt is None else circuit_camera_tilt  # Slight upward tilt
         self.wait_to_turn_time = self.config_manager.get("ai.wait_to_turn_time") or 2.0  # Default 2 seconds
         self.stop_sign_wait_time = self.config_manager.get("ai.stop_sign_wait_time") or 2.0  # Default 2 seconds
         self.stop_sign_ignore_time = self.config_manager.get("ai.stop_sign_ignore_time") or 3.0  # Default 3 seconds
@@ -141,11 +145,52 @@ class AICameraCameraManager:
 
         # Initialize motor balance
         self.motor_balance = self.config_manager.get("ai.motor_balance") or 0
+        self.motor_balance_test_active = False
 
     def clamp_number(self, num, lower_bound, upper_bound):
         """Clamp 'num' between 'lower_bound' and 'upper_bound'."""
         return max(min(num, max(lower_bound, upper_bound)),
                    min(lower_bound, upper_bound))
+
+    def stop_motion(self, reset_steering=True):
+        """Stop both drive motors and clear the current motion state."""
+        try:
+            self.px.forward(0)
+            self.px.set_motor_speed(1, 0)
+            self.px.set_motor_speed(2, 0)
+            if reset_steering:
+                self.px.set_dir_servo_angle(0)
+        except Exception as e:
+            logger.error(f"Error while stopping robot motion: {e}")
+
+        if self.sensor_manager:
+            self.sensor_manager.current_speed = 0.0
+            self.sensor_manager.current_turn = 0.0
+            self.sensor_manager.previous_speed = 0.0
+
+    def _say_key_background(self, key, priority=1, **kwargs):
+        """Schedule a TTS message without letting speech latency block motors."""
+        if not self.tts_manager:
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug(f"Skipping background TTS '{key}' because no asyncio loop is running")
+            return
+
+        loop.create_task(self.tts_manager.say_key(key, priority=priority, **kwargs))
+
+    def set_circuit_camera_pose(self):
+        """Set the default camera pose used when circuit mode starts."""
+        self.x_angle = 0
+        self.y_angle = self.clamp_number(
+            float(self.circuit_camera_tilt),
+            self.TILT_MIN_ANGLE,
+            self.TILT_MAX_ANGLE,
+        )
+        self.px.set_cam_pan_angle(0)
+        self.px.set_cam_tilt_angle(int(self.y_angle))
 
     # ------------------------------------------------------------------
     # Face Following
@@ -177,7 +222,7 @@ class AICameraCameraManager:
 
     def stop_face_following(self):
         if not self.face_follow_active:
-            logger.warning("Face following is not currently running!")
+            logger.debug("Face following is already stopped")
             return
 
         logger.info("Stopping face following ...")
@@ -193,7 +238,7 @@ class AICameraCameraManager:
         self.stop_all_led_patterns()
         
         # Stop robot
-        self.px.forward(0)
+        self.stop_motion()
 
     def _face_follow_loop(self):
         """
@@ -236,6 +281,9 @@ class AICameraCameraManager:
                 face_y = detection['human_y']
                 face_w = detection.get('human_w', 0)
                 face_h = detection.get('human_h', 0)
+
+                if not self.face_follow_active:
+                    break
 
                 # ---------------------------------------------
                 # 1) Pan/Tilt the camera
@@ -302,6 +350,7 @@ class AICameraCameraManager:
 
             time.sleep(0.05)
 
+        self.stop_motion()
         logger.info("Face-follow loop stopped.")
 
     # ------------------------------------------------------------------
@@ -649,9 +698,8 @@ class AICameraCameraManager:
         logger.info("Starting YOLO object detection...")
         self.yolo_detection_active = True
         
-        # Reset camera angles
-        self.x_angle = 0
-        self.y_angle = 0
+        # Start circuit mode with the camera raised slightly to see signs.
+        self.set_circuit_camera_pose()
 
         self.led_manager.turn_off()
         
@@ -677,14 +725,17 @@ class AICameraCameraManager:
         Stops YOLO object detection.
         """
         if not self.yolo_detection_active:
-            logger.warning("YOLO object detection is not currently running!")
+            logger.debug("YOLO object detection is already stopped")
             return False
         
         logger.info("Stopping YOLO object detection...")
         self.yolo_detection_active = False
+        self.yolo_detection_paused = False
         
         if self.yolo_detection_thread and self.yolo_detection_thread.is_alive():
             self.yolo_detection_thread.join(timeout=2.0)
+            if self.yolo_detection_thread.is_alive():
+                logger.warning("YOLO detection thread did not stop within timeout; motors remain forced off")
         
         self.yolo_detection_thread = None
         self.yolo_results = []
@@ -701,6 +752,7 @@ class AICameraCameraManager:
         
         self.right_turn_sign_detected = False
         self.right_turn_timer = None
+        self.right_turn_pending = False
         self.executing_right_turn = False
 
         # Stop any LED patterns
@@ -716,7 +768,7 @@ class AICameraCameraManager:
         except Exception as e:
             logger.error(f"Error disabling vilib drawing: {e}")
 
-        self.px.forward(0)  # Stop the robot
+        self.stop_motion()
         return True
     
     async def _yolo_detection_loop(self):
@@ -736,10 +788,7 @@ class AICameraCameraManager:
             return
         
         # Reset camera position at start of detection loop
-        self.x_angle = 0
-        self.y_angle = 0
-        self.px.set_cam_pan_angle(0)
-        self.px.set_cam_tilt_angle(0)
+        self.set_circuit_camera_pose()
         
         frame_rate_buffer = []
         fps_avg_len = 30
@@ -823,6 +872,9 @@ class AICameraCameraManager:
                 # Extract results
                 detections = results[0].boxes
                 self.yolo_results = results  # Store for external access
+
+                if not self.yolo_detection_active:
+                    break
                 
                 # Reset object count
                 self.yolo_object_count = 0
@@ -906,6 +958,7 @@ class AICameraCameraManager:
                 traffic_light_object = None
                 stop_sign_object = None
                 right_turn_object = None
+                best_object = None
                 
                 # Sort detections by distance
                 sorted_detections = sorted(
@@ -946,6 +999,9 @@ class AICameraCameraManager:
                     elif closest_object['class'] == "Tourner":
                         right_turn_object = closest_object
 
+                if not self.yolo_detection_active:
+                    break
+
                 # Priority of handling:
                 # 1. Traffic lights (highest priority)
                 # 2. Stop signs
@@ -965,7 +1021,7 @@ class AICameraCameraManager:
                     await self._handle_right_turn_sign(right_turn_object)
                     best_object = right_turn_object
                 # If no priority objects detected and we're not waiting for anything
-                elif not (self.waiting_for_green or self.waiting_at_stop_sign or self.executing_right_turn):
+                elif not (self.waiting_for_green or self.waiting_at_stop_sign or self.executing_right_turn or self.right_turn_pending):
                     # Move forward at default speed
                     self.forward_with_balance(self.autonomous_speed)  # Use configured autonomous speed
                     # Use closest object for tracking regardless of type
@@ -1000,6 +1056,9 @@ class AICameraCameraManager:
                 logger.error(f"Error in YOLO detection loop: {e}")
                 await asyncio.sleep(0.1)
         
+        # Stop any motor command issued shortly before the loop ended.
+        self.stop_motion()
+
         # Reset camera position at end of detection loop
         self.x_angle = 0
         self.y_angle = 0
@@ -1081,6 +1140,9 @@ class AICameraCameraManager:
             class_name (str): The detected class name ("Rouge", "Vert", or "Orange")
             object_info (dict): Object information with coordinates, size, etc.
         """
+        if not self.yolo_detection_active:
+            return
+
         # If we're in the ignore period, skip processing traffic lights
         if time.time() < self.ignore_traffic_lights_until:
             logger.info(f"Ignoring traffic light {class_name} (in ignore period)")
@@ -1192,6 +1254,9 @@ class AICameraCameraManager:
         Args:
             object_info (dict): Object information with coordinates, size, etc.
         """
+        if not self.yolo_detection_active:
+            return
+
         # If we're in the ignore period, skip processing stop signs
         if time.time() < self.ignore_stop_signs_until:
             logger.info("Ignoring stop sign detection (in ignore period)")
@@ -1275,6 +1340,9 @@ class AICameraCameraManager:
         Args:
             object_info (dict): Object information with coordinates, size, etc.
         """
+        if not self.yolo_detection_active:
+            return
+
         # If we're already executing a right turn, don't process any new detections
         if self.executing_right_turn:
             return
@@ -1328,8 +1396,7 @@ class AICameraCameraManager:
                 self.right_turn_pending = False
             
             # Announce if TTS manager is available
-            if self.tts_manager:
-                await self.tts_manager.say_key("ai.right_turn_ahead", priority=1)
+            self._say_key_background("ai.right_turn_ahead", priority=1)
         
         elif not is_close_enough and not self.right_turn_pending:
             # Not close enough yet, continue moving forward
@@ -1348,21 +1415,19 @@ class AICameraCameraManager:
             time.sleep(self.wait_to_turn_time)
             logger.info(f"Thread sleep completed, about to execute turn")
             
-            # Execute the turn if we're still pending
-            if self.right_turn_pending:
+            # Execute the turn only if circuit detection is still active.
+            if self.yolo_detection_active and self.right_turn_pending:
                 logger.info("Executing right turn from thread...")
-                
-                # We need to run the async method in a new event loop
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    loop.run_until_complete(self._execute_right_turn())
+                if self._perform_right_turn_sequence(
+                    context="RIGHT TURN SIGN",
+                    resume_after=True,
+                    require_yolo_active=True,
+                ):
                     logger.info("Right turn execution completed from thread")
-                finally:
-                    loop.close()
                     
             else:
                 logger.warning("Right turn was cancelled before execution in thread")
+                self.stop_motion()
                 
         except Exception as e:
             logger.error(f"Error in delayed turn thread: {e}")
@@ -1372,75 +1437,107 @@ class AICameraCameraManager:
             # Make sure detection is re-enabled on error
             self.yolo_detection_paused = False
 
+    def _sleep_for_turn_duration(self, duration, require_yolo_active=False):
+        """Sleep in short steps so mode changes can cancel a turn promptly."""
+        deadline = time.monotonic() + max(0.0, float(duration))
+
+        while True:
+            if require_yolo_active and not self.yolo_detection_active:
+                return False
+
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return True
+
+            time.sleep(min(0.02, remaining))
+
+    def _apply_right_turn_motor_command(self, speed_value=None, context="RIGHT TURN"):
+        """Apply the shared right-turn motor command used by real and test turns."""
+        left_speed, right_speed = self._right_turn_motor_speeds(speed_value)
+        logger.info(
+            f"{context} - Left motor: {left_speed * 100:.1f}%, "
+            f"Right motor: {right_speed * 100:.1f}%, Steering angle: 35°"
+        )
+        self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
+        self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
+        self.px.set_dir_servo_angle(35)
+        return left_speed, right_speed
+
+    def _perform_right_turn_sequence(self, context="RIGHT TURN", resume_after=False, require_yolo_active=False):
+        """Run a complete timed right turn with one shared implementation."""
+        if not self._right_turn_lock.acquire(blocking=False):
+            logger.warning(f"{context} skipped because another right turn is already running")
+            return False
+
+        previous_pause_state = self.yolo_detection_paused
+        completed = False
+
+        try:
+            if require_yolo_active and not self.yolo_detection_active:
+                logger.info(f"{context} skipped because YOLO/circuit mode is no longer active")
+                return False
+
+            self.executing_right_turn = True
+            self.right_turn_pending = False
+            self.yolo_detection_paused = True
+
+            # Give the detection loop one short tick to observe the pause flag
+            # before motors receive a turn command.
+            time.sleep(0.05)
+
+            self.start_turn_signal_blink()
+            logger.info(f"{context} - Executing right turn now")
+            self.stop_motion(reset_steering=False)
+            self._apply_right_turn_motor_command(context=context)
+
+            logger.info(f"{context} - Holding right turn for {self.right_turn_time} seconds")
+            if not self._sleep_for_turn_duration(self.right_turn_time, require_yolo_active=require_yolo_active):
+                logger.info(f"{context} cancelled because circuit mode stopped during the turn")
+                return False
+
+            self.stop_motion()
+            self.right_turn_timer = None
+            self.executing_right_turn = False
+            self.right_turn_sign_detected = False
+            self.stop_all_led_patterns(True)
+
+            if resume_after and self.yolo_detection_active:
+                self.forward_with_balance(self.autonomous_speed)
+                logger.info(
+                    f"{context} - Turn completed, continuing forward at "
+                    f"{self.autonomous_speed * 100:.1f}% speed"
+                )
+            else:
+                logger.info(f"{context} - Turn completed")
+
+            completed = True
+            return True
+
+        except Exception as e:
+            logger.error(f"Error during {context.lower()} sequence: {e}")
+            return False
+
+        finally:
+            if not completed:
+                self.stop_motion()
+                self.stop_all_led_patterns(True)
+
+            self.executing_right_turn = False
+            self.right_turn_pending = False
+            self.yolo_detection_paused = previous_pause_state if not require_yolo_active else False
+            self._right_turn_lock.release()
+
     async def _execute_right_turn(self):
         """
         Execute the right turn. Called when it's time to turn after seeing a right turn sign.
         """
-        # Execute right turn
-        self.executing_right_turn = True
-        self.right_turn_pending = False
-        
-        try:
-            # Pause YOLO detection during the turn
-            logger.info("Pausing YOLO detection for the turn")
-            self.yolo_detection_paused = True
-            
-            # Start turn signal LED blinking
-            self.start_turn_signal_blink()
-            
-            # Announce the turn
-            if self.tts_manager:
-                await self.tts_manager.say_key("ai.turning_right", priority=1)
-            
-            logger.info("RIGHT TURN SIGN - Executing right turn now")
-            # Stop forward movement before starting the turn
-            self.px.forward(0)
-            
-            # Differential steering approach that increases outer wheel speed
-            base_speed = 0.1  # Base speed (10%)
-            boost_factor = 0.8  # How much to boost outer wheel speed (up to 80% boost)
-            
-            # Calculate per-wheel speeds - boost the outer wheel rather than slowing inner wheel
-            left_speed = base_speed * (1 + boost_factor)  # Outer wheel (left) gets boosted
-            right_speed = base_speed  # Inner wheel (right) stays at base speed
-            
-            # Apply speeds to motors and set steering angle
-            logger.info(f"Turning right - Left motor: {left_speed * 100:.1f}%, Right motor: {right_speed * 100:.1f}%, Steering angle: 35°")
-            self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
-            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
-            self.px.set_dir_servo_angle(35)    # Set steering to full right turn
-            
-            # Wait for the turn to complete
-            logger.info(f"Executing right turn for {self.right_turn_time} seconds...")
-            await asyncio.sleep(self.right_turn_time)  # Wait for the turn time (default 2 seconds)
-            
-            # Reset direction and return to normal driving
-            logger.info("Turn completed, resetting steering angle")
-            self.px.set_dir_servo_angle(0)
-            
-            # Reset turn state
-            self.right_turn_timer = None
-            self.executing_right_turn = False
-            self.right_turn_sign_detected = False
-
-            # Stop LED blinking
-            self.stop_all_led_patterns(False)
-            
-            # Reset camera position after turning right
-            # self.x_angle = 0
-            # self.y_angle = 0
-            # self.px.set_cam_pan_angle(0)
-            # self.px.set_cam_tilt_angle(0)
-
-            # Move forward slowly after the turn
-            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
-            
-            logger.info(f"RIGHT TURN SIGN - Turn completed, continuing forward at {self.autonomous_speed*100:.1f}% speed")
-            
-        finally:
-            # Always re-enable YOLO detection after the turn, even if there was an error
-            logger.info("Resuming YOLO detection after turn")
-            self.yolo_detection_paused = False
+        self._say_key_background("ai.turning_right", priority=1)
+        return await asyncio.to_thread(
+            self._perform_right_turn_sequence,
+            "RIGHT TURN SIGN",
+            True,
+            True,
+        )
 
     def _run_turn_calibration(self):
         """Run a single right turn to calibrate the turning parameters"""
@@ -1461,70 +1558,43 @@ class AICameraCameraManager:
     
     async def _test_right_turn(self):
         """Test function to execute a single right turn"""
+        was_paused = self.yolo_detection_paused
         try:
             logger.info("----- RIGHT TURN CALIBRATION TEST -----")
             logger.info("Testing if the robot turns 90 degrees with current settings")
             
             # Pause YOLO detection during calibration
-            was_paused = self.yolo_detection_paused
             self.yolo_detection_paused = True
             logger.info("Pausing YOLO detection for calibration")
             
-            # Announce the test if TTS is available
-            if self.tts_manager:
-                await self.tts_manager.say_key("ai.test_right_turn", priority=1)
+            self._say_key_background("ai.test_right_turn", priority=1)
             
             # Make sure we're stopped
-            self.px.forward(0)
+            self.stop_motion()
             await asyncio.sleep(1.0)
+
+            turn_completed = await asyncio.to_thread(
+                self._perform_right_turn_sequence,
+                "RIGHT TURN CALIBRATION TEST",
+                False,
+                False,
+            )
             
-            # Start turn signal LED blinking
-            self.start_turn_signal_blink()
+            if turn_completed:
+                logger.info("Calibration turn completed")
+            else:
+                logger.warning("Calibration turn did not complete")
             
-            # Execute the turn
-            logger.info("Executing right turn now...")
-            
-            # Differential steering approach that increases outer wheel speed
-            base_speed = 0.1  # Base speed (10%)
-            boost_factor = 0.8  # How much to boost outer wheel speed (up to 80% boost)
-            
-            # Calculate per-wheel speeds - boost the outer wheel rather than slowing inner wheel
-            left_speed = base_speed * (1 + boost_factor)  # Outer wheel (left) gets boosted
-            right_speed = base_speed  # Inner wheel (right) stays at base speed
-            
-            # Apply speeds to motors and set steering angle
-            logger.info(f"Turning right - Left motor: {left_speed * 100:.1f}%, Right motor: {right_speed * 100:.1f}%, Steering angle: 35°")
-            self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
-            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
-            self.px.set_dir_servo_angle(35)    # Set steering to full right turn
-            
-            # Wait for the turn to complete
-            logger.info(f"Turning right for {self.right_turn_time} seconds...")
-            await asyncio.sleep(self.right_turn_time)  # Wait for the turn time (default 2 seconds)
-            
-            # Stop and reset direction
-            self.px.set_motor_speed(1, 0)
-            self.px.set_motor_speed(2, 0)
-            self.px.set_dir_servo_angle(0)
-            
-            # Stop LED blinking
-            self.stop_all_led_patterns()
-            
-            logger.info("Calibration turn completed")
-            
-            # Announce completion if TTS is available
-            if self.tts_manager:
-                await self.tts_manager.say_key("ai.turn_calibration_done", priority=1)
+            self._say_key_background("ai.turn_calibration_done", priority=1)
 
             logger.info(f"Check if the robot turned approximately 90 degrees in {self.right_turn_time} seconds.")
-            logger.info("If not, adjust the turn parameters in _handle_right_turn_sign method.")
+            logger.info("If not, adjust the right-turn time and speed settings.")
             logger.info("----- END OF CALIBRATION TEST -----")
             
         except Exception as e:
             logger.error(f"Error in right turn test: {e}")
             # Stop the robot if there was an error
-            self.px.forward(0)
-            self.px.set_dir_servo_angle(0)
+            self.stop_motion()
             
             # Make sure to stop LED blinking
             self.stop_all_led_patterns()
@@ -1586,7 +1656,7 @@ class AICameraCameraManager:
         """
         return self.right_turn_time
     
-    async def start_continuous_right_turn(self, speed_value=0.1):
+    async def start_continuous_right_turn(self, speed_value=None):
         """
         Start a continuous right turn using differential steering.
         The turn will continue until stop_continuous_turn() is called.
@@ -1614,19 +1684,7 @@ class AICameraCameraManager:
             # Stop forward movement before starting the turn
             self.px.forward(0)
             
-            # Differential steering approach that increases outer wheel speed
-            base_speed = speed_value  # Use the provided speed as base
-            boost_factor = 0.8  # How much to boost outer wheel speed (up to 80% boost)
-            
-            # Calculate per-wheel speeds - boost the outer wheel rather than slowing inner wheel
-            left_speed = base_speed * (1 + boost_factor)  # Outer wheel (left) gets boosted
-            right_speed = base_speed  # Inner wheel (right) stays at base speed
-            
-            # Apply speeds to motors and set steering angle
-            logger.info(f"Continuous turning right - Left motor: {left_speed * 100:.1f}%, Right motor: {right_speed * 100:.1f}%, Steering angle: 35°")
-            self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
-            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
-            self.px.set_dir_servo_angle(35)    # Set steering to full right turn
+            self._apply_right_turn_motor_command(speed_value, context="CONTINUOUS RIGHT TURN")
             
             logger.info("Continuous right turn active - call stop_continuous_turn() to stop")
             
@@ -1706,6 +1764,7 @@ class AICameraCameraManager:
                 "status": "success",
                 "current_settings": {
                     "turn_time": self.right_turn_time,
+                    "turn_speed": self.turn_speed,
                     "continuous_turning": hasattr(self, 'continuous_turning') and self.continuous_turning
                 }
             }
@@ -1714,7 +1773,7 @@ class AICameraCameraManager:
             if command == "start":
                 # Default speed if not provided
                 if speed is None:
-                    speed = 0.1
+                    speed = self.turn_speed
 
                 # Start a continuous turn
                 turn_started = await self.start_continuous_right_turn(speed_value=speed)
@@ -1748,7 +1807,9 @@ class AICameraCameraManager:
                     
             elif command == "set_speed":
                 if speed is not None and 0 < speed <= 1.0:
+                    self.set_turn_speed(speed)
                     result["action"] = f"Updated turn speed to {speed}"
+                    result["current_settings"]["turn_speed"] = self.turn_speed
                     # If turning is active, restart with new speed
                     if hasattr(self, 'continuous_turning') and self.continuous_turning:
                         self.stop_continuous_turn()
@@ -1771,6 +1832,7 @@ class AICameraCameraManager:
                 "error": str(e),
                 "current_settings": {
                     "turn_time": self.right_turn_time,
+                    "turn_speed": self.turn_speed,
                     "continuous_turning": hasattr(self, 'continuous_turning') and self.continuous_turning
                 }
             }
@@ -2043,28 +2105,35 @@ class AICameraCameraManager:
                 if self.traffic_sign_detection_active:
                     self.stop_traffic_sign_detection()
                 
-                # Start driving straight at low speed with motor balance applied
-                self.forward_with_balance(0.05)  # 5% speed
+                # Start driving straight with motor balance applied. 5% often
+                # cannot overcome static friction on the PiCar-X motors, so the
+                # drive test uses a visible but still conservative floor.
+                test_speed = max(float(self.autonomous_speed or 0.05), 0.12)
+                self.forward_with_balance(test_speed)
+                self.motor_balance_test_active = True
                 
                 # Announce test start
-                await self.tts_manager.say_key("ai.motor_test_started", priority=1)
+                if self.tts_manager:
+                    asyncio.create_task(self.tts_manager.say_key("ai.motor_test_started", priority=1))
 
                     
                 return {
                     "status": "success",
                     "message": "Motor balance test started",
-                    "motor_balance": self.motor_balance
+                    "motor_balance": self.motor_balance,
+                    "test_speed": test_speed
                 }
                 
             elif command == "stop":
                 logger.info("Stopping motor balance test drive")
             
                 # Stop all motors
-                self.px.set_motor_speed(1, 0)
-                self.px.set_motor_speed(2, 0)
+                self.forward_with_balance(0)
+                self.motor_balance_test_active = False
                 
                 # Announce test stop
-                await self.tts_manager.say_key("ai.motor_test_stopped", priority=1)
+                if self.tts_manager:
+                    asyncio.create_task(self.tts_manager.say_key("ai.motor_test_stopped", priority=1))
                 return {
                     "status": "success",
                     "message": "Motor balance test stopped",
@@ -2080,8 +2149,8 @@ class AICameraCameraManager:
         except Exception as e:
             logger.error(f"Error in motor calibration: {e}")
             # Stop motors on error
-            self.px.set_motor_speed(1, 0)
-            self.px.set_motor_speed(2, 0)
+            self.forward_with_balance(0)
+            self.motor_balance_test_active = False
             
             return {
                 "status": "error", 
@@ -2100,6 +2169,58 @@ class AICameraCameraManager:
             logger.info(f"Autonomous driving speed set to {speed*100:.1f}%")
         else:
             logger.warning(f"Invalid autonomous speed: {speed}. Must be between 0.01 (1%) and 0.2 (20%)")
+
+    def set_turn_speed(self, speed):
+        """
+        Set the motor speed used during right-turn rotations.
+
+        Args:
+            speed (float): Speed value from 0.05 to 0.3 (5% - 30%)
+        """
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid turn speed value: {speed}. Must be a number.")
+            return self.turn_speed
+
+        if 0.05 <= speed <= 0.3:
+            self.turn_speed = speed
+            logger.info(f"Turn speed set to {speed*100:.1f}%")
+        else:
+            logger.warning(f"Invalid turn speed: {speed}. Must be between 0.05 and 0.3")
+
+        return self.turn_speed
+
+    def set_circuit_camera_tilt(self, angle):
+        """Set the default camera tilt angle used when entering circuit mode."""
+        try:
+            angle = float(angle)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid circuit camera tilt value: {angle}. Must be a number.")
+            return self.circuit_camera_tilt
+
+        self.circuit_camera_tilt = self.clamp_number(
+            angle,
+            self.TILT_MIN_ANGLE,
+            self.TILT_MAX_ANGLE,
+        )
+        logger.info(f"Circuit camera tilt set to {self.circuit_camera_tilt:.1f}°")
+        return self.circuit_camera_tilt
+
+    def _right_turn_motor_speeds(self, speed_value=None):
+        """
+        Calculate per-wheel speeds for a right-turn rotation.
+
+        The outer wheel is boosted while the inner wheel keeps the configured
+        base speed. Values are clamped to protect against invalid settings.
+        """
+        base_speed = self.turn_speed if speed_value is None else float(speed_value)
+        base_speed = max(0.05, min(0.3, base_speed))
+        boost_factor = 0.8
+
+        left_speed = min(1.0, base_speed * (1 + boost_factor))
+        right_speed = base_speed
+        return left_speed, right_speed
             
     def set_wait_to_turn_time(self, seconds):
         """

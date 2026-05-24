@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_TTS_CACHE_DIR = PROJECT_DIR / ".venv" / "tts-cache"
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 def get_tts_cache_dir(value: str | Path | None = None) -> Path:
@@ -116,6 +116,7 @@ def generate_cached_tts_file(
             voice=voice,
             data_dir=piper_data_dir,
             supertonic_cache_dir=supertonic_cache_dir,
+            allow_fallback=False,
         )
         if not engine_used:
             return None

@@ -138,6 +138,7 @@ export interface RobotSettings {
     tts_language: string;
     tts_engine: "piper" | "supertonic" | "pico" | "auto";
     tts_voice: string;
+    tts_use_pico_for_uncached: boolean;
     volume: number;
     sound_volume: number;
     driving_volume: number;
@@ -200,6 +201,7 @@ export interface RobotSettings {
     yolo_confidence: number;
     motor_balance: number;
     autonomous_speed: number;
+    turn_speed: number;
     wait_to_turn_time: number;
     stop_sign_wait_time: number;
     stop_sign_ignore_time: number;
