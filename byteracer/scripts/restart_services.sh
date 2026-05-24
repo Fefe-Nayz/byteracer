@@ -25,9 +25,9 @@ WEBSOCKET_EXIT=0
 WEBSERVER_EXIT=0
 PYTHON_EXIT=0
 
-"${SCRIPT_DIR}/restart_websocket.sh" || WEBSOCKET_EXIT=$?
-"${SCRIPT_DIR}/restart_web_server.sh" || WEBSERVER_EXIT=$?
-"${SCRIPT_DIR}/restart_python.sh" || PYTHON_EXIT=$?
+bash "${SCRIPT_DIR}/restart_websocket.sh" || WEBSOCKET_EXIT=$?
+bash "${SCRIPT_DIR}/restart_web_server.sh" || WEBSERVER_EXIT=$?
+bash "${SCRIPT_DIR}/restart_python.sh" || PYTHON_EXIT=$?
 
 log "Screen sessions after restart:"
 screen_list

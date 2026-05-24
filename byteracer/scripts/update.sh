@@ -81,7 +81,7 @@ cp -a "${CONFIG_BACKUP}/." "${BYTERACER_PATH}/byteracer/config/" 2>/dev/null || 
 rm -rf "${CONFIG_BACKUP}" 2>/dev/null || true
 
 BUILD_EXIT=0
-"${SCRIPT_DIR}/setup_python_env.sh" || BUILD_EXIT=$?
+bash "${SCRIPT_DIR}/setup_python_env.sh" || BUILD_EXIT=$?
 build_relaytower_if_needed "true" || BUILD_EXIT=$?
 install_eaglecontrol_deps || BUILD_EXIT=$?
 
@@ -92,7 +92,7 @@ if [ "${BUILD_EXIT}" -ne 0 ]; then
 fi
 
 log "Restarting services after update"
-if "${SCRIPT_DIR}/restart_services.sh"; then
+if bash "${SCRIPT_DIR}/restart_services.sh"; then
     speak_key "update.installed_ready"
     log "========== UPDATE COMPLETED =========="
 else
