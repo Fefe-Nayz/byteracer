@@ -5,6 +5,25 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export BYTERACER_PATH="${BYTERACER_PATH:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 
+FORCE_UPDATE=false
+for arg in "$@"; do
+    case "${arg}" in
+        --force|-f)
+            FORCE_UPDATE=true
+            ;;
+        --help|-h)
+            echo "Usage: $0 [--force]"
+            echo "  --force, -f    Reinstall dependencies, rebuild, and restart even when already up to date."
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: ${arg}" >&2
+            echo "Usage: $0 [--force]" >&2
+            exit 2
+            ;;
+    esac
+done
+
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/common.sh"
 
@@ -19,6 +38,9 @@ REPO_URL="$(get_config ".github.repo_url" "https://github.com/Fefe-Nayz/byterace
 
 log "Repository: ${REPO_URL}"
 log "Branch: ${BRANCH}"
+if [ "${FORCE_UPDATE}" = "true" ]; then
+    log "Force mode enabled: reinstalling even if local commit matches remote"
+fi
 
 if [ ! -d "${BYTERACER_PATH}/.git" ]; then
     log "No git repository found at ${BYTERACER_PATH}"
@@ -55,11 +77,15 @@ fi
 log "Local commit: ${LOCAL}"
 log "Remote commit: ${REMOTE}"
 
-if [ "${LOCAL}" = "${REMOTE}" ]; then
+if [ "${LOCAL}" = "${REMOTE}" ] && [ "${FORCE_UPDATE}" != "true" ]; then
     log "Already up to date"
     speak_key "update.already_current"
     log "========== UPDATE COMPLETED: NO CHANGES =========="
     exit 0
+fi
+
+if [ "${LOCAL}" = "${REMOTE}" ]; then
+    log "Already up to date, but force mode will reinstall and rebuild"
 fi
 
 speak_key "update.installing"
