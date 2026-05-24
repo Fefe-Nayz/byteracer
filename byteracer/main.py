@@ -1500,7 +1500,7 @@ class ByteRacer:
                     command.append(f"--setenv={key}={env[key]}")
             command += ["bash", str(script_path)]
             if hasattr(os, "geteuid") and os.geteuid() != 0:
-                command.insert(0, "sudo")
+                command = ["sudo", "-n", *command]
 
             try:
                 subprocess.run(

@@ -17,7 +17,7 @@ speak_key "admin.python_restart"
 if systemd_unit_exists "byteracer-python.service"; then
     if restart_systemd_unit "byteracer-python.service"; then
         sleep 3
-        if sudo systemctl is-active --quiet "byteracer-python.service"; then
+        if systemctl is-active --quiet "byteracer-python.service"; then
             log "Python controller systemd service is active"
             speak_key "admin.python_restarted"
             log "========== RESTART PYTHON COMPLETED =========="
@@ -30,7 +30,13 @@ fi
 stop_screen_session "byteracer" "python[0-9.]* .*main.py|.venv/bin/python .*main.py"
 
 PYTHON_BIN="$(byteracer_python)"
-if start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -E env PATH=${PATH} BYTERACER_PYTHON=${PYTHON_BIN} ${PYTHON_BIN} main.py"; then
+if [ "$(id -u)" -eq 0 ]; then
+    PYTHON_START_CMD="env PATH=${PATH} BYTERACER_PYTHON=${PYTHON_BIN} ${PYTHON_BIN} main.py"
+else
+    PYTHON_START_CMD="sudo -n -E env PATH=${PATH} BYTERACER_PYTHON=${PYTHON_BIN} ${PYTHON_BIN} main.py"
+fi
+
+if start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "${PYTHON_START_CMD}"; then
     sleep 3
     if pgrep -f "python[0-9.]* .*main.py|.venv/bin/python .*main.py" >/dev/null 2>&1; then
         log "Python controller process is running"

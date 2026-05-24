@@ -22,10 +22,16 @@ sleep 2
 
 if systemd_available; then
     log "Rebooting through systemd"
-    sudo systemctl reboot
+    run_root systemctl reboot || {
+        log "systemctl reboot failed"
+        exit 1
+    }
 else
     log "Rebooting through reboot command"
-    sudo reboot
+    run_root reboot || {
+        log "reboot command failed"
+        exit 1
+    }
 fi
 
 log "Reboot requested"

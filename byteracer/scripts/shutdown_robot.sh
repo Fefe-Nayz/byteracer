@@ -22,10 +22,16 @@ sleep 2
 
 if systemd_available; then
     log "Powering off through systemd"
-    sudo systemctl poweroff
+    run_root systemctl poweroff || {
+        log "systemctl poweroff failed"
+        exit 1
+    }
 else
     log "Powering off through shutdown command"
-    sudo shutdown -h now
+    run_root shutdown -h now || {
+        log "shutdown command failed"
+        exit 1
+    }
 fi
 
 log "Poweroff requested"

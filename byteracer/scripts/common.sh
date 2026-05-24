@@ -113,6 +113,21 @@ run_as_user() {
     fi
 }
 
+run_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+        return $?
+    fi
+
+    sudo -n "$@"
+    local exit_code=$?
+    if [ "${exit_code}" -ne 0 ]; then
+        log "Root command failed with exit ${exit_code}: $*"
+        log "Run the script with sudo or reinstall ByteRacer systemd services so byteracer-python runs as root."
+    fi
+    return "${exit_code}"
+}
+
 screen_list() {
     run_as_user screen -list 2>/dev/null || true
 }
@@ -138,7 +153,7 @@ systemd_unit_exists() {
 restart_systemd_unit() {
     local unit="$1"
     log "Restarting systemd unit: ${unit}"
-    sudo systemctl restart "${unit}"
+    run_root systemctl restart "${unit}"
 }
 
 start_systemd_stack() {
@@ -160,7 +175,7 @@ start_systemd_stack() {
 
     wait_for_port "127.0.0.1" 3001 20 || log "EagleControl did not open port 3001 yet"
     wait_for_port "127.0.0.1" 3000 20 || log "RelayTower did not open port 3000 yet"
-    sudo systemctl --no-pager --plain status "${units[@]}" || true
+    systemctl --no-pager --plain status "${units[@]}" || true
     return 0
 }
 
@@ -370,7 +385,11 @@ start_byteracer_services() {
 
     local python_bin
     python_bin="$(byteracer_python)"
-    start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -E env PATH=${PATH} BYTERACER_PYTHON=${python_bin} ${python_bin} main.py" || return 1
+    if [ "$(id -u)" -eq 0 ]; then
+        start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "env PATH=${PATH} BYTERACER_PYTHON=${python_bin} ${python_bin} main.py" || return 1
+    else
+        start_screen_session "byteracer" "${BYTERACER_PATH}/byteracer" "sudo -n -E env PATH=${PATH} BYTERACER_PYTHON=${python_bin} ${python_bin} main.py" || return 1
+    fi
     sleep 3
 
     log "Current screen sessions:"
