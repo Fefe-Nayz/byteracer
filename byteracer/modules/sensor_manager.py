@@ -6,6 +6,7 @@ from typing import Callable, Dict, Any, Optional
 import threading
 
 logger = logging.getLogger(__name__)
+_robot_client_connected = False
 
 class EmergencyState(Enum):
     """Enum representing different emergency states"""
@@ -33,21 +34,20 @@ class RobotState(Enum):
     DEMO_MODE = auto() # The robot is doing pre-registered actions and tts to demo it capabilities. The user inputs are not taken into account. The emergency of collision and cliff are active
     TRACKING_MODE = auto() # The robot is going arround (by itself) until he detects a person. When it detects a person the head will lock on it and the robot will follow the person. The robot will use it's camera to detect the person and the line following sensors to avoid cliffs. The robot will not be able to move if it detects a cliff or an obstacle in front of it. The user inputs are not taken into account. The emergency of collision and cliff are active
 
-    _connected = False  # Class variable to track connection status
-
     @classmethod
     def isConnected(cls) -> bool:
         """
         Class‐level method: returns the single 'connected' flag.
         """
-        return cls._connected
+        return _robot_client_connected
 
     @classmethod
     def setConnected(cls, value: bool):
         """
         Class‐level setter: updates the flag.
         """
-        type.__setattr__(cls, "_connected", bool(value))
+        global _robot_client_connected
+        _robot_client_connected = bool(value)
         
 
 class SensorManager:
