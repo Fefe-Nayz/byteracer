@@ -10,6 +10,7 @@ import websockets
 from logging.handlers import QueueHandler, QueueListener
 import queue
 import sys
+from collections import deque
 
 class ColoredFormatter(logging.Formatter):
     """
@@ -58,6 +59,7 @@ class WebSocketLogHandler(logging.Handler):
         self.event_loop = None
         self.worker_thread = None
         self.running = True
+        self.backlog = deque(maxlen=500)
         # Start the worker thread
         self._start_worker()
         
@@ -72,6 +74,13 @@ class WebSocketLogHandler(logging.Handler):
         self.websocket = websocket
         # Store a reference to the event loop when the WebSocket is set
         self.event_loop = asyncio.get_running_loop()
+        # Replay recent logs so the UI can see messages produced before the
+        # browser connected, including startup and maintenance script logs.
+        for log_data in list(self.backlog):
+            try:
+                self.queue.put_nowait(log_data)
+            except queue.Full:
+                break
         
     def emit(self, record):
         """Put log record in the queue for sending - safe to call from any thread"""
@@ -81,13 +90,17 @@ class WebSocketLogHandler(logging.Handler):
         try:
             log_entry = self.format(record)
             
-            # Add to thread-safe queue - no asyncio needed here.
-            # Drop log streaming entries if the UI is not consuming fast enough.
-            self.queue.put_nowait({
+            log_data = {
                 "level": record.levelname,
                 "message": log_entry,
                 "timestamp": int(time.time() * 1000)
-            })
+            }
+
+            self.backlog.append(log_data)
+
+            # Add to thread-safe queue - no asyncio needed here.
+            # Drop live streaming entries if the UI is not consuming fast enough.
+            self.queue.put_nowait(log_data)
             
         except queue.Full:
             pass
@@ -160,7 +173,7 @@ class LogManager:
             self.log_dir = Path(log_dir)
         
         # Ensure log directory exists
-        self.log_dir.mkdir(exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
         
         # Log settings
         self.max_log_files = max_log_files
@@ -180,6 +193,9 @@ class LogManager:
         
         # Log maintenance task
         self._cleanup_task = None
+        self._external_log_task = None
+        self._external_log_positions = {}
+        self._tail_start_time = time.time()
         self._running = True
         
         # Initial log
@@ -241,9 +257,10 @@ class LogManager:
     async def start(self):
         """Start the log maintenance task"""
         self._cleanup_task = asyncio.create_task(self._log_maintenance())
+        self._external_log_task = asyncio.create_task(self._tail_external_logs())
         logging.info("Log maintenance task started")
     
-    async def stop(self):
+    async def stop(self, close_handlers=False):
         """Stop the log maintenance task"""
         self._running = False
         
@@ -253,12 +270,32 @@ class LogManager:
                 await self._cleanup_task
             except asyncio.CancelledError:
                 pass
+
+        if self._external_log_task:
+            self._external_log_task.cancel()
+            try:
+                await self._external_log_task
+            except asyncio.CancelledError:
+                pass
         
         # Close WebSocket handler
         if self.websocket_handler:
             self.websocket_handler.close()
-        
+
         logging.info("Log Manager stopped")
+
+        if close_handlers:
+            self._close_handlers()
+
+    def _close_handlers(self):
+        """Detach and close root logger handlers owned by this manager."""
+        root_logger = logging.getLogger()
+        for handler in root_logger.handlers[:]:
+            root_logger.removeHandler(handler)
+            try:
+                handler.close()
+            except Exception:
+                pass
     
     async def _log_maintenance(self):
         """Periodically check log files and clean up if needed"""
@@ -281,6 +318,92 @@ class LogManager:
             except Exception as e:
                 logging.error(f"Error in log maintenance: {e}")
                 await asyncio.sleep(60)  # Retry after a minute
+
+    async def _tail_external_logs(self):
+        """Stream maintenance shell script logs into the normal Python log flow."""
+        logging.info("Starting external script log tailer")
+
+        while self._running:
+            try:
+                self._emit_new_external_log_lines()
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                logging.info("External script log tailer cancelled")
+                break
+            except Exception as e:
+                logging.error(f"Error tailing external logs: {e}")
+                await asyncio.sleep(5)
+
+    def _iter_external_log_files(self):
+        """Return shell-maintenance log files without tailing our own byteracer log."""
+        try:
+            for path in self.log_dir.glob("*.log"):
+                if path.name.startswith("byteracer_"):
+                    continue
+                if path.is_file():
+                    yield path
+        except Exception as e:
+            logging.error(f"Error listing external logs: {e}")
+
+    def _emit_new_external_log_lines(self):
+        for path in self._iter_external_log_files():
+            try:
+                stat = path.stat()
+                key = str(path)
+                previous_position = self._external_log_positions.get(key)
+
+                if previous_position is None:
+                    # Avoid flooding the UI with stale historical logs, but keep
+                    # recent boot/script lines that may have happened before the
+                    # browser connected.
+                    if stat.st_mtime >= self._tail_start_time - 10:
+                        position = max(0, stat.st_size - 16384)
+                    else:
+                        position = stat.st_size
+                elif stat.st_size < previous_position:
+                    position = 0
+                else:
+                    position = previous_position
+
+                if stat.st_size <= position:
+                    self._external_log_positions[key] = stat.st_size
+                    continue
+
+                with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                    handle.seek(position)
+                    chunk = handle.read(65536)
+                    new_position = handle.tell()
+
+                self._external_log_positions[key] = new_position
+
+                lines = chunk.splitlines()
+                if position > 0 and lines:
+                    # The first line may be partial when we start from a tail
+                    # offset inside a large file.
+                    lines = lines[1:]
+
+                script_logger = logging.getLogger(f"scripts.{path.stem}")
+                for line in lines[-200:]:
+                    cleaned_line = line.strip()
+                    if not cleaned_line:
+                        continue
+                    script_logger.log(self._infer_external_log_level(cleaned_line), cleaned_line)
+
+            except FileNotFoundError:
+                self._external_log_positions.pop(str(path), None)
+            except Exception as e:
+                logging.error(f"Error reading external log {path}: {e}")
+
+    @staticmethod
+    def _infer_external_log_level(line):
+        upper = line.upper()
+        if "CRITICAL" in upper or "FATAL" in upper:
+            return logging.CRITICAL
+        if "ERROR" in upper or "FAILED" in upper or "EXIT 1" in upper:
+            return logging.ERROR
+        if "WARNING" in upper or "WARN" in upper:
+            return logging.WARNING
+        return logging.INFO
     
     async def _check_log_size(self):
         """Check if current log file needs rotation"""
