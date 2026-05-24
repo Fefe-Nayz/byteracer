@@ -14,7 +14,17 @@ if ! id "${BYTERACER_USER}" >/dev/null 2>&1; then
     BYTERACER_USER="$(id -un)"
 fi
 
-export PATH="/home/pi/.bun/bin:${HOME}/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH}"
+BYTERACER_HOME="$(getent passwd "${BYTERACER_USER}" 2>/dev/null | cut -d: -f6 || true)"
+if [ -z "${BYTERACER_HOME}" ]; then
+    if [ "${BYTERACER_USER}" = "root" ]; then
+        BYTERACER_HOME="/root"
+    else
+        BYTERACER_HOME="/home/${BYTERACER_USER}"
+    fi
+fi
+
+export HOME="${HOME:-${BYTERACER_HOME}}"
+export PATH="${BYTERACER_HOME}/.bun/bin:${HOME}/.bun/bin:/home/pi/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 TTS_SCRIPT="${BYTERACER_PATH}/byteracer/tts/speak.py"
 CONFIG_FILE="${BYTERACER_PATH}/byteracer/config/settings.json"
