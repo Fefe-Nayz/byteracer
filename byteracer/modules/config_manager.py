@@ -112,11 +112,14 @@ class ConfigManager:
             },
             "imu": {
                 "enabled": True,
+                "sensor_type": "mpu6050",  # "mpu6050" or "mpu9250" (adds magnetometer)
                 "bus": 1,
                 "i2c_address": "0x68",
                 "sample_rate_hz": 50,
                 "calibration_samples": 120,
                 "gyro_deadband_dps": 0.35,
+                "mag_declination_deg": 0.0,  # MPU9250: local magnetic declination
+                "mag_yaw_invert": False,  # MPU9250: flip if fused yaw oscillates
             },
             "ai": {
                 "speak_pause_threshold": 1.2,
@@ -468,11 +471,14 @@ class ConfigManager:
             },
             "imu": {
                 "enabled": True,
+                "sensor_type": "mpu6050",  # "mpu6050" or "mpu9250" (adds magnetometer)
                 "bus": 1,
                 "i2c_address": "0x68",
                 "sample_rate_hz": 50,
                 "calibration_samples": 120,
                 "gyro_deadband_dps": 0.35,
+                "mag_declination_deg": 0.0,  # MPU9250: local magnetic declination
+                "mag_yaw_invert": False,  # MPU9250: flip if fused yaw oscillates
             },
             "ai": {
                 "speak_pause_threshold": 1.2,

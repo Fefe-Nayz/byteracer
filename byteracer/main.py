@@ -1551,11 +1551,14 @@ class ByteRacer:
             imu = settings["imu"]
             allowed_imu_keys = {
                 "enabled",
+                "sensor_type",
                 "bus",
                 "i2c_address",
                 "sample_rate_hz",
                 "calibration_samples",
                 "gyro_deadband_dps",
+                "mag_declination_deg",
+                "mag_yaw_invert",
             }
             for key, value in imu.items():
                 if key in allowed_imu_keys:

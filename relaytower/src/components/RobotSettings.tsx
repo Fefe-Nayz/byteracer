@@ -154,11 +154,14 @@ export default function RobotSettings() {
     : "auto";
   const imuSettings = localSettings.imu || {
     enabled: true,
+    sensor_type: "mpu6050" as const,
     bus: 1,
     i2c_address: "0x68",
     sample_rate_hz: 50,
     calibration_samples: 120,
     gyro_deadband_dps: 0.35,
+    mag_declination_deg: 0,
+    mag_yaw_invert: false,
   };
 
   // Update a specific setting
@@ -446,6 +449,65 @@ export default function RobotSettings() {
                   }
                 />
               </div>
+
+              <div className="space-y-2">
+                <div className="text-xs">Sensor Type</div>
+                <Select
+                  value={imuSettings.sensor_type || "mpu6050"}
+                  disabled={!imuSettings.enabled}
+                  onValueChange={(value) =>
+                    updateSetting("imu", "sensor_type", value)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sensor type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mpu6050">MPU6050 (gyro + accel)</SelectItem>
+                    <SelectItem value="mpu9250">
+                      MPU9250 (+ magnetometer)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="text-xs text-muted-foreground">
+                  MPU9250 uses its magnetometer to remove yaw drift for a far more
+                  accurate heading.
+                </div>
+              </div>
+
+              {imuSettings.sensor_type === "mpu9250" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <div className="text-xs">Magnetic Declination (°)</div>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      value={imuSettings.mag_declination_deg ?? 0}
+                      disabled={!imuSettings.enabled}
+                      onChange={(event) =>
+                        updateSetting(
+                          "imu",
+                          "mag_declination_deg",
+                          Number(event.target.value)
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="flex flex-col justify-end space-y-1">
+                    <div className="text-xs">Invert Mag Heading</div>
+                    <Switch
+                      checked={imuSettings.mag_yaw_invert ?? false}
+                      disabled={!imuSettings.enabled}
+                      onCheckedChange={(checked) =>
+                        updateSetting("imu", "mag_yaw_invert", checked)
+                      }
+                    />
+                    <div className="text-[10px] text-muted-foreground">
+                      Flip if fused yaw oscillates.
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">

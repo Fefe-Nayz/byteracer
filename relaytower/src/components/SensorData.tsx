@@ -340,6 +340,12 @@ export default function SensorData() {
               sensorData.imu?.available ? 'text-cyan-600 dark:text-cyan-300' : ''
             }`} />
             <span className="text-sm font-medium">Inertial Sensor:</span>
+            {sensorData.imu?.sensorType && (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+                {sensorData.imu.sensorType}
+                {sensorData.imu.magnetometer ? " + mag" : ""}
+              </span>
+            )}
             <span className={`ml-auto text-xs font-medium ${
               sensorData.imu?.available ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'
             }`}>

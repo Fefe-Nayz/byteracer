@@ -117,12 +117,16 @@ export interface SensorData {
     enabled: boolean;
     available: boolean;
     calibrated: boolean;
+    sensorType: "mpu6050" | "mpu9250";
+    magnetometer: boolean;
     bus: number;
     address: string;
     accel: { x: number; y: number; z: number };
     gyro: { x: number; y: number; z: number };
+    mag: { x: number; y: number; z: number };
     angles: { roll: number; pitch: number; yaw: number };
     heading: number;
+    magHeading: number;
     headingReference: number;
     headingError: number;
     temperature: number;
@@ -236,11 +240,14 @@ export interface RobotSettings {
   };
   imu: {
     enabled: boolean;
+    sensor_type: "mpu6050" | "mpu9250";
     bus: number;
     i2c_address: string;
     sample_rate_hz: number;
     calibration_samples: number;
     gyro_deadband_dps: number;
+    mag_declination_deg: number;
+    mag_yaw_invert: boolean;
   };
   led: {
     enabled: boolean;
