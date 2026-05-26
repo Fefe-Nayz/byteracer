@@ -4,32 +4,23 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Button } from "./ui/button";
 
+interface Quat {
+  w: number;
+  x: number;
+  y: number;
+  z: number;
+}
+
 interface ImuVisualizerProps {
-  roll: number;
-  pitch: number;
-  yaw: number;
+  quaternion?: Quat;
   available: boolean;
 }
 
 const ZERO_STORAGE_KEY = "byteracer-imu-zero-quat";
-const DEG2RAD = Math.PI / 180;
 
-// Build the orientation quaternion from the IMU euler angles. Mapping:
-//   yaw   -> world up (Y) : heading
-//   pitch -> lateral (X)  : nose up/down
-//   roll  -> longitudinal (Z) : banking
-// Flip a sign here if a real-robot test shows an axis rotating the wrong way.
-function quatFromEuler(rollDeg: number, pitchDeg: number, yawDeg: number) {
-  const euler = new THREE.Euler(
-    pitchDeg * DEG2RAD,
-    yawDeg * DEG2RAD,
-    rollDeg * DEG2RAD,
-    "YXZ"
-  );
-  return new THREE.Quaternion().setFromEuler(euler);
-}
-
-// Build the little robot car. Returns the group to add to the scene.
+// Build the little robot car in the IMU body frame: X = forward (nose), Y = left,
+// Z = up. The whole model is later tipped by a pivot so this Z-up frame is shown
+// in three.js's Y-up world.
 function buildRobot(): THREE.Group {
   const group = new THREE.Group();
 
@@ -50,39 +41,38 @@ function buildRobot(): THREE.Group {
     emissive: 0x6b4500,
     emissiveIntensity: 0.4,
   });
-
-  // Chassis (length along Z = forward, width along X, height along Y).
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.4, 2.2), bodyMat);
-  chassis.position.y = 0.35;
-  group.add(chassis);
-
-  // Cabin, set back from the front.
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.45, 1.0), darkMat);
-  cabin.position.set(0, 0.72, -0.25);
-  group.add(cabin);
-
-  // Front marker (arrow head) so heading is unambiguous; points to +Z (front).
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 4), frontMat);
-  nose.rotation.x = Math.PI / 2; // cone points up by default -> rotate to +Z
-  nose.position.set(0, 0.4, 1.35);
-  group.add(nose);
-
-  // Wheels (cylinders) at the four corners, axis along X.
-  const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.22, 20);
   const wheelMat = new THREE.MeshStandardMaterial({
     color: 0x111827,
     metalness: 0.1,
     roughness: 0.9,
   });
+
+  // Chassis: length along X (forward), width along Y, height along Z.
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 0.4), bodyMat);
+  chassis.position.z = 0.35;
+  group.add(chassis);
+
+  // Cabin, set back toward the rear (-X).
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.1, 0.45), darkMat);
+  cabin.position.set(-0.25, 0, 0.72);
+  group.add(cabin);
+
+  // Front marker (arrow) pointing to +X so heading is unambiguous.
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 4), frontMat);
+  nose.rotation.z = -Math.PI / 2; // cone points +Y by default -> rotate to +X
+  nose.position.set(1.35, 0, 0.4);
+  group.add(nose);
+
+  // Wheels: cylinders with their axle along Y (the lateral axis).
+  const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.22, 20);
   const wheelPositions: [number, number, number][] = [
-    [0.75, 0.32, 0.75],
-    [-0.75, 0.32, 0.75],
-    [0.75, 0.32, -0.75],
-    [-0.75, 0.32, -0.75],
+    [0.75, 0.75, 0.32],
+    [0.75, -0.75, 0.32],
+    [-0.75, 0.75, 0.32],
+    [-0.75, -0.75, 0.32],
   ];
   for (const [x, y, z] of wheelPositions) {
     const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-    wheel.rotation.z = Math.PI / 2;
     wheel.position.set(x, y, z);
     group.add(wheel);
   }
@@ -91,21 +81,19 @@ function buildRobot(): THREE.Group {
 }
 
 export default function ImuVisualizer({
-  roll,
-  pitch,
-  yaw,
+  quaternion,
   available,
 }: ImuVisualizerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  // Latest angles, read inside the animation loop without re-running setup.
-  const anglesRef = useRef({ roll, pitch, yaw, available });
+  // Latest orientation, read inside the animation loop without re-running setup.
+  const quatRef = useRef<Quat>({ w: 1, x: 0, y: 0, z: 0 });
+  const availableRef = useRef(available);
   const zeroRef = useRef<THREE.Quaternion>(new THREE.Quaternion());
-  const robotRef = useRef<THREE.Group | null>(null);
   const [hasZero, setHasZero] = useState(false);
 
-  anglesRef.current = { roll, pitch, yaw, available };
+  if (quaternion) quatRef.current = quaternion;
+  availableRef.current = available;
 
-  // One-time scene setup.
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
@@ -130,44 +118,47 @@ export default function ImuVisualizer({
     const scene = new THREE.Scene();
 
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-    camera.position.set(3.6, 2.8, 4.4);
-    camera.lookAt(0, 0.4, 0);
+    camera.position.set(4.6, 3.2, 5.0);
+    camera.lookAt(0, 0.5, 0);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(width, height);
     mount.appendChild(renderer.domElement);
 
-    // Lighting.
     scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 1.1));
     const dir = new THREE.DirectionalLight(0xffffff, 1.2);
     dir.position.set(5, 8, 6);
     scene.add(dir);
 
-    // Ground grid + axes for spatial reference.
-    const grid = new THREE.GridHelper(10, 20, 0x0891b2, 0x334155);
+    // Ground grid in the three.js Y-up world.
+    const grid = new THREE.GridHelper(12, 24, 0x0891b2, 0x334155);
     (grid.material as THREE.Material).opacity = 0.35;
     (grid.material as THREE.Material).transparent = true;
     scene.add(grid);
 
-    const axes = new THREE.AxesHelper(1.6);
-    axes.position.y = 0.01;
-    scene.add(axes);
+    // Pivot tips the body Z-up frame into the scene Y-up frame for viewing.
+    const pivot = new THREE.Group();
+    pivot.rotation.x = -Math.PI / 2;
+    scene.add(pivot);
 
     const robot = buildRobot();
-    robotRef.current = robot;
-    scene.add(robot);
+    pivot.add(robot);
 
-    // Smoothly track the target orientation.
-    const target = new THREE.Quaternion();
+    const qCurrent = new THREE.Quaternion();
+    const qDisplay = new THREE.Quaternion();
+    const qZeroInv = new THREE.Quaternion();
+
     let frameId = 0;
     const animate = () => {
-      const { roll: r, pitch: p, yaw: y } = anglesRef.current;
-      const current = quatFromEuler(r, p, y);
-      // Displayed orientation is relative to the captured "level" reference, so
-      // the robot's real mounting offset (e.g. roll ~180° when flat) is removed.
-      target.copy(zeroRef.current).invert().multiply(current);
-      robot.quaternion.slerp(target, 0.2);
+      const q = quatRef.current;
+      qCurrent.set(q.x, q.y, q.z, q.w);
+      // Show orientation relative to the captured "level" reference, which
+      // cancels the robot's mounting offset (e.g. roll ~180 deg when flat).
+      qZeroInv.copy(zeroRef.current).invert();
+      qDisplay.copy(qZeroInv).multiply(qCurrent);
+      // Smooth toward the target; slerp avoids any wrap/gimbal artifacts.
+      robot.quaternion.slerp(qDisplay, 0.25);
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(animate);
     };
@@ -197,13 +188,12 @@ export default function ImuVisualizer({
           else mat.dispose();
         }
       });
-      robotRef.current = null;
     };
   }, []);
 
   const setLevel = () => {
-    const { roll: r, pitch: p, yaw: y } = anglesRef.current;
-    zeroRef.current.copy(quatFromEuler(r, p, y));
+    const q = quatRef.current;
+    zeroRef.current.set(q.x, q.y, q.z, q.w);
     try {
       localStorage.setItem(
         ZERO_STORAGE_KEY,

@@ -70,6 +70,10 @@ class IMUManager:
         self.gyro = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.mag = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.angles = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+        # Orientation quaternion sent to the UI for the 3D visualizer. Built from
+        # the instantaneous accelerometer tilt + fused yaw, so it stays fluid (no
+        # gyro-integration overshoot) and consistent (no Euler axis coupling).
+        self.orientation_quat = {"w": 1.0, "x": 0.0, "y": 0.0, "z": 0.0}
         self.temperature_c = 0.0
         self.heading_reference_deg = 0.0
 
@@ -109,6 +113,27 @@ class IMUManager:
     @staticmethod
     def _normalize_angle(angle: float) -> float:
         return (angle + 180.0) % 360.0 - 180.0
+
+    @staticmethod
+    def _quaternion_from_euler(roll_deg: float, pitch_deg: float, yaw_deg: float) -> Dict[str, float]:
+        """Tait-Bryan ZYX (yaw-pitch-roll) angles -> orientation quaternion.
+
+        Producing a single consistent quaternion (instead of letting the client
+        recombine the three angles) avoids the axis coupling that appears when the
+        mounting roll is near 180 degrees.
+        """
+        r = math.radians(roll_deg) * 0.5
+        p = math.radians(pitch_deg) * 0.5
+        y = math.radians(yaw_deg) * 0.5
+        cr, sr = math.cos(r), math.sin(r)
+        cp, sp = math.cos(p), math.sin(p)
+        cy, sy = math.cos(y), math.sin(y)
+        return {
+            "w": cr * cp * cy + sr * sp * sy,
+            "x": sr * cp * cy - cr * sp * sy,
+            "y": cr * sp * cy + sr * cp * sy,
+            "z": cr * cp * sy - sr * sp * cy,
+        }
 
     async def start(self):
         if self._running:
@@ -421,6 +446,10 @@ class IMUManager:
             else:
                 self.temperature_c = raw["temperature_raw"] / 340.0 + 36.53
             self.angles = {"roll": roll, "pitch": pitch, "yaw": yaw}
+            # Build the display orientation from the instantaneous accelerometer
+            # tilt (not the gyro-fused roll/pitch) so the 3D model tracks the real
+            # pose immediately without the integration overshoot.
+            self.orientation_quat = self._quaternion_from_euler(roll_acc, pitch_acc, yaw)
             self.last_update = time.time()
 
     def _compute_mag_heading(self, mag: Dict[str, float], roll_deg: float, pitch_deg: float) -> Optional[float]:
@@ -486,6 +515,7 @@ class IMUManager:
                 "gyro": dict(self.gyro),
                 "mag": dict(self.mag),
                 "angles": dict(self.angles),
+                "quaternion": dict(self.orientation_quat),
                 "heading": self.angles["yaw"],
                 "magHeading": self.mag_heading_deg,
                 "headingReference": self.heading_reference_deg,

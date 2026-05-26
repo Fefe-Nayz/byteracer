@@ -354,9 +354,7 @@ export default function SensorData() {
           </div>
           <div className="mb-3">
             <ImuVisualizer
-              roll={sensorData.imu?.angles?.roll ?? 0}
-              pitch={sensorData.imu?.angles?.pitch ?? 0}
-              yaw={sensorData.imu?.angles?.yaw ?? 0}
+              quaternion={sensorData.imu?.quaternion}
               available={!!sensorData.imu?.available}
             />
           </div>

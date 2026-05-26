@@ -125,6 +125,7 @@ export interface SensorData {
     gyro: { x: number; y: number; z: number };
     mag: { x: number; y: number; z: number };
     angles: { roll: number; pitch: number; yaw: number };
+    quaternion?: { w: number; x: number; y: number; z: number };
     heading: number;
     magHeading: number;
     headingReference: number;
