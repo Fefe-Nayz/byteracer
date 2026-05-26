@@ -14,7 +14,9 @@ import {
   ShieldAlert,
   Cpu,
   MemoryStick,
-  Thermometer
+  Thermometer,
+  Compass,
+  Gauge
 } from "lucide-react";
 
 export default function SensorData() {
@@ -171,6 +173,11 @@ export default function SensorData() {
     if (temperature >= 65) return "text-yellow-500";
     return "text-green-500";
   };
+
+  const formatImuValue = (value: number | null | undefined, digits = 1) => {
+    if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
+    return value.toFixed(digits);
+  };
   
   // Helper to format emergency state message
   const formatEmergencyMessage = (state: string | null) => {
@@ -319,6 +326,57 @@ export default function SensorData() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* IMU data */}
+        <div className={`p-3 rounded-md ${
+          sensorData.imu?.available
+            ? 'bg-cyan-50 dark:bg-cyan-950/30'
+            : 'bg-muted'
+        }`}>
+          <div className="flex items-center mb-2">
+            <Compass className={`h-4 w-4 mr-2 ${
+              sensorData.imu?.available ? 'text-cyan-600 dark:text-cyan-300' : ''
+            }`} />
+            <span className="text-sm font-medium">Inertial Sensor:</span>
+            <span className={`ml-auto text-xs font-medium ${
+              sensorData.imu?.available ? 'text-green-600 dark:text-green-400' : 'text-yellow-600 dark:text-yellow-400'
+            }`}>
+              {sensorData.imu?.available ? "Ready" : sensorData.imu?.enabled ? "Unavailable" : "Disabled"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div>
+              <div className="text-muted-foreground">Roll</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.angles?.roll)}°</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Pitch</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.angles?.pitch)}°</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Yaw</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.angles?.yaw)}°</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Heading Error</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.headingError)}°</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Gyro Z</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.gyro?.z)} °/s</div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">IMU Temp</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.temperature)}°C</div>
+            </div>
+          </div>
+          {sensorData.imu?.error && (
+            <div className="mt-2 flex items-center text-xs text-yellow-700 dark:text-yellow-300">
+              <Gauge className="h-3 w-3 mr-1" />
+              <span className="truncate">{sensorData.imu.error}</span>
+            </div>
+          )}
         </div>
         
         {/* Safety status */}

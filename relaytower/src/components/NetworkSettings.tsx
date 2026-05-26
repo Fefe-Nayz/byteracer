@@ -298,7 +298,7 @@ export default function NetworkSettings() {
         {networkStatus.ap_mode_active ? (
           <div className="flex items-center space-x-2">
             <Globe className="h-4 w-4 text-primary" />
-            <span>Access Point Mode: {networkStatus.ap_ssid || apName || "ByteRacer_AP"}</span>
+            <span>Access Point Mode: {networkStatus.ap_ssid || apName || "configured access point"}</span>
           </div>
         ) : networkStatus.current_connection ? (
           <div className="flex items-center space-x-2">

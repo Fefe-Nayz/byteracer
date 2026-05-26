@@ -76,6 +76,7 @@ import ultralytics
 import ncnn
 import piper
 import supertonic
+import smbus2
 from importlib.metadata import version
 
 expected_custom = {
@@ -98,6 +99,7 @@ print(f"ultralytics={ultralytics.__version__}")
 print(f"ncnn={getattr(ncnn, '__version__', 'unknown')}")
 print("piper=OK")
 print(f"supertonic={version('supertonic')}")
+print(f"smbus2={version('smbus2')}")
 for package, origin in resolved.items():
     print(f"{package}={origin}")
 PY

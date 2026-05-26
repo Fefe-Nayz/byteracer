@@ -32,6 +32,7 @@ import {
   Battery,
   Play,
   Square,
+  Compass,
 } from "lucide-react";
 
 export default function RobotSettings() {
@@ -151,6 +152,14 @@ export default function RobotSettings() {
   )
     ? ttsVoice
     : "auto";
+  const imuSettings = localSettings.imu || {
+    enabled: true,
+    bus: 1,
+    i2c_address: "0x68",
+    sample_rate_hz: 50,
+    calibration_samples: 120,
+    gyro_deadband_dps: 0.35,
+  };
 
   // Update a specific setting
   const updateSetting = (
@@ -165,6 +174,9 @@ export default function RobotSettings() {
       const updated = JSON.parse(JSON.stringify(prev));
 
       // Update the specific setting
+      if (!updated[category]) {
+        updated[category] = {};
+      }
       updated[category][key] = value;
 
       console.log("Updated settings:", updated);
@@ -418,6 +430,164 @@ export default function RobotSettings() {
                 <span>Safe (5%)</span>
                 <span>Default (15%)</span>
                 <span>Strong (30%)</span>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Compass className="h-4 w-4" />
+                  <span className="text-sm font-medium">Inertial Sensor</span>
+                </div>
+                <Switch
+                  checked={imuSettings.enabled}
+                  onCheckedChange={(checked) =>
+                    updateSetting("imu", "enabled", checked)
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <div className="text-xs">I2C Address</div>
+                  <Input
+                    value={imuSettings.i2c_address || "0x68"}
+                    disabled={!imuSettings.enabled}
+                    onChange={(event) =>
+                      updateSetting("imu", "i2c_address", event.target.value)
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="text-xs">I2C Bus</div>
+                  <Input
+                    type="number"
+                    value={imuSettings.bus ?? 1}
+                    disabled={!imuSettings.enabled}
+                    onChange={(event) =>
+                      updateSetting("imu", "bus", Number(event.target.value))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Sample Rate</span>
+                  <span>{imuSettings.sample_rate_hz || 50} Hz</span>
+                </div>
+                <Slider
+                  value={[imuSettings.sample_rate_hz || 50]}
+                  min={10}
+                  max={100}
+                  step={5}
+                  disabled={!imuSettings.enabled}
+                  onValueChange={(value) =>
+                    updateSetting("imu", "sample_rate_hz", value[0])
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-sm">Inertial Circuit Mode</div>
+                  <div className="text-xs text-muted-foreground">
+                    Uses yaw feedback for straight driving and 90° turns.
+                  </div>
+                </div>
+                <Switch
+                  checked={localSettings.ai.circuit_use_imu || false}
+                  disabled={!imuSettings.enabled}
+                  onCheckedChange={(checked) =>
+                    updateSetting("ai", "circuit_use_imu", checked)
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Heading Gain</span>
+                  <span>{(localSettings.ai.imu_heading_kp ?? 0.8).toFixed(2)}</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.imu_heading_kp ?? 0.8]}
+                  min={-2}
+                  max={2}
+                  step={0.05}
+                  disabled={!localSettings.ai.circuit_use_imu}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "imu_heading_kp", value[0])
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Max Heading Correction</span>
+                  <span>{(((localSettings.ai.imu_max_correction ?? 0.05) * 100)).toFixed(1)}%</span>
+                </div>
+                <Slider
+                  value={[(localSettings.ai.imu_max_correction ?? 0.05) * 100]}
+                  min={1}
+                  max={20}
+                  step={0.5}
+                  disabled={!localSettings.ai.circuit_use_imu}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "imu_max_correction", value[0] / 100)
+                  }
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span>Turn Target</span>
+                    <span>{localSettings.ai.imu_turn_target_deg ?? 90}°</span>
+                  </div>
+                  <Slider
+                    value={[localSettings.ai.imu_turn_target_deg ?? 90]}
+                    min={45}
+                    max={135}
+                    step={1}
+                    disabled={!localSettings.ai.circuit_use_imu}
+                    onValueChange={(value) =>
+                      updateSetting("ai", "imu_turn_target_deg", value[0])
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span>Tolerance</span>
+                    <span>{localSettings.ai.imu_turn_tolerance_deg ?? 3}°</span>
+                  </div>
+                  <Slider
+                    value={[localSettings.ai.imu_turn_tolerance_deg ?? 3]}
+                    min={1}
+                    max={10}
+                    step={0.5}
+                    disabled={!localSettings.ai.circuit_use_imu}
+                    onValueChange={(value) =>
+                      updateSetting("ai", "imu_turn_tolerance_deg", value[0])
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Turn Timeout</span>
+                  <span>{(localSettings.ai.imu_turn_timeout ?? 4).toFixed(1)}s</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.imu_turn_timeout ?? 4]}
+                  min={1}
+                  max={8}
+                  step={0.1}
+                  disabled={!localSettings.ai.circuit_use_imu}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "imu_turn_timeout", value[0])
+                  }
+                />
               </div>
             </div>
 

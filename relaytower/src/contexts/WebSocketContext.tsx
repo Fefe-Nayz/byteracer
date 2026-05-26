@@ -113,6 +113,22 @@ export interface SensorData {
   ramUsage: number;
   cpuUsage: number;
   cpuTemperature: number | null;
+  imu?: {
+    enabled: boolean;
+    available: boolean;
+    calibrated: boolean;
+    bus: number;
+    address: string;
+    accel: { x: number; y: number; z: number };
+    gyro: { x: number; y: number; z: number };
+    angles: { roll: number; pitch: number; yaw: number };
+    heading: number;
+    headingReference: number;
+    headingError: number;
+    temperature: number;
+    lastUpdated: number | null;
+    error?: string | null;
+  };
 }
 
 // Define camera status interface
@@ -211,6 +227,20 @@ export interface RobotSettings {
     face_tracking_max_speed: number;
     speed_dead_zone: number;
     turn_factor: number;
+    circuit_use_imu: boolean;
+    imu_heading_kp: number;
+    imu_max_correction: number;
+    imu_turn_target_deg: number;
+    imu_turn_tolerance_deg: number;
+    imu_turn_timeout: number;
+  };
+  imu: {
+    enabled: boolean;
+    bus: number;
+    i2c_address: string;
+    sample_rate_hz: number;
+    calibration_samples: number;
+    gyro_deadband_dps: number;
   };
   led: {
     enabled: boolean;

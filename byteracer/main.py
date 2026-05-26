@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import threading
 import psutil
+import signal
 import sys
 from pathlib import Path
 import logging
@@ -44,10 +45,18 @@ from modules.gpt_manager import GPTManager
 from modules.network_manager import NetworkManager
 from modules.aicamera_manager import AICameraCameraManager
 from modules.led_manager import LEDManager
+from modules.imu_manager import IMUManager
 
 # Define project directory
 PROJECT_DIR = Path(__file__).parent.parent  # Get ByteRacer root directory
 SERVER_HOST = "127.0.0.1:3001"  # Default WebSocket server address
+
+# Marker dropped by reboot_robot.sh / shutdown_robot.sh. It lets the controller
+# announce the right action ("rebooting"/"shutting down") during its graceful
+# stop, which is the last moment before systemd actually reboots/powers off.
+POWER_ACTION_MARKER = Path(
+    os.environ.get("BYTERACER_LOG_DIR", "/tmp/byteracer/logs")
+) / "pending_power_action"
 
 def patch_getlogin_for_service_context():
     """Make SunFounder libraries safe when launched by systemd without a TTY."""
@@ -93,6 +102,7 @@ class ByteRacer:
         self.sound_manager = SoundManager()  # Initialize sound manager first
         self.tts_manager = TTSManager(sound_manager=self.sound_manager)  # Pass sound manager to TTS manager
         self.sensor_manager = SensorManager(self.px, self.handle_emergency, self.led_manager)
+        self.imu_manager = IMUManager(config_manager=self.config_manager)
         
         # Initialize camera with config settings directly
         self.camera_manager = CameraManager(
@@ -103,9 +113,9 @@ class ByteRacer:
             camera_size=camera_size
         )
 
-        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager, self.led_manager)
+        self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager, self.led_manager, self.imu_manager)
         self.network_manager = NetworkManager()
-        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager, self.led_manager)
+        self.gpt_manager = GPTManager(self.px, self.camera_manager, self.tts_manager, self.sound_manager, self.sensor_manager, self.config_manager, self.aicamera_manager, self.led_manager, self.imu_manager)
         
         # Initialize audio manager for microphone streaming
         from modules.audio_manager import AudioManager
@@ -133,6 +143,7 @@ class ByteRacer:
         # Start managers
         await self.config_manager.start()
         await self.tts_manager.start()
+        await self.imu_manager.start()
         await self.sensor_manager.start()
         await self.camera_manager.start(self.handle_camera_status)
         await self.log_manager.start()
@@ -180,12 +191,23 @@ class ByteRacer:
         self.px.set_cam_pan_angle(0)
         self.px.set_cam_tilt_angle(0)
         
-        # Announce shutdown
-        await self.tts_manager.say_key("robot.controller_stopping", priority=2, blocking=True)
-        
+        # Announce shutdown. When a reboot/power-off was requested, the machine
+        # only actually restarts/powers off minutes later, once systemd has
+        # finished stopping every service. This graceful close is the last moment
+        # we control the speaker, so make a final, full-volume announcement of the
+        # real action so nobody is left waiting in front of a still-on robot.
+        power_action = self._read_pending_power_action()
+        if power_action == "reboot":
+            await self.tts_manager.say_key("power.rebooting_now", priority=2, blocking=True, force_volume=100)
+        elif power_action == "shutdown":
+            await self.tts_manager.say_key("power.shutting_down_now", priority=2, blocking=True, force_volume=100)
+        else:
+            await self.tts_manager.say_key("robot.controller_stopping", priority=2, blocking=True)
+
         # Stop managers in reverse order
         await self.log_manager.stop()
         await self.camera_manager.stop()
+        await self.imu_manager.stop()
         await self.sensor_manager.stop()
         await self.sound_manager.shutdown()
         await self.tts_manager.stop()
@@ -193,6 +215,27 @@ class ByteRacer:
         await self.audio_manager.stop()
         
         logging.info("ByteRacer stopped")
+
+    def _read_pending_power_action(self):
+        """Return and clear the pending power action recorded by the admin scripts.
+
+        reboot_robot.sh / shutdown_robot.sh write a marker file before asking
+        systemd to reboot or power off. Reading it during graceful shutdown lets
+        the final announcement name the real action. Returns "reboot",
+        "shutdown" or None.
+        """
+        try:
+            if not POWER_ACTION_MARKER.exists():
+                return None
+            action = POWER_ACTION_MARKER.read_text(encoding="utf-8").strip().lower()
+            try:
+                POWER_ACTION_MARKER.unlink()
+            except OSError:
+                pass
+            return action or None
+        except Exception as e:
+            logging.warning("Could not read pending power action marker: %s", e)
+            return None
 
     def stop_robot_motion(self, reason=""):
         """Force the drive train into a neutral state."""
@@ -328,6 +371,27 @@ class ByteRacer:
             
         if "turn_factor" in settings["ai"]:
             self.aicamera_manager.set_turn_factor(settings["ai"]["turn_factor"])
+
+        if "imu" in settings:
+            await self.imu_manager.configure(settings["imu"])
+
+        if "circuit_use_imu" in settings["ai"]:
+            self.aicamera_manager.set_circuit_imu_enabled(settings["ai"]["circuit_use_imu"])
+
+        if "imu_heading_kp" in settings["ai"]:
+            self.aicamera_manager.set_imu_heading_kp(settings["ai"]["imu_heading_kp"])
+
+        if "imu_max_correction" in settings["ai"]:
+            self.aicamera_manager.set_imu_max_correction(settings["ai"]["imu_max_correction"])
+
+        if "imu_turn_target_deg" in settings["ai"]:
+            self.aicamera_manager.set_imu_turn_target_deg(settings["ai"]["imu_turn_target_deg"])
+
+        if "imu_turn_tolerance_deg" in settings["ai"]:
+            self.aicamera_manager.set_imu_turn_tolerance_deg(settings["ai"]["imu_turn_tolerance_deg"])
+
+        if "imu_turn_timeout" in settings["ai"]:
+            self.aicamera_manager.set_imu_turn_timeout(settings["ai"]["imu_turn_timeout"])
         
         # Apply sensor manager emergency settings
         if "emergency_cooldown" in settings["safety"]:
@@ -360,6 +424,7 @@ class ByteRacer:
         if modes.get("circuit_mode_enabled"):
             self.sensor_manager.set_circuit_mode(True)
             self.aicamera_manager.set_circuit_camera_pose()
+            self.aicamera_manager.prepare_imu_circuit_mode()
             self.aicamera_manager.start_color_control()
             self.aicamera_manager.start_traffic_sign_detection()
         else:
@@ -429,17 +494,18 @@ class ByteRacer:
                         previous_mode = current_mode
 
                         if not current_ip:
-                            await self.tts_manager.say_key("network.waiting_ip", priority=1)
+                            await self.tts_manager.say_key("network.waiting_ip", priority=2, force_volume=100)
                             await asyncio.sleep(15)
                             continue
                         
                         # Announce using the localized catalog so the message
                         # follows the configured TTS language.
                         if current_mode == "ap":
-                            ap_name = network_status.get("ap_ssid", "ByteRacer")
+                            ap_name = network_status.get("ap_ssid") or self.network_manager.ap_config.get("ssid", "the robot access point")
                             await self.tts_manager.say_key(
                                 "network.announce_ap",
-                                priority=1,
+                                priority=2,
+                                force_volume=100,
                                 ssid=ap_name,
                                 ip=current_ip,
                                 port=port,
@@ -447,7 +513,8 @@ class ByteRacer:
                         else:
                             await self.tts_manager.say_key(
                                 "network.announce_wifi",
-                                priority=1,
+                                priority=2,
+                                force_volume=100,
                                 ip=current_ip,
                                 port=port,
                             )
@@ -772,7 +839,7 @@ class ByteRacer:
                     # After network update, send updated network list
                     if result["success"]:
                         status = await self.network_manager.get_connection_status()
-                        networks = [] if status.get("ap_mode_active") else await self.network_manager.scan_wifi_networks()
+                        networks = await self.network_manager.scan_wifi_networks()
                         await self.send_network_list(networks)
             
             elif data["name"] == "reset_settings":
@@ -1029,7 +1096,7 @@ class ByteRacer:
                         "ap_mode_active": connection_status["ap_mode_active"],
                         "current_ip": connection_status.get("reachable_ip") or "Unknown",
                         "current_connection": current_connection,
-                        "ap_ssid": connection_status.get("ap_ssid", "ByteRacer_AP"),
+                        "ap_ssid": connection_status.get("ap_ssid") or self.network_manager.ap_config.get("ssid", "configured access point"),
                         "internet_connected": connection_status.get("internet_connected", False),
                         "wifi_interface": connection_status.get("wifi_interface", self.network_manager.wifi_interface)
                     }
@@ -1227,6 +1294,7 @@ class ByteRacer:
                 if modes["circuit_mode_enabled"]:
                     self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
                     self.aicamera_manager.set_circuit_camera_pose()
+                    self.aicamera_manager.prepare_imu_circuit_mode()
                     self.aicamera_manager.start_color_control()
                     self.aicamera_manager.start_traffic_sign_detection()
                 else:   
@@ -1409,6 +1477,21 @@ class ByteRacer:
                 logging.info("Reloaded GPT manager API settings")
                 await self.send_ai_models()
 
+        if "imu" in settings:
+            imu = settings["imu"]
+            allowed_imu_keys = {
+                "enabled",
+                "bus",
+                "i2c_address",
+                "sample_rate_hz",
+                "calibration_samples",
+                "gyro_deadband_dps",
+            }
+            for key, value in imu.items():
+                if key in allowed_imu_keys:
+                    self.config_manager.set(f"imu.{key}", value)
+            await self.imu_manager.configure(self.config_manager.get("imu") or {})
+
         if "ai" in settings:
             ai = settings["ai"]
             if "speak_pause_threshold" in ai:
@@ -1479,6 +1562,30 @@ class ByteRacer:
             if "turn_factor" in ai:
                 self.config_manager.set("ai.turn_factor", ai["turn_factor"])
                 self.aicamera_manager.set_turn_factor(ai["turn_factor"])
+
+            if "circuit_use_imu" in ai:
+                self.config_manager.set("ai.circuit_use_imu", ai["circuit_use_imu"])
+                self.aicamera_manager.set_circuit_imu_enabled(ai["circuit_use_imu"])
+
+            if "imu_heading_kp" in ai:
+                self.config_manager.set("ai.imu_heading_kp", ai["imu_heading_kp"])
+                self.aicamera_manager.set_imu_heading_kp(ai["imu_heading_kp"])
+
+            if "imu_max_correction" in ai:
+                self.config_manager.set("ai.imu_max_correction", ai["imu_max_correction"])
+                self.aicamera_manager.set_imu_max_correction(ai["imu_max_correction"])
+
+            if "imu_turn_target_deg" in ai:
+                self.config_manager.set("ai.imu_turn_target_deg", ai["imu_turn_target_deg"])
+                self.aicamera_manager.set_imu_turn_target_deg(ai["imu_turn_target_deg"])
+
+            if "imu_turn_tolerance_deg" in ai:
+                self.config_manager.set("ai.imu_turn_tolerance_deg", ai["imu_turn_tolerance_deg"])
+                self.aicamera_manager.set_imu_turn_tolerance_deg(ai["imu_turn_tolerance_deg"])
+
+            if "imu_turn_timeout" in ai:
+                self.config_manager.set("ai.imu_turn_timeout", ai["imu_turn_timeout"])
+                self.aicamera_manager.set_imu_turn_timeout(ai["imu_turn_timeout"])
 
         if "led" in settings:
             led = settings["led"]
@@ -1646,7 +1753,6 @@ class ByteRacer:
         try:
             if command == "restart_robot":
                 # Restart the entire system
-                await self.tts_manager.say_key("admin.reboot", priority=1, blocking=True)
                 success = self.run_admin_script("reboot_robot.sh")
                 result = {
                     "success": success,
@@ -1655,7 +1761,6 @@ class ByteRacer:
                 
             elif command == "stop_robot":
                 # Shutdown the system
-                await self.tts_manager.say_key("admin.shutdown", priority=1, blocking=True)
                 success = self.run_admin_script("shutdown_robot.sh")
                 result = {
                     "success": success,
@@ -1820,7 +1925,8 @@ class ByteRacer:
                     "acceleration": sensor_data["acceleration"],  # Add acceleration value
                     "cpuUsage": cpu_usage,  # Add CPU usage
                     "cpuTemperature": cpu_temperature,
-                    "ramUsage": ram_usage   # Add RAM usage
+                    "ramUsage": ram_usage,   # Add RAM usage
+                    "imu": self.imu_manager.get_data()
                 }
                 
                 await self.websocket.send(json.dumps({
@@ -1973,11 +2079,34 @@ async def main():
                 asyncio.create_task(robot.periodic_tasks())
                 
         periodic_task.add_done_callback(handle_task_exception)
-        
-        # Wait for keyboard interrupt
+
+        # Trigger a graceful shutdown on SIGTERM/SIGINT. systemd sends SIGTERM
+        # when it stops byteracer-python during a reboot/power-off (and on a
+        # plain service restart). Without a handler the process is killed
+        # outright and robot.stop() never runs, so the final spoken announcement
+        # and the clean motor/camera teardown are skipped entirely.
+        loop = asyncio.get_running_loop()
+        shutdown_event = asyncio.Event()
+
+        def _request_shutdown(signame):
+            logging.info("Received %s, requesting graceful shutdown", signame)
+            shutdown_event.set()
+
+        for signame in ("SIGTERM", "SIGINT"):
+            sig = getattr(signal, signame, None)
+            if sig is None:
+                continue
+            try:
+                loop.add_signal_handler(sig, _request_shutdown, signame)
+            except (NotImplementedError, RuntimeError):
+                # add_signal_handler is unavailable on some platforms (e.g.
+                # Windows); fall back to the KeyboardInterrupt path below.
+                pass
+
+        # Wait for a shutdown signal (or keyboard interrupt where signals aren't wired up)
         try:
-            while True:
-                await asyncio.sleep(1)
+            await shutdown_event.wait()
+            logging.info("Shutdown requested, shutting down")
         except (KeyboardInterrupt, asyncio.CancelledError):
             logging.info("Keyboard interrupt received, shutting down")
         finally:

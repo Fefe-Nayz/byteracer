@@ -37,7 +37,7 @@ function GamepadPage() {
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-2xl font-bold">
           <img src="/icon.png" alt="Logo" className="h-8 inline-block mr-2" />
-          ByteRacer Control Panel</h1>
+          Robot Control Panel</h1>
         <ThemeToggle />
       </div>
 

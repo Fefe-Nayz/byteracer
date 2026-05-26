@@ -143,61 +143,87 @@ class NetworkManager:
                     return handle.read()
         return ""
 
-    async def scan_wifi_networks(self) -> List[str]:
-        """
-        Scans for nearby WiFi networks using 'iw' or 'nmcli' and returns a list of detected SSIDs.
-        
-        Returns:
-            List of unique SSID names
-        """
+    @staticmethod
+    def _parse_nmcli_ssids(output: str) -> List[str]:
+        ssids = []
+        for line in output.splitlines():
+            ssid = line.strip()
+            if ssid and ssid not in ssids and not ssid.startswith('\x00'):
+                ssids.append(ssid)
+        return ssids
+
+    @staticmethod
+    def _parse_iw_ssids(output: str) -> List[str]:
+        ssids = []
+        for line in output.splitlines():
+            if "SSID:" in line:
+                ssid = line.split("SSID:", 1)[1].strip()
+                if ssid and ssid not in ssids and not ssid.startswith('\x00'):
+                    ssids.append(ssid)
+        return ssids
+
+    def _scan_wifi_with_nmcli(self) -> List[str]:
+        returncode, stdout, stderr = self._run_command(
+            ["nmcli", "-t", "-f", "SSID", "device", "wifi", "list", "ifname", self.wifi_interface, "--rescan", "yes"],
+            timeout=20,
+        )
+        if returncode != 0:
+            self.logger.warning(f"nmcli WiFi scan failed: {stderr}")
+            return []
+
+        ssids = self._parse_nmcli_ssids(stdout)
+        self.logger.info(f"Found {len(ssids)} WiFi networks using nmcli")
+        return ssids
+
+    def _scan_wifi_with_iw(self, force_ap_scan: bool = False) -> List[str]:
+        command = ["iw", "dev", self.wifi_interface, "scan"]
+        if force_ap_scan:
+            command.append("ap-force")
+
+        attempts = [command]
+        if hasattr(os, "geteuid") and os.geteuid() != 0:
+            attempts.append(["sudo", "-n", *command])
+
+        for attempt in attempts:
+            returncode, stdout, stderr = self._run_command(attempt, timeout=25)
+            if returncode == 0:
+                ssids = self._parse_iw_ssids(stdout)
+                self.logger.info(f"Found {len(ssids)} WiFi networks using iw")
+                return ssids
+            self.logger.warning(f"iw WiFi scan failed ({' '.join(attempt)}): {stderr}")
+
+        return []
+
+    def _scan_wifi_networks_sync(self) -> List[str]:
         try:
             self._check_ap_mode()
-            if self._ap_mode_active:
-                self.logger.info("Skipping WiFi scan while AP mode is active")
-                return []
-
-            # First ensure WiFi is powered on
             self._ensure_wifi_powered()
-            
-            # Try using nmcli first (preferred method with NetworkManager)
-            returncode, stdout, stderr = self._run_command(
-                ["nmcli", "-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "yes"]
-            )
-            
-            if returncode == 0:
-                # Parse nmcli output for SSIDs
-                ssids = []
-                for line in stdout.splitlines():
-                    ssid = line.strip()
-                    if ssid and ssid not in ssids and not ssid.startswith('\x00'):
-                        ssids.append(ssid)
-                
-                self.logger.info(f"Found {len(ssids)} WiFi networks using nmcli")
-                return ssids
-            else:
-                # Fallback to iw scan if nmcli fails
-                self.logger.warning("nmcli scan failed, falling back to iw scan")
-                returncode, stdout, stderr = self._run_command(
-                    ["iw", "dev", self.wifi_interface, "scan", "ap-force"],
-                    timeout=20  # iw scan can take longer
-                )
-                
-                if returncode == 0:
-                    ssids = []
-                    for line in stdout.splitlines():
-                        if "SSID:" in line:
-                            ssid = line.split("SSID:")[1].strip()
-                            if ssid and ssid not in ssids and not ssid.startswith('\x00'):
-                                ssids.append(ssid)
-                    
-                    self.logger.info(f"Found {len(ssids)} WiFi networks using iw")
+
+            if self._ap_mode_active:
+                self.logger.info("Scanning WiFi networks while AP mode is active")
+                ssids = self._scan_wifi_with_iw(force_ap_scan=True)
+                if ssids:
                     return ssids
-                else:
-                    self.logger.error(f"WiFi scan failed: {stderr}")
-                    return []
+                return self._scan_wifi_with_nmcli()
+
+            ssids = self._scan_wifi_with_nmcli()
+            if ssids:
+                return ssids
+
+            self.logger.warning("nmcli scan found no networks, falling back to iw scan")
+            return self._scan_wifi_with_iw(force_ap_scan=False)
         except Exception as e:
             self.logger.error(f"Error scanning for WiFi networks: {str(e)}")
             return []
+
+    async def scan_wifi_networks(self) -> List[str]:
+        """
+        Scans for nearby WiFi networks using 'iw' or 'nmcli' and returns a list of detected SSIDs.
+
+        Returns:
+            List of unique SSID names
+        """
+        return await asyncio.to_thread(self._scan_wifi_networks_sync)
 
     async def connect_to_wifi(self, ssid: str, password: str) -> Dict[str, Any]:
         """

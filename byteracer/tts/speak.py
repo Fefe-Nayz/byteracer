@@ -59,7 +59,7 @@ def main():
             print(f"Warning: Could not load config settings: {e}", file=sys.stderr)
     
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Text-to-Speech for ByteRacer')
+    parser = argparse.ArgumentParser(description='Text-to-speech for robot system messages')
     parser.add_argument('text', help='Text to speak', nargs='?')
     parser.add_argument('-f', '--file', help='File to read text from')
     parser.add_argument('-k', '--key', help='Localized message key to speak')

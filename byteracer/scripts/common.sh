@@ -7,6 +7,7 @@
 export BYTERACER_PATH="${BYTERACER_PATH:-/home/pi/ByteRacer}"
 export BYTERACER_USER="${BYTERACER_USER:-pi}"
 export BYTERACER_LOG_DIR="${BYTERACER_LOG_DIR:-/tmp/byteracer/logs}"
+export BYTERACER_POWER_MARKER="${BYTERACER_POWER_MARKER:-${BYTERACER_LOG_DIR}/pending_power_action}"
 export BYTERACER_VENV="${BYTERACER_VENV:-${BYTERACER_PATH}/.venv}"
 export BYTERACER_PYTHON="${BYTERACER_PYTHON:-${BYTERACER_VENV}/bin/python}"
 
@@ -70,6 +71,18 @@ speak() {
     timeout 20s "${python_bin}" "${TTS_SCRIPT}" "${text}" >/dev/null 2>&1 || \
         log "TTS failed or timed out: ${text}"
     return 0
+}
+
+set_power_action() {
+    # Record the pending power action (reboot/shutdown) so the Python controller
+    # can make a final spoken announcement when systemd stops it gracefully. The
+    # real reboot/power-off only happens minutes later, once every service has
+    # stopped, so this marker lets the robot warn people right before it goes.
+    local action="$1"
+    mkdir -p "$(dirname "${BYTERACER_POWER_MARKER}")" 2>/dev/null || true
+    if ! printf '%s\n' "${action}" > "${BYTERACER_POWER_MARKER}" 2>/dev/null; then
+        log "Could not write power action marker: ${BYTERACER_POWER_MARKER}"
+    fi
 }
 
 speak_key() {

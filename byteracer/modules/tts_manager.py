@@ -111,7 +111,7 @@ class TTSManager:
         # Stop any currently playing TTS
         await self.stop_speech()
         logger.info("TTS processing loop stopped")
-    async def say(self, text, priority=0, blocking=False, lang=None):
+    async def say(self, text, priority=0, blocking=False, lang=None, force_volume=None):
         """
         Add a phrase to the TTS queue.
         
@@ -120,6 +120,7 @@ class TTSManager:
             priority (int): Priority level (higher means more important)
             blocking (bool): If True, wait until speech is completed (not recommended)
             lang (str): Language for the TTS (overrides instance language)
+            force_volume (int | None): If set, bypass configured TTS volumes.
         """
 
         logger.info(f"Request to say: '{text}' in lang '{lang}' with priority {priority}")
@@ -131,7 +132,7 @@ class TTSManager:
             return
 
         # Put in queue with priority
-        await self._queue.put((priority, text, lang, False))
+        await self._queue.put((priority, text, lang, False, force_volume))
         logger.debug(f"Added to TTS queue: '{text}' (priority {priority})")
         
         if blocking:
@@ -144,7 +145,7 @@ class TTSManager:
             while self.is_speaking():
                 await asyncio.sleep(0.1)
 
-    async def say_key(self, key, priority=1, blocking=False, lang=None, **params):
+    async def say_key(self, key, priority=1, blocking=False, lang=None, force_volume=None, **params):
         """Speak a localized system message by key."""
         locale = lang or self.lang
         text = translate(key, locale, **params)
@@ -153,7 +154,7 @@ class TTSManager:
             logger.debug("TTS disabled, skipping key: %s", key)
             return
 
-        await self._queue.put((priority, text, locale, cache_static))
+        await self._queue.put((priority, text, locale, cache_static, force_volume))
         logger.debug(
             "Added localized TTS key to queue: %s (priority %s, cached=%s)",
             key,
@@ -181,8 +182,10 @@ class TTSManager:
                 if len(item) == 3:
                     priority, text, lang = item
                     cache_static = False
+                    force_volume = None
                 else:
-                    priority, text, lang, cache_static = item
+                    priority, text, lang, cache_static, *rest = item
+                    force_volume = rest[0] if rest else None
                 
                 with self._lock:
                     self._speaking = True
@@ -190,7 +193,7 @@ class TTSManager:
                 
                 # Generate the speech in a separate thread to avoid blocking
                 # Important: We DON'T wait for the playback to finish in this thread
-                await asyncio.to_thread(self._generate_and_play_speech, text, lang, cache_static)
+                await asyncio.to_thread(self._generate_and_play_speech, text, lang, cache_static, force_volume)
                 
                 # Mark as done IMMEDIATELY - don't wait for audio to finish
                 queue.task_done()
@@ -248,7 +251,7 @@ class TTSManager:
         # Clean up temporary files
         await asyncio.to_thread(self._cleanup_temp_files)
         
-    def _generate_and_play_speech(self, text, lang=None, cache_static=False):
+    def _generate_and_play_speech(self, text, lang=None, cache_static=False, force_volume=None):
         """Generate speech file and start playback - but don't wait for it to finish"""
         if lang is None:
             lang = self.lang
@@ -272,7 +275,10 @@ class TTSManager:
             else:
                 priority_volume = self.user_tts_volume
 
-            effective_volume = (self.volume / 100.0) * (priority_volume / 100.0)
+            if force_volume is not None:
+                effective_volume = max(0.0, min(1.0, float(force_volume) / 100.0))
+            else:
+                effective_volume = (self.volume / 100.0) * (priority_volume / 100.0)
 
             # Generate the TTS wave file
             if self.engine == "supertonic":

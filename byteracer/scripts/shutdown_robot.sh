@@ -12,13 +12,17 @@ LOG_FILE="${BYTERACER_LOG_DIR}/shutdown_robot.log"
 setup_logging "${LOG_FILE}"
 
 log "========== SHUTDOWN ROBOT STARTED =========="
-speak_key "admin.shutdown"
+speak_key "admin.shutdown" --volume 100
+
+# Let the controller announce the power-off one last time when systemd stops it,
+# right before the machine actually shuts down (which is minutes after this point).
+set_power_action "shutdown"
 
 # Run the poweroff inline rather than detaching a background child. This script
 # is launched in its own systemd transient unit; a backgrounded grandchild
 # would be killed when the unit's main process exits (KillMode=control-group)
-# before it could trigger the poweroff. A short sleep lets the TTS finish.
-sleep 2
+# before it could trigger the poweroff. speak_key blocks until playback completes,
+# so the poweroff request is sent immediately after the audible warning.
 
 if systemd_available; then
     log "Powering off through systemd"

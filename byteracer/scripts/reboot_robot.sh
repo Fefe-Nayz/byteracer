@@ -12,13 +12,17 @@ LOG_FILE="${BYTERACER_LOG_DIR}/reboot_robot.log"
 setup_logging "${LOG_FILE}"
 
 log "========== REBOOT ROBOT STARTED =========="
-speak_key "admin.reboot"
+speak_key "admin.reboot" --volume 100
+
+# Let the controller announce the reboot one last time when systemd stops it,
+# right before the machine actually restarts (which is minutes after this point).
+set_power_action "reboot"
 
 # Run the reboot inline rather than detaching a background child. This script
 # is launched in its own systemd transient unit; a backgrounded grandchild
 # would be killed when the unit's main process exits (KillMode=control-group)
-# before it could trigger the reboot. A short sleep lets the TTS finish.
-sleep 2
+# before it could trigger the reboot. speak_key blocks until playback completes,
+# so the reboot request is sent immediately after the audible warning.
 
 if systemd_available; then
     log "Rebooting through systemd"

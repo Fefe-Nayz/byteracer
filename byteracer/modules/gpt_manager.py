@@ -73,7 +73,7 @@ class GPTManager:
       - Running custom scripts
     """
     
-    def __init__(self, px, camera_manager, tts_manager, sound_manager, sensor_manager, config_manager, aicamera_manager, led_manager):
+    def __init__(self, px, camera_manager, tts_manager, sound_manager, sensor_manager, config_manager, aicamera_manager, led_manager, imu_manager=None):
         """
         Initialize the GPT manager with references to other system components.
         
@@ -85,6 +85,7 @@ class GPTManager:
             sensor_manager: Sensor manager for accessing robot sensors.
             config_manager: Configuration manager for accessing settings.
             aicamera_manager: AI Camera manager for computer vision features.
+            imu_manager: Optional inertial sensor manager for roll/pitch/yaw data.
         """
         self.px = px
         self.camera_manager = camera_manager
@@ -94,6 +95,7 @@ class GPTManager:
         self.config_manager = config_manager
         self.aicamera_manager = aicamera_manager
         self.led_manager = led_manager
+        self.imu_manager = imu_manager
 
         self.robot_state_enum = RobotState
         self.api_key = ""
@@ -114,6 +116,12 @@ class GPTManager:
         self.is_conversation_active = False
         self.conversation_cancelled = False
         self.pause_threshold = 1.2
+
+    def get_imu_data(self):
+        """Return a snapshot of current IMU readings if the sensor is configured."""
+        if not self.imu_manager:
+            return {"enabled": False, "available": False, "error": "IMU manager not configured"}
+        return self.imu_manager.get_data()
 
     def reload_api_settings(self):
         """
@@ -686,6 +694,7 @@ HARDWARE CAPABILITIES:
 - SENSORS:
   • Front ultrasonic distance sensor (returns cm)
   • Bottom line-following sensors (array of values)
+  • Inertial sensor / IMU (roll, pitch, yaw, gyro, acceleration, heading error)
   • Camera for real-time visual analysis
 - AUDIO:
   • Text-to-speech capability
@@ -717,6 +726,7 @@ AVAILABLE ACTIONS:
    • px.get_line_sensor_value(): Gets line follower sensor values
    • px.get_grayscale_value(): Gets grayscale sensor reading
    • px.reset(): Reset all servos and motors to default positions
+   • gpt_manager.get_imu_data(): Returns current IMU telemetry as a dict
    
    For camera image processing:
    • get_camera_image(): Returns the camera image as raw bytes from camera, it's an async function
@@ -1007,7 +1017,7 @@ def _build_script_with_environment(script_code: str) -> str:
 2. CALL PREDEFINED FUNCTIONS (action_type: "predefined_function"): 
    Sensor Functions:
    • get_distance(): Returns ultrasonic sensor measurement with TTS feedback
-   • get_sensor_data(): Reads all sensors (distance, line, battery)
+   • get_sensor_data(): Reads all sensors (distance, line, battery, IMU)
    
    Audio Functions:
    • play_sound(sound_name: string): Plays a sound effect
@@ -1874,6 +1884,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     if hasattr(self, "sensor_manager"):
                         state_data = self.sensor_manager.get_sensor_data()
                         sensor_data.update(state_data)
+
+                    sensor_data["imu"] = self.get_imu_data()
                     
                     # Output a summary via TTS
                     summary = f"Distance: {sensor_data.get('distance', 'unknown')} cm"
@@ -2344,6 +2356,8 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
                     self.sensor_manager.set_circuit_mode(parameters["mode"] == "circuit")
                     if parameters["mode"] == "circuit":
                         self.sensor_manager.robot_state = RobotState.CIRCUIT_MODE
+                        self.aicamera_manager.set_circuit_camera_pose()
+                        self.aicamera_manager.prepare_imu_circuit_mode()
                         self.aicamera_manager.start_color_control()
                         self.aicamera_manager.start_traffic_sign_detection()
                     else:
@@ -2517,12 +2531,10 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             # SYSTEM FUNCTIONS
             elif function_name == "restart_robot":
                 logger.info("Restart robot requested")
-                await self.tts_manager.say_key("admin.reboot", priority=2, blocking=True)
                 return self.run_admin_script("reboot_robot.sh")
                 
             elif function_name == "shutdown_robot":
                 logger.info("Shutdown robot requested")
-                await self.tts_manager.say_key("admin.shutdown", priority=2, blocking=True)
                 return self.run_admin_script("shutdown_robot.sh")
             
             elif function_name == "restart_all_services":
@@ -2990,6 +3002,7 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
         """
         # Get sensor data about current robot state
         sensor_data = self.sensor_manager.get_sensor_data()
+        imu_data = self.get_imu_data()
         
         # Get current settings
         settings = self.config_manager.get()
@@ -3014,6 +3027,7 @@ Current time: {current_time}
 - Face Following: {"Active" if self.aicamera_manager and self.aicamera_manager.face_follow_active else "Inactive"}
 - Color Control: {"Active" if self.aicamera_manager and self.aicamera_manager.color_control_active else "Inactive"}
 - Traffic Sign Detection: {"Active" if self.aicamera_manager and self.aicamera_manager.traffic_sign_detection_active else "Inactive"}
+- IMU: {"Ready" if imu_data.get('available') else "Unavailable"}; yaw={imu_data.get('angles', {}).get('yaw', 'N/A')}; heading_error={imu_data.get('headingError', 'N/A')}
 
 # Current Settings
 ## Sound Settings
@@ -3042,6 +3056,8 @@ Current time: {current_time}
 - Distance Threshold: {settings.get('ai', {}).get('distance_threshold_cm', 30)} cm
 - Turn Time: {settings.get('ai', {}).get('turn_time', 2.0)} seconds
 - YOLO Confidence Threshold: {settings.get('ai', {}).get('yolo_confidence', 0.5)}
+- Circuit IMU Assistance: {settings.get('ai', {}).get('circuit_use_imu', False)}
+- IMU Turn Target: {settings.get('ai', {}).get('imu_turn_target_deg', 90)} degrees
 
 ## Safety Settings
 - Collision Avoidance: {settings.get('safety', {}).get('collision_avoidance', True)}
@@ -3222,7 +3238,7 @@ Example:
 
 ## update_settings
 Parameters:
-- setting_type: Category of setting ("sound", "camera", "drive", "safety", "ai")
+- setting_type: Category of setting ("sound", "camera", "drive", "safety", "ai", "imu")
 - setting_name: Name of the specific setting to change
 - setting_value: New value for the setting
 
@@ -3231,7 +3247,8 @@ Valid settings by type:
 - camera: vflip, hflip, local_display, web_display, camera_size
 - drive: max_speed, max_turn_angle, acceleration_factor, enhanced_turning, turn_in_place, motor_balance
 - safety: collision_avoidance, edge_detection, auto_stop, collision_threshold, edge_threshold, client_timeout
-- ai: speak_pause_threshold, distance_threshold_cm, turn_time, yolo_confidence
+- ai: speak_pause_threshold, distance_threshold_cm, turn_time, yolo_confidence, circuit_use_imu, imu_heading_kp, imu_max_correction, imu_turn_target_deg, imu_turn_tolerance_deg, imu_turn_timeout
+- imu: enabled, bus, i2c_address, sample_rate_hz, calibration_samples, gyro_deadband_dps
 
 Example:
 ```

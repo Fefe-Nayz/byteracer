@@ -25,7 +25,7 @@ class AICameraCameraManager:
     - Stop sign: Robot stops for 2 seconds then proceeds
     - Right turn sign: Robot turns right after a 2-second delay
     """
-    def __init__(self, px, sensor_manager, camera_manager, tts_manager, config_manager, led_manager):
+    def __init__(self, px, sensor_manager, camera_manager, tts_manager, config_manager, led_manager, imu_manager=None):
         # Robot control/hardware
         self.px = px
         self.sensor_manager = sensor_manager
@@ -33,6 +33,7 @@ class AICameraCameraManager:
         self.tts_manager = tts_manager
         self.config_manager = config_manager
         self.led_manager = led_manager
+        self.imu_manager = imu_manager
 
         logger.info("AI CAMERA INITIALIZED")
 
@@ -105,6 +106,14 @@ class AICameraCameraManager:
         self.stop_sign_wait_time = self.config_manager.get("ai.stop_sign_wait_time") or 2.0  # Default 2 seconds
         self.stop_sign_ignore_time = self.config_manager.get("ai.stop_sign_ignore_time") or 3.0  # Default 3 seconds
         self.traffic_light_ignore_time = self.config_manager.get("ai.traffic_light_ignore_time") or 3.0  # Default 3 seconds
+        self.circuit_use_imu = bool(self.config_manager.get("ai.circuit_use_imu") or False)
+        self.imu_circuit_active = False
+        self.imu_heading_reference_ready = False
+        self.imu_heading_kp = float(self.config_manager.get("ai.imu_heading_kp") or 0.8)
+        self.imu_max_correction = float(self.config_manager.get("ai.imu_max_correction") or 0.05)
+        self.imu_turn_target_deg = float(self.config_manager.get("ai.imu_turn_target_deg") or 90)
+        self.imu_turn_tolerance_deg = float(self.config_manager.get("ai.imu_turn_tolerance_deg") or 3)
+        self.imu_turn_timeout = float(self.config_manager.get("ai.imu_turn_timeout") or 4.0)
         
         # Auto-load YOLO model if available in modules directory
         self.model_path = os.path.join(os.path.dirname(__file__), 'model_ncnn_model')
@@ -191,6 +200,22 @@ class AICameraCameraManager:
         )
         self.px.set_cam_pan_angle(0)
         self.px.set_cam_tilt_angle(int(self.y_angle))
+
+    def prepare_imu_circuit_mode(self):
+        """Capture the current heading before circuit mode starts moving."""
+        self.imu_circuit_active = bool(self.circuit_use_imu)
+        self.imu_heading_reference_ready = False
+        self._should_use_imu_circuit()
+
+    def _should_use_imu_circuit(self):
+        if not (self.circuit_use_imu and self.imu_circuit_active and self.imu_manager):
+            return False
+        if not self.imu_manager.is_ready():
+            return False
+        if not self.imu_heading_reference_ready:
+            self.imu_manager.reset_heading_reference()
+            self.imu_heading_reference_ready = True
+        return True
 
     # ------------------------------------------------------------------
     # Face Following
@@ -700,6 +725,7 @@ class AICameraCameraManager:
         
         # Start circuit mode with the camera raised slightly to see signs.
         self.set_circuit_camera_pose()
+        self.prepare_imu_circuit_mode()
 
         self.led_manager.turn_off()
         
@@ -731,6 +757,8 @@ class AICameraCameraManager:
         logger.info("Stopping YOLO object detection...")
         self.yolo_detection_active = False
         self.yolo_detection_paused = False
+        self.imu_circuit_active = False
+        self.imu_heading_reference_ready = False
         
         if self.yolo_detection_thread and self.yolo_detection_thread.is_alive():
             self.yolo_detection_thread.join(timeout=2.0)
@@ -1463,6 +1491,60 @@ class AICameraCameraManager:
         self.px.set_dir_servo_angle(35)
         return left_speed, right_speed
 
+    def _run_imu_right_turn(self, context="RIGHT TURN", require_yolo_active=False):
+        """Turn until the IMU reports the configured target angle."""
+        if not self._should_use_imu_circuit():
+            return False
+
+        start_yaw = self.imu_manager.get_yaw_deg()
+        target = abs(self.imu_turn_target_deg)
+        tolerance = max(0.5, abs(self.imu_turn_tolerance_deg))
+        deadline = time.monotonic() + max(0.5, self.imu_turn_timeout)
+        reached_target = False
+
+        logger.info(
+            "%s - IMU turn target %.1f° ± %.1f° from yaw %.2f",
+            context,
+            target,
+            tolerance,
+            start_yaw,
+        )
+
+        while time.monotonic() < deadline:
+            if require_yolo_active and not self.yolo_detection_active:
+                logger.info("%s cancelled because circuit mode stopped during IMU turn", context)
+                return False
+
+            delta = self.imu_manager.angle_delta_from(start_yaw)
+            remaining = target - abs(delta)
+            if remaining <= tolerance:
+                reached_target = True
+                break
+
+            # Keep enough PWM to avoid motor stall, then slow near target.
+            speed_scale = max(0.08, min(self.turn_speed, remaining / target * self.turn_speed))
+            self._apply_right_turn_motor_command(speed_scale, context=f"{context} IMU")
+            time.sleep(0.02)
+
+        self.stop_motion()
+        self.imu_manager.reset_heading_reference()
+        self.imu_heading_reference_ready = True
+
+        if reached_target:
+            logger.info(
+                "%s - IMU turn completed at %.2f° delta",
+                context,
+                self.imu_manager.angle_delta_from(start_yaw),
+            )
+            return True
+
+        logger.warning(
+            "%s - IMU turn timed out at %.2f° delta",
+            context,
+            self.imu_manager.angle_delta_from(start_yaw),
+        )
+        return False
+
     def _perform_right_turn_sequence(self, context="RIGHT TURN", resume_after=False, require_yolo_active=False):
         """Run a complete timed right turn with one shared implementation."""
         if not self._right_turn_lock.acquire(blocking=False):
@@ -1488,12 +1570,16 @@ class AICameraCameraManager:
             self.start_turn_signal_blink()
             logger.info(f"{context} - Executing right turn now")
             self.stop_motion(reset_steering=False)
-            self._apply_right_turn_motor_command(context=context)
+            if self._should_use_imu_circuit():
+                if not self._run_imu_right_turn(context=context, require_yolo_active=require_yolo_active):
+                    return False
+            else:
+                self._apply_right_turn_motor_command(context=context)
 
-            logger.info(f"{context} - Holding right turn for {self.right_turn_time} seconds")
-            if not self._sleep_for_turn_duration(self.right_turn_time, require_yolo_active=require_yolo_active):
-                logger.info(f"{context} cancelled because circuit mode stopped during the turn")
-                return False
+                logger.info(f"{context} - Holding right turn for {self.right_turn_time} seconds")
+                if not self._sleep_for_turn_duration(self.right_turn_time, require_yolo_active=require_yolo_active):
+                    logger.info(f"{context} cancelled because circuit mode stopped during the turn")
+                    return False
 
             self.stop_motion()
             self.right_turn_timer = None
@@ -2065,6 +2151,23 @@ class AICameraCameraManager:
             
         # Calculate adjusted speeds with motor balance
         left_speed, right_speed = self.apply_motor_balance(speed)
+
+        if self._should_use_imu_circuit():
+            heading_error = self.imu_manager.get_heading_error_deg()
+            correction = self.clamp_number(
+                (heading_error * self.imu_heading_kp) / 100.0,
+                -abs(self.imu_max_correction),
+                abs(self.imu_max_correction),
+            )
+            left_speed = self.clamp_number(left_speed - correction, 0.0, 1.0)
+            right_speed = self.clamp_number(right_speed + correction, 0.0, 1.0)
+            logger.info(
+                "IMU heading hold - error %.2f°, correction %.3f, left %.3f, right %.3f",
+                heading_error,
+                correction,
+                left_speed,
+                right_speed,
+            )
         
         # Apply speeds to motors
         logger.info(f"Applying motor speeds - Left: {left_speed*100:.1f}%, Right: {right_speed*100:.1f}%")
@@ -2190,6 +2293,51 @@ class AICameraCameraManager:
             logger.warning(f"Invalid turn speed: {speed}. Must be between 0.05 and 0.3")
 
         return self.turn_speed
+
+    def set_circuit_imu_enabled(self, enabled):
+        self.circuit_use_imu = bool(enabled)
+        logger.info("Circuit IMU assistance %s", "enabled" if self.circuit_use_imu else "disabled")
+        if self.circuit_use_imu and self.yolo_detection_active:
+            self.prepare_imu_circuit_mode()
+        elif not self.circuit_use_imu:
+            self.imu_circuit_active = False
+            self.imu_heading_reference_ready = False
+        return self.circuit_use_imu
+
+    def set_imu_heading_kp(self, value):
+        try:
+            self.imu_heading_kp = self.clamp_number(float(value), -3.0, 3.0)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid IMU heading gain: {value}")
+        return self.imu_heading_kp
+
+    def set_imu_max_correction(self, value):
+        try:
+            self.imu_max_correction = self.clamp_number(float(value), 0.0, 0.2)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid IMU max correction: {value}")
+        return self.imu_max_correction
+
+    def set_imu_turn_target_deg(self, value):
+        try:
+            self.imu_turn_target_deg = self.clamp_number(float(value), 30.0, 180.0)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid IMU turn target: {value}")
+        return self.imu_turn_target_deg
+
+    def set_imu_turn_tolerance_deg(self, value):
+        try:
+            self.imu_turn_tolerance_deg = self.clamp_number(float(value), 0.5, 15.0)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid IMU turn tolerance: {value}")
+        return self.imu_turn_tolerance_deg
+
+    def set_imu_turn_timeout(self, value):
+        try:
+            self.imu_turn_timeout = self.clamp_number(float(value), 0.5, 10.0)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid IMU turn timeout: {value}")
+        return self.imu_turn_timeout
 
     def set_circuit_camera_tilt(self, angle):
         """Set the default camera tilt angle used when entering circuit mode."""

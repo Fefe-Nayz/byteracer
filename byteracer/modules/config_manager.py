@@ -110,6 +110,14 @@ class ConfigManager:
                 "openai_api_key": "",
                 "model": "gpt-5.5"
             },
+            "imu": {
+                "enabled": True,
+                "bus": 1,
+                "i2c_address": "0x68",
+                "sample_rate_hz": 50,
+                "calibration_samples": 120,
+                "gyro_deadband_dps": 0.35,
+            },
             "ai": {
                 "speak_pause_threshold": 1.2,
                 "distance_threshold_cm": 30,
@@ -128,6 +136,12 @@ class ConfigManager:
                 "face_tracking_max_speed": 0.1, # Maximum speed for face tracking (1-20%)
                 "speed_dead_zone": 0.5, # Speed dead zone for face tracking (0.0-1.0)
                 "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
+                "circuit_use_imu": False, # Use the inertial sensor for circuit straight/turn control
+                "imu_heading_kp": 0.8, # Heading hold gain for circuit mode
+                "imu_max_correction": 0.05, # Max per-wheel correction while driving straight
+                "imu_turn_target_deg": 90, # Target turn angle for circuit signs
+                "imu_turn_tolerance_deg": 3, # Acceptable turn angle error
+                "imu_turn_timeout": 4.0, # Max seconds allowed for an IMU turn
             },
             "led": {
                 "enabled": True,
@@ -452,6 +466,14 @@ class ConfigManager:
                 "openai_api_key": "",
                 "model": "gpt-5.5"
             },
+            "imu": {
+                "enabled": True,
+                "bus": 1,
+                "i2c_address": "0x68",
+                "sample_rate_hz": 50,
+                "calibration_samples": 120,
+                "gyro_deadband_dps": 0.35,
+            },
             "ai": {
                 "speak_pause_threshold": 1.2,
                 "distance_threshold_cm": 30,
@@ -470,6 +492,12 @@ class ConfigManager:
                 "face_tracking_max_speed": 0.1, # Maximum speed for face tracking (1-20%)
                 "speed_dead_zone": 0.5, # Speed dead zone for face tracking (0.0-1.0)
                 "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
+                "circuit_use_imu": False, # Use the inertial sensor for circuit straight/turn control
+                "imu_heading_kp": 0.8, # Heading hold gain for circuit mode
+                "imu_max_correction": 0.05, # Max per-wheel correction while driving straight
+                "imu_turn_target_deg": 90, # Target turn angle for circuit signs
+                "imu_turn_tolerance_deg": 3, # Acceptable turn angle error
+                "imu_turn_timeout": 4.0, # Max seconds allowed for an IMU turn
             },
             "led": {
                 "enabled": True,
