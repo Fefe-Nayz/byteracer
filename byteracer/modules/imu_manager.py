@@ -448,8 +448,9 @@ class IMUManager:
             self.angles = {"roll": roll, "pitch": pitch, "yaw": yaw}
             # Build the display orientation from the instantaneous accelerometer
             # tilt (not the gyro-fused roll/pitch) so the 3D model tracks the real
-            # pose immediately without the integration overshoot.
-            self.orientation_quat = self._quaternion_from_euler(roll_acc, pitch_acc, yaw)
+            # pose immediately without the integration overshoot. Pitch is negated
+            # so a real nose-up tilt shows as nose-up in the visualizer.
+            self.orientation_quat = self._quaternion_from_euler(roll_acc, -pitch_acc, yaw)
             self.last_update = time.time()
 
     def _compute_mag_heading(self, mag: Dict[str, float], roll_deg: float, pitch_deg: float) -> Optional[float]:
