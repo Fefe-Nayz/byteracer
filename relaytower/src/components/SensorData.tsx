@@ -3,6 +3,7 @@ import { useWebSocket } from "@/contexts/WebSocketContext";
 import { useEffect, useState } from "react";
 import { Card } from "./ui/card";
 import { Progress } from "./ui/progress";
+import ImuVisualizer from "./ImuVisualizer";
 import { 
   RadioTower, 
   MoveHorizontal, 
@@ -344,6 +345,14 @@ export default function SensorData() {
             }`}>
               {sensorData.imu?.available ? "Ready" : sensorData.imu?.enabled ? "Unavailable" : "Disabled"}
             </span>
+          </div>
+          <div className="mb-3">
+            <ImuVisualizer
+              roll={sensorData.imu?.angles?.roll ?? 0}
+              pitch={sensorData.imu?.angles?.pitch ?? 0}
+              yaw={sensorData.imu?.angles?.yaw ?? 0}
+              available={!!sensorData.imu?.available}
+            />
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">
             <div>

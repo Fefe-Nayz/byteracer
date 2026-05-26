@@ -190,7 +190,7 @@ export default function RobotSettings() {
     if (!localSettings) return;
 
     setSaveStatus("saving");
-    updateSettings(localSettings);
+    updateSettings(localSettings, true);
 
     // On settings save, the app will send the updated settings to the robot so we change the status to "saved" after receiving the new settings response
   };

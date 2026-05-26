@@ -348,7 +348,7 @@ interface WebSocketContextValue {
   requestBatteryLevel: () => void;
   requestSettings: () => void;
   requestAiModels: () => void;
-  updateSettings: (settings: Partial<RobotSettings>) => void;
+  updateSettings: (settings: Partial<RobotSettings>, announce?: boolean) => void;
   resetSettings: (section?: string) => void;
   speakText: (text: string, language: string) => void;
   playSound: (sound: string) => void;
@@ -846,12 +846,15 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
 
   // Function to update settings
   const updateSettings = useCallback(
-    (newSettings: Partial<RobotSettings>) => {
+    (newSettings: Partial<RobotSettings>, announce: boolean = false) => {
       if (socket && socket.readyState === WebSocket.OPEN) {
         const settingsData = {
           name: "settings_update",
           data: {
             settings: newSettings,
+            // Only an explicit "Save Settings" action asks the robot to announce
+            // it out loud; live toggles (e.g. mode switches) stay silent.
+            announce,
             timestamp: Date.now(),
           },
           createdAt: Date.now(),

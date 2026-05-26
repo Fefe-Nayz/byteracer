@@ -126,6 +126,17 @@ class ByteRacer:
         self.last_activity_time = time.time()
         self.speaking_ip = False
         self.ip_speaking_task = None
+
+        # WiFi scan state. The scan is slow (radio sweep) and must never run on
+        # the websocket receive path, otherwise drive commands queue up behind it
+        # and the robot stops responding while scanning. We run it in background
+        # tasks, guard against piling up concurrent scans, and briefly cache the
+        # last result so repeated UI requests don't trigger redundant sweeps.
+        self._wifi_scan_task = None
+        self._background_tasks = set()
+        self._wifi_scan_cache = None
+        self._wifi_scan_cache_time = 0.0
+        self._wifi_scan_cache_ttl = 15.0
         
         # Motion tracking
         self.last_speed = 0
@@ -597,6 +608,60 @@ class ByteRacer:
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(30, reconnect_delay * 2)
     
+    def _spawn_background_task(self, coro):
+        """Run a coroutine off the websocket receive path and keep a reference.
+
+        Storing the task prevents it from being garbage-collected mid-flight and
+        lets us log any exception instead of swallowing it silently.
+        """
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+
+        def _done(t):
+            self._background_tasks.discard(t)
+            try:
+                t.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logging.error(f"Background task failed: {e}", exc_info=True)
+
+        task.add_done_callback(_done)
+        return task
+
+    def request_wifi_scan(self, force=False):
+        """Trigger a WiFi scan without blocking the websocket receive loop.
+
+        Returns immediately. The scan runs in a background task and the result is
+        pushed to the client via send_network_list when ready. Cached results are
+        reused within the TTL and only one scan runs at a time.
+        """
+        now = time.time()
+        if (
+            not force
+            and self._wifi_scan_cache is not None
+            and (now - self._wifi_scan_cache_time) < self._wifi_scan_cache_ttl
+        ):
+            logging.info("Serving cached WiFi scan result")
+            self._spawn_background_task(self.send_network_list(self._wifi_scan_cache))
+            return
+
+        if self._wifi_scan_task and not self._wifi_scan_task.done():
+            logging.info("WiFi scan already in progress; skipping duplicate request")
+            return
+
+        self._wifi_scan_task = self._spawn_background_task(self._scan_and_send_networks())
+
+    async def _scan_and_send_networks(self):
+        """Scan for WiFi networks (in a worker thread) and push the list to the client."""
+        try:
+            networks = await self.network_manager.scan_wifi_networks()
+            self._wifi_scan_cache = networks
+            self._wifi_scan_cache_time = time.time()
+            await self.send_network_list(networks)
+        except Exception as e:
+            logging.error(f"WiFi scan failed: {e}", exc_info=True)
+
     async def handle_message(self, message, websocket):
         """Handle messages received from the WebSocket"""
         try:
@@ -725,6 +790,10 @@ class ByteRacer:
                         "success": True,
                         "message": "Settings updated successfully"
                     })
+                    # Only announce on an explicit "Save Settings" action; live
+                    # toggles (mode switches, etc.) reuse this message silently.
+                    if data["data"].get("announce"):
+                        await self.tts_manager.say_key("settings.saved", priority=1)
             
             elif data["name"] == "settings":
                 # Handle settings request
@@ -821,10 +890,11 @@ class ByteRacer:
                 })                
                  
             elif data["name"] == "network_scan":
-                # Handle network scan request
+                # Handle network scan request. Run it in the background so the
+                # receive loop keeps processing drive/control messages instead of
+                # stalling for the duration of the radio sweep.
                 logging.info("Received network scan request")
-                networks = await self.network_manager.scan_wifi_networks()
-                await self.send_network_list(networks)
+                self.request_wifi_scan()
             
             elif data["name"] == "network_update":
                 # Handle network update request
@@ -836,11 +906,11 @@ class ByteRacer:
                     result = await self.execute_network_action(action, network_data)
                     await self.send_command_response(result)
                     
-                    # After network update, send updated network list
+                    # After network update, refresh the network list in the
+                    # background (force a fresh scan since the config just changed)
+                    # so we don't stall the receive loop here either.
                     if result["success"]:
-                        status = await self.network_manager.get_connection_status()
-                        networks = await self.network_manager.scan_wifi_networks()
-                        await self.send_network_list(networks)
+                        self.request_wifi_scan(force=True)
             
             elif data["name"] == "reset_settings":
                 # Handle reset settings request
