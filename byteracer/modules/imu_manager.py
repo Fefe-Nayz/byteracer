@@ -85,7 +85,9 @@ class IMUManager:
 
         # UI motion estimates derived from live IMU samples (not motor commands).
         self._motion_speed_est = 0.0
+        self._motion_speed_peak = 0.0
         self._motion_forward_accel = 0.0
+        self._motion_last_activity = 0.0
 
         # Magnetometer runtime state.
         self.mag_available = False
@@ -460,8 +462,14 @@ class IMUManager:
             forward_dynamic = accel["x"] - gravity_x
             self._motion_forward_accel = forward_dynamic
             if dt > 0:
-                self._motion_speed_est += forward_dynamic * dt * 2.5
-            self._motion_speed_est = max(0.0, min(1.0, self._motion_speed_est * 0.985))
+                self._motion_speed_est += forward_dynamic * dt * 3.0
+            self._motion_speed_est = max(0.0, min(1.0, self._motion_speed_est * 0.997))
+            self._motion_speed_peak = max(
+                self._motion_speed_est,
+                self._motion_speed_peak * 0.998,
+            )
+            if abs(forward_dynamic) > 0.03 or abs(gyro["z"]) > 2.0:
+                self._motion_last_activity = time.time()
             if self.sensor_type == "mpu9250":
                 # MPU9250: TEMP_degC = (raw - roomOffset)/333.87 + 21
                 self.temperature_c = raw["temperature_raw"] / 333.87 + 21.0
@@ -544,20 +552,26 @@ class IMUManager:
         with self._lock:
             return float(self.gyro.get("z", 0.0))
 
-    def get_motion_display(self) -> Optional[Dict[str, float]]:
+    def get_motion_display(self, circuit_active: bool = False) -> Optional[Dict[str, float]]:
         """Normalized speed/turn/acceleration for the web UI from IMU measurements."""
         if not self.available:
             return None
         with self._lock:
             turn = max(-1.0, min(1.0, self.gyro["z"] / 120.0))
             acceleration = max(-1.0, min(1.0, self._motion_forward_accel / 0.25))
-            speed = max(0.0, min(1.0, self._motion_speed_est))
+            speed = self._motion_speed_est
+            # IMU cannot read steady cruise speed (≈0 dynamic accel). Hold a slow
+            # decay from recent motion so the bar does not snap to zero mid-run.
+            if circuit_active and time.time() - self._motion_last_activity < 4.0:
+                speed = max(speed, self._motion_speed_peak * 0.85)
+            speed = max(0.0, min(1.0, speed))
             return {
                 "speed": speed,
                 "turn": turn,
                 "acceleration": acceleration,
                 "gyroRateZ": self.gyro["z"],
                 "gyroYaw": self.gyro_yaw_deg,
+                "forwardAccelG": self._motion_forward_accel,
             }
 
     def get_data(self) -> Dict[str, Any]:
@@ -581,6 +595,7 @@ class IMUManager:
                 "headingReference": self.heading_reference_deg,
                 "headingError": heading_error,
                 "gyroYaw": self.gyro_yaw_deg,
+                "forwardAccelG": self._motion_forward_accel,
                 "temperature": self.temperature_c,
                 "lastUpdated": int(self.last_update * 1000) if self.last_update else None,
                 "error": self.error,

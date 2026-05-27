@@ -132,6 +132,7 @@ export interface SensorData {
     headingReference: number;
     headingError: number;
     gyroYaw?: number;
+    forwardAccelG?: number;
     temperature: number;
     lastUpdated: number | null;
     error?: string | null;

@@ -1997,15 +1997,18 @@ class ByteRacer:
                 acceleration = sensor_data["acceleration"]
                 motion_source = "control"
 
-                if imu_data.get("available"):
-                    motion = self.imu_manager.get_motion_display()
+                use_imu_motion = (
+                    imu_data.get("available")
+                    and sensor_data["settings"]["circuit_mode"]
+                    and circuit_data.get("enabled")
+                )
+                if use_imu_motion:
+                    motion = self.imu_manager.get_motion_display(circuit_active=True)
                     if motion:
                         turn = motion["turn"]
                         acceleration = motion["acceleration"]
                         speed = motion["speed"]
                         motion_source = "imu"
-                        if circuit_data.get("driveSpeed", 0) > 0 and sensor_data["settings"]["circuit_mode"]:
-                            speed = max(speed, circuit_data["driveSpeed"])
 
                 transformed_data = {
                     "ultrasonicDistance": sensor_data["ultrasonic"],

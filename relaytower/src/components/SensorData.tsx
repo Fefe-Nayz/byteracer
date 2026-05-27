@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Card } from "./ui/card";
 import { Progress } from "./ui/progress";
 import ImuVisualizer from "./ImuVisualizer";
+import { getMotionBarValues } from "@/lib/motionDisplay";
 import { 
   RadioTower, 
   MoveHorizontal, 
@@ -192,6 +193,7 @@ export default function SensorData() {
   
   // Check if safety system is active
   const isSafetyActive = sensorData.isCollisionAvoidanceActive || sensorData.isEdgeDetectionActive;
+  const motion = getMotionBarValues(sensorData);
 
   return (
     <Card className={`p-4 ${emergencyAlert ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' : 'border bg-card'}`}>
@@ -228,7 +230,7 @@ export default function SensorData() {
           <div className="flex items-center mb-2">
             <Car className="h-4 w-4 mr-2" />
             <span className="text-sm font-medium">Motion Data:</span>
-            {sensorData.motionSource === "imu" && sensorData.imu?.available && (
+            {motion.imuMode && (
               <span className="ml-2 rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200">
                 IMU
               </span>
@@ -237,28 +239,28 @@ export default function SensorData() {
           <div className="space-y-2">
             {/* Speed */}
             <div className="flex items-center justify-between text-xs">
-              <span>Speed:</span>
+              <span>{motion.imuMode ? "Speed (est.):" : "Speed:"}</span>
               <span
                 className={`font-medium ${
-                  (sensorData.speed || 0) === 0
+                  motion.speed === 0
                     ? 'text-gray-500'
-                    : (sensorData.speed || 0) > 0
+                    : motion.speed > 0
                       ? 'text-blue-600'
                       : 'text-orange-600'
                 }`}
               >
-                {((sensorData.speed || 0) * 100).toFixed(0)}%
+                {motion.speedLabel}
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div 
                 className={`absolute top-0 bottom-0 transition-[width] duration-300 ease-out ${
-                  (sensorData.speed || 0) > 0 
+                  motion.speed > 0 
                     ? 'bg-gradient-to-r from-blue-400 to-blue-600' 
                     : 'bg-gradient-to-r from-orange-400 to-orange-600'
                 }`}
                 style={{ 
-                  width: `${Math.min(100, Math.abs((sensorData.speed || 0) * 100))}%`,
+                  width: `${Math.min(100, Math.abs(motion.speed * 100))}%`,
                   ...getSpeedAnchor()
                 }}
               >
@@ -266,30 +268,30 @@ export default function SensorData() {
               </div>
             </div>
             
-            {/* Turn */}
+            {/* Turn / yaw rate */}
             <div className="flex items-center justify-between text-xs mt-3">
-              <span>Turn:</span>
+              <span>{motion.turnCaption}:</span>
               <span
                 className={`font-medium ${
-                  (sensorData.turn || 0) === 0
+                  motion.turn === 0
                     ? 'text-gray-500'
-                    : (sensorData.turn || 0) > 0
+                    : motion.turn > 0
                       ? 'text-emerald-600'
                       : 'text-purple-600'
                 }`}
               >
-                {((sensorData.turn || 0) * 100).toFixed(0)}%
+                {motion.turnLabel}
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div 
                 className={`absolute top-0 bottom-0 transition-[width] duration-300 ease-out ${
-                  (sensorData.turn || 0) > 0 
+                  motion.turn > 0 
                     ? 'bg-gradient-to-r from-emerald-400 to-emerald-600' 
                     : 'bg-gradient-to-r from-purple-400 to-purple-600'
                 }`}
                 style={{ 
-                  width: `${Math.min(100, Math.abs((sensorData.turn || 0) * 100))}%`,
+                  width: `${Math.min(100, Math.abs(motion.turn * 100))}%`,
                   ...getTurnAnchor()
                 }}
               >
@@ -299,36 +301,35 @@ export default function SensorData() {
             
             {/* Acceleration */}
             <div className="flex items-center justify-between text-xs mt-3">
-              <span>Acceleration:</span>
-              {/* Fix for color matching positive/negative */}
+              <span>{motion.imuMode ? "Long. accel:" : "Acceleration:"}</span>
               <span
                 className={`font-medium ${
-                  (sensorData.acceleration || 0) === 0
+                  motion.acceleration === 0
                     ? 'text-gray-500'
-                    : (sensorData.acceleration || 0) > 0
+                    : motion.acceleration > 0
                       ? 'text-amber-600'
                       : 'text-red-600'
                 }`}
               >
-                {((sensorData.acceleration || 0) * 100).toFixed(0)}%
+                {motion.accelLabel}
               </span>
             </div>
             <div className="relative w-full h-2 bg-gray-200 rounded-full overflow-hidden">
               <div className="absolute top-0 bottom-0 left-1/2 w-px h-full bg-gray-400"></div>
               <div 
                 className={`absolute top-0 bottom-0 transition-all duration-300 ease-out ${
-                  (sensorData.acceleration || 0) >= 0 
+                  motion.acceleration >= 0 
                     ? 'bg-gradient-to-r from-amber-400 to-amber-600' 
                     : 'bg-gradient-to-r from-red-400 to-red-600'
                 }`}
                 style={{ 
-                  width: `${Math.min(50, Math.abs((sensorData.acceleration || 0) * 50))}%`,
-                  left: (sensorData.acceleration || 0) >= 0
+                  width: `${Math.min(50, Math.abs(motion.acceleration * 50))}%`,
+                  left: motion.acceleration >= 0
                     ? '50%'
-                    : `calc(50% - ${Math.min(50, Math.abs((sensorData.acceleration || 0) * 50))}%)`,
+                    : `calc(50% - ${Math.min(50, Math.abs(motion.acceleration * 50))}%)`,
                 }}
               >
-                <div className={`absolute ${(sensorData.acceleration || 0) >= 0 ? 'right' : 'left'}-0 top-0 bottom-0 w-1 bg-white opacity-70`}></div>
+                <div className={`absolute ${motion.acceleration >= 0 ? 'right' : 'left'}-0 top-0 bottom-0 w-1 bg-white opacity-70`}></div>
               </div>
             </div>
           </div>

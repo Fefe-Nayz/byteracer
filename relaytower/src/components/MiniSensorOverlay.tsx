@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useWebSocket } from "@/contexts/WebSocketContext";
+import { getMotionBarValues } from "@/lib/motionDisplay";
 import { Progress } from "./ui/progress";
 import { 
   AlertOctagon,
@@ -130,6 +131,8 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
       .replace(/\b\w/g, char => char.toUpperCase());
   };
 
+  const motion = getMotionBarValues(sensorData);
+
   return (
     <div 
       className={`absolute ${positionClasses} z-40 bg-black/50 backdrop-blur-sm rounded-md shadow-lg overflow-hidden`}
@@ -173,23 +176,28 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
             <div className="flex items-center mb-1">
               <Car className="h-3 w-3 mr-1" />
               <span className="text-xs">Motion</span>
+              {motion.imuMode && (
+                <span className="ml-1 rounded bg-cyan-700/80 px-1 text-[9px] font-medium text-cyan-100">
+                  IMU
+                </span>
+              )}
             </div>
             
             <div className="grid grid-cols-3 gap-1 text-[10px]">
               <div>
                 <div className="flex justify-between">
                   <span>Speed</span>
-                  <span className={getSpeedColorClass(sensorData.speed || 0)}>
-                    {((sensorData.speed || 0) * 100).toFixed(0)}%
+                  <span className={getSpeedColorClass(motion.speed)}>
+                    {motion.speedLabel}
                   </span>
                 </div>
                 <div className="relative w-full h-1 bg-gray-800 rounded-full overflow-hidden">
                   <div 
-                    className={`absolute left-0 top-0 bottom-0 ${(sensorData.speed || 0) > 0 ? 'bg-blue-500' : 'bg-orange-500'}`}
+                    className={`absolute left-0 top-0 bottom-0 ${motion.speed > 0 ? 'bg-blue-500' : 'bg-orange-500'}`}
                     style={{ 
-                      width: `${Math.min(100, Math.abs((sensorData.speed || 0) * 100))}%`,
-                      left: (sensorData.speed || 0) < 0 ? 'auto' : '0',
-                      right: (sensorData.speed || 0) < 0 ? '0' : 'auto'
+                      width: `${Math.min(100, Math.abs(motion.speed * 100))}%`,
+                      left: motion.speed < 0 ? 'auto' : '0',
+                      right: motion.speed < 0 ? '0' : 'auto'
                     }}
                   ></div>
                 </div>
@@ -197,18 +205,18 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
               
               <div>
                 <div className="flex justify-between">
-                  <span>Turn</span>
-                  <span className={getTurnColorClass(sensorData.turn || 0)}>
-                    {((sensorData.turn || 0) * 100).toFixed(0)}%
+                  <span>{motion.imuMode ? "Yaw" : "Turn"}</span>
+                  <span className={getTurnColorClass(motion.turn)}>
+                    {motion.turnLabel}
                   </span>
                 </div>
                 <div className="relative w-full h-1 bg-gray-800 rounded-full overflow-hidden">
                   <div 
-                    className={`absolute left-0 top-0 bottom-0 ${(sensorData.turn || 0) > 0 ? 'bg-green-500' : 'bg-purple-500'}`}
+                    className={`absolute left-0 top-0 bottom-0 ${motion.turn > 0 ? 'bg-green-500' : 'bg-purple-500'}`}
                     style={{ 
-                      width: `${Math.min(100, Math.abs((sensorData.turn || 0) * 100))}%`,
-                      left: (sensorData.turn || 0) < 0 ? 'auto' : '0',
-                      right: (sensorData.turn || 0) < 0 ? '0' : 'auto'
+                      width: `${Math.min(100, Math.abs(motion.turn * 100))}%`,
+                      left: motion.turn < 0 ? 'auto' : '0',
+                      right: motion.turn < 0 ? '0' : 'auto'
                     }}
                   ></div>
                 </div>
@@ -217,17 +225,17 @@ export default function MiniSensorOverlay({ position = "bottom-right" }: { posit
               <div>
                 <div className="flex justify-between">
                   <span>Accel</span>
-                  <span className={getAccelerationColorClass(sensorData.acceleration || 0)}>
-                    {((sensorData.acceleration || 0) * 100).toFixed(0)}%
+                  <span className={getAccelerationColorClass(motion.acceleration)}>
+                    {motion.accelLabel}
                   </span>
                 </div>
                 <div className="relative w-full h-1 bg-gray-800 rounded-full overflow-hidden">
                   <div 
-                    className={`absolute top-0 bottom-0 ${(sensorData.acceleration || 0) >= 0 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    className={`absolute top-0 bottom-0 ${motion.acceleration >= 0 ? 'bg-amber-500' : 'bg-red-500'}`}
                     style={{ 
-                      width: `${Math.min(100, Math.abs((sensorData.acceleration || 0) * 50))}%`,
+                      width: `${Math.min(100, Math.abs(motion.acceleration * 50))}%`,
                       left: '50%',
-                      transform: `translateX(${(sensorData.acceleration || 0) >= 0 ? '0' : '-100%'})`,
+                      transform: `translateX(${motion.acceleration >= 0 ? '0' : '-100%'})`,
                     }}
                   ></div>
                 </div>
