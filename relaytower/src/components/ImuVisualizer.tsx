@@ -29,6 +29,7 @@ interface CircuitDebug {
   turnTargetDeg: number;
   turnGoalDelta: number;
   turnCurrentDelta: number;
+  turnInPlace?: boolean;
 }
 
 interface ImuVisualizerProps {

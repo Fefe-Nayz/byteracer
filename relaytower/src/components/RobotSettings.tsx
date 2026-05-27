@@ -680,6 +680,22 @@ export default function RobotSettings() {
                 </div>
               </div>
 
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-sm">Turn in place</div>
+                  <div className="text-xs text-muted-foreground">
+                    Pivot on the spot (steering centered) instead of an Ackermann arc.
+                    Recommended with IMU turns.
+                  </div>
+                </div>
+                <Switch
+                  checked={localSettings.ai.circuit_turn_in_place ?? true}
+                  onCheckedChange={(checked) =>
+                    updateSetting("ai", "circuit_turn_in_place", checked)
+                  }
+                />
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs">

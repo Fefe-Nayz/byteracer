@@ -147,6 +147,7 @@ class ConfigManager:
                 "imu_turn_target_deg": 90, # Target turn angle for circuit signs
                 "imu_turn_tolerance_deg": 3, # Acceptable turn angle error
                 "imu_turn_timeout": 4.0, # Max seconds allowed for an IMU turn
+                "circuit_turn_in_place": True, # Pivot in place vs Ackermann arc for circuit turns
             },
             "led": {
                 "enabled": True,
@@ -508,6 +509,7 @@ class ConfigManager:
                 "imu_turn_target_deg": 90, # Target turn angle for circuit signs
                 "imu_turn_tolerance_deg": 3, # Acceptable turn angle error
                 "imu_turn_timeout": 4.0, # Max seconds allowed for an IMU turn
+                "circuit_turn_in_place": True, # Pivot in place vs Ackermann arc for circuit turns
             },
             "led": {
                 "enabled": True,

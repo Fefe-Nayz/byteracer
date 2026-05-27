@@ -116,6 +116,11 @@ class AICameraCameraManager:
         self.imu_turn_target_deg = float(self.config_manager.get("ai.imu_turn_target_deg") or 90)
         self.imu_turn_tolerance_deg = float(self.config_manager.get("ai.imu_turn_tolerance_deg") or 3)
         self.imu_turn_timeout = float(self.config_manager.get("ai.imu_turn_timeout") or 4.0)
+        self.circuit_turn_in_place = bool(
+            self.config_manager.get("ai.circuit_turn_in_place")
+            if self.config_manager.get("ai.circuit_turn_in_place") is not None
+            else True
+        )
 
         # PI heading-hold state. The integral term removes the steady-state drift
         # a P-only controller leaves against a constant disturbance (e.g. a robot
@@ -897,6 +902,107 @@ class AICameraCameraManager:
         self.stop_motion()
         return True
     
+    def _process_yolo_frame(self, frame, model_input_size):
+        """Blocking crop/resize/inference/parse — must not run on the asyncio loop."""
+        import cv2
+
+        if frame is None:
+            return None
+
+        if len(frame.shape) == 2:
+            frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
+        target_aspect = model_input_size[0] / model_input_size[1]
+        current_aspect = frame.shape[1] / frame.shape[0]
+        offset_x = 0
+        offset_y = 0
+        original_width = frame.shape[1]
+        original_height = frame.shape[0]
+
+        if current_aspect > target_aspect:
+            new_width = int(original_height * target_aspect)
+            offset_x = (original_width - new_width) // 2
+            cropped = frame[:, offset_x:offset_x + new_width]
+            cropped_width = new_width
+            cropped_height = original_height
+        else:
+            new_height = int(original_width / target_aspect)
+            offset_y = (original_height - new_height) // 2
+            cropped = frame[offset_y:offset_y + new_height, :]
+            cropped_width = original_width
+            cropped_height = new_height
+
+        resized_frame = cv2.resize(cropped, model_input_size)
+        transform_params = {
+            "offset_x": offset_x,
+            "offset_y": offset_y,
+            "cropped_width": cropped_width,
+            "cropped_height": cropped_height,
+            "model_width": model_input_size[0],
+            "model_height": model_input_size[1],
+            "original_width": original_width,
+            "original_height": original_height,
+        }
+
+        results = self.yolo_model(resized_frame, verbose=False)
+        detections = results[0].boxes
+        transformed_detections = []
+
+        for i in range(len(detections)):
+            xyxy = detections[i].xyxy.cpu().numpy().squeeze()
+            xmin, ymin, xmax, ymax = xyxy.astype(int)
+            classidx = int(detections[i].cls.item())
+            classname = self.yolo_labels[classidx]
+            conf = detections[i].conf.item()
+
+            if conf < self.yolo_min_confidence:
+                continue
+
+            cropped_xmin = int(
+                xmin * (transform_params["cropped_width"] / transform_params["model_width"])
+            )
+            cropped_ymin = int(
+                ymin * (transform_params["cropped_height"] / transform_params["model_height"])
+            )
+            cropped_xmax = int(
+                xmax * (transform_params["cropped_width"] / transform_params["model_width"])
+            )
+            cropped_ymax = int(
+                ymax * (transform_params["cropped_height"] / transform_params["model_height"])
+            )
+            orig_xmin = cropped_xmin + transform_params["offset_x"]
+            orig_ymin = cropped_ymin + transform_params["offset_y"]
+            orig_xmax = cropped_xmax + transform_params["offset_x"]
+            orig_ymax = cropped_ymax + transform_params["offset_y"]
+            orig_xmin = max(0, min(orig_xmin, original_width - 1))
+            orig_xmax = max(0, min(orig_xmax, original_width - 1))
+            orig_ymin = max(0, min(orig_ymin, original_height - 1))
+            orig_ymax = max(0, min(orig_ymax, original_height - 1))
+
+            object_info = {
+                "class": classname,
+                "confidence": conf,
+                "x": (orig_xmin + orig_xmax) // 2,
+                "y": (orig_ymin + orig_ymax) // 2,
+                "width": orig_xmax - orig_xmin,
+                "height": orig_ymax - orig_ymin,
+                "xmin": orig_xmin,
+                "ymin": orig_ymin,
+                "xmax": orig_xmax,
+                "ymax": orig_ymax,
+            }
+            distance_cm = self.calculate_object_distance(object_info)
+            if distance_cm is not None:
+                object_info["distance_cm"] = distance_cm
+            transformed_detections.append(object_info)
+
+        return {
+            "results": results,
+            "transform_params": transform_params,
+            "detections": transformed_detections,
+            "object_count": len(transformed_detections),
+        }
+
     async def _yolo_detection_loop(self):
         """
         Main loop for YOLO object detection.
@@ -935,150 +1041,33 @@ class AICameraCameraManager:
                 # Get current frame from camera via camera_manager
                 frame = self._get_camera_frame()
                 
-                # Skip if no frame is available
                 if frame is None:
                     logger.warning("No frame available from camera.")
                     await asyncio.sleep(0.1)
                     continue
-                
-                # Convert frame format if needed
-                if len(frame.shape) == 2:  # If grayscale
-                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-                
-                # Resize frame to match the expected model input size
-                # This is crucial for NCNN models which require exact input dimensions
-                # Resize by cropping to maintain aspect ratio instead of stretching
-                # First, calculate target aspect ratio
-                target_aspect = model_input_size[0] / model_input_size[1]
-                # Calculate current aspect ratio
-                current_aspect = frame.shape[1] / frame.shape[0]
-                  # Determine crop dimensions and store the offsets for coordinate correction later
-                offset_x = 0
-                offset_y = 0
-                original_width = frame.shape[1]
-                original_height = frame.shape[0]
-                
-                if current_aspect > target_aspect:
-                    # Image is wider than needed - crop width
-                    new_width = int(original_height * target_aspect)
-                    offset_x = (original_width - new_width) // 2
-                    # Crop horizontally to target aspect ratio
-                    cropped = frame[:, offset_x:offset_x+new_width]
-                    # Store the actual cropped dimensions
-                    cropped_width = new_width
-                    cropped_height = original_height
-                else:
-                    # Image is taller than needed - crop height
-                    new_height = int(original_width / target_aspect)
-                    offset_y = (original_height - new_height) // 2
-                    # Crop vertically to target aspect ratio
-                    cropped = frame[offset_y:offset_y+new_height, :]
-                    # Store the actual cropped dimensions
-                    cropped_width = original_width
-                    cropped_height = new_height
-                
-                # Now resize the cropped image to the target size
-                resized_frame = cv2.resize(cropped, model_input_size)
-                
-                # Store transformation parameters for later coordinate conversion
-                self.transform_params = {
-                    'offset_x': offset_x,
-                    'offset_y': offset_y,
-                    'cropped_width': cropped_width,
-                    'cropped_height': cropped_height,
-                    'model_width': model_input_size[0],
-                    'model_height': model_input_size[1],
-                    'original_width': original_width,
-                    'original_height': original_height
-                }
-                
-                # Run inference off the event loop so sign handlers stay responsive.
-                results = await asyncio.to_thread(
-                    self.yolo_model, resized_frame, verbose=False
+
+                # Keep OpenCV + NCNN off the asyncio thread (and off the main
+                # process event loop) so WebSocket telemetry stays responsive.
+                pack = await asyncio.to_thread(
+                    self._process_yolo_frame, frame, model_input_size
                 )
-                
-                # Extract results
-                detections = results[0].boxes
-                self.yolo_results = results  # Store for external access
+                if pack is None:
+                    await asyncio.sleep(0.05)
+                    continue
+
+                results = pack["results"]
+                self.yolo_results = results
+                self.transform_params = pack["transform_params"]
+                transformed_detections = pack["detections"]
+                self.yolo_object_count = pack["object_count"]
 
                 if not self.yolo_detection_active:
                     break
                 
-                # Reset object count
-                self.yolo_object_count = 0
-                
-                # Process detections and convert coordinates back to original image space
-                transformed_detections = []
-                
-                # Process each detection
-                for i in range(len(detections)):
-                    # Get bounding box coordinates (convert from tensor)
-                    xyxy_tensor = detections[i].xyxy.cpu()
-                    xyxy = xyxy_tensor.numpy().squeeze()
-                    xmin, ymin, xmax, ymax = xyxy.astype(int)
-                    
-                    # Get class ID, name and confidence
-                    classidx = int(detections[i].cls.item())
-                    classname = self.yolo_labels[classidx]
-                    conf = detections[i].conf.item()
-                    
-                    # Skip if below confidence threshold
-                    if conf < self.yolo_min_confidence:
-                        continue
-                    
-                    # Convert coordinates from model space to original image space
-                    # First, convert from model space to cropped space
-                    cropped_xmin = int(xmin * (self.transform_params['cropped_width'] / self.transform_params['model_width']))
-                    cropped_ymin = int(ymin * (self.transform_params['cropped_height'] / self.transform_params['model_height']))
-                    cropped_xmax = int(xmax * (self.transform_params['cropped_width'] / self.transform_params['model_width']))
-                    cropped_ymax = int(ymax * (self.transform_params['cropped_height'] / self.transform_params['model_height']))
-                    
-                    # Then add the offset to get to original image space
-                    orig_xmin = cropped_xmin + self.transform_params['offset_x']
-                    orig_ymin = cropped_ymin + self.transform_params['offset_y']
-                    orig_xmax = cropped_xmax + self.transform_params['offset_x']
-                    orig_ymax = cropped_ymax + self.transform_params['offset_y']
-                    
-                    # Ensure coordinates are within image boundaries
-                    orig_xmin = max(0, min(orig_xmin, original_width - 1))
-                    orig_xmax = max(0, min(orig_xmax, original_width - 1))
-                    orig_ymin = max(0, min(orig_ymin, original_height - 1))
-                    orig_ymax = max(0, min(orig_ymax, original_height - 1))
-                    
-                    # Calculate width, height, and center
-                    width = orig_xmax - orig_xmin
-                    height = orig_ymax - orig_ymin
-                    center_x = (orig_xmin + orig_xmax) // 2
-                    center_y = (orig_ymin + orig_ymax) // 2
-                    
-                    # Create object info dictionary with original image coordinates
-                    object_info = {
-                        'class': classname,
-                        'confidence': conf,
-                        'x': center_x,
-                        'y': center_y,
-                        'width': width,
-                        'height': height,
-                        'xmin': orig_xmin,
-                        'ymin': orig_ymin,
-                        'xmax': orig_xmax,
-                        'ymax': orig_ymax
-                    }
-                    
-                    # Count objects above confidence threshold
-                    self.yolo_object_count += 1
-                    
-                    # Calculate distance for this object
-                    distance_cm = self.calculate_object_distance(object_info)
-                    if distance_cm is not None:
-                        object_info['distance_cm'] = distance_cm
-                        logger.debug(f"Object {classname}: estimated distance {distance_cm:.1f} cm")
-                    
-                    # Add to transformed detections
-                    transformed_detections.append(object_info)
-                
                 # Display detections with corrected coordinates on vilib camera feed
-                self.camera_manager.display_yolo_detections_on_vilib(transformed_detections, self.yolo_labels, self.yolo_min_confidence)
+                self.camera_manager.display_yolo_detections_on_vilib(
+                    transformed_detections, self.yolo_labels, self.yolo_min_confidence
+                )
                 
                 # Find objects to track - modified to find the closest object
                 closest_object = None
@@ -1581,8 +1570,31 @@ class AICameraCameraManager:
 
             time.sleep(min(0.02, remaining))
 
-    def _apply_right_turn_motor_command(self, speed_value=None, context="RIGHT TURN"):
-        """Apply the shared right-turn motor command used by real and test turns."""
+    def _apply_pivot_turn_motor_command(self, speed_value=None, context="PIVOT RIGHT"):
+        """Spin in place (steering centered) so gyro yaw tracks rotation, not an arc."""
+        base_speed = self.turn_speed if speed_value is None else float(speed_value)
+        power = int(max(0.08, min(0.35, base_speed)) * 100)
+        logger.info(
+            "%s - pivot in place, both motors %d%%, steering centered",
+            context,
+            power,
+        )
+        with self._motion_command_lock:
+            self.px.set_dir_servo_angle(0)
+            # Same command on both channels: right motor is wired reversed on
+            # PiCar-X, so the wheels spin opposite and the robot yaws in place.
+            self.px.set_motor_speed(1, power)
+            self.px.set_motor_speed(2, power)
+        return power / 100.0
+
+    def _apply_right_turn_motor_command(self, speed_value=None, context="RIGHT TURN", pivot=None):
+        """Apply a right turn using pivot-in-place or Ackermann arc per settings."""
+        if pivot is None:
+            pivot = bool(self.circuit_turn_in_place)
+        if pivot:
+            speed = self._apply_pivot_turn_motor_command(speed_value, context=context)
+            return speed, speed
+
         left_speed, right_speed = self._right_turn_motor_speeds(speed_value)
         logger.info(
             f"{context} - Left motor: {left_speed * 100:.1f}%, "
@@ -2503,6 +2515,7 @@ class AICameraCameraManager:
         debug["headingKp"] = self.imu_heading_kp
         debug["headingKi"] = self.imu_heading_ki
         debug["maxSteeringDeg"] = self.imu_max_steering_deg
+        debug["turnInPlace"] = bool(self.circuit_turn_in_place)
         return debug
 
     def set_imu_heading_kp(self, value):
@@ -2554,6 +2567,14 @@ class AICameraCameraManager:
         except (TypeError, ValueError):
             logger.warning(f"Invalid IMU turn timeout: {value}")
         return self.imu_turn_timeout
+
+    def set_circuit_turn_in_place(self, enabled):
+        self.circuit_turn_in_place = bool(enabled)
+        logger.info(
+            "Circuit turn mode: %s",
+            "pivot in place" if self.circuit_turn_in_place else "Ackermann arc",
+        )
+        return self.circuit_turn_in_place
 
     def set_circuit_camera_tilt(self, angle):
         """Set the default camera tilt angle used when entering circuit mode."""

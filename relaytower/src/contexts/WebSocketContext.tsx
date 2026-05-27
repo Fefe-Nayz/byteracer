@@ -155,6 +155,7 @@ export interface SensorData {
     turnTargetDeg: number;
     turnGoalDelta: number;
     turnCurrentDelta: number;
+    turnInPlace?: boolean;
   };
 }
 
@@ -262,6 +263,7 @@ export interface RobotSettings {
     imu_turn_target_deg: number;
     imu_turn_tolerance_deg: number;
     imu_turn_timeout: number;
+    circuit_turn_in_place: boolean;
   };
   imu: {
     enabled: boolean;

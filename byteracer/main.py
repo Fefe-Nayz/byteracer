@@ -159,6 +159,7 @@ class ByteRacer:
         await self.camera_manager.start(self.handle_camera_status)
         await self.log_manager.start()
         await self.audio_manager.start()
+        psutil.cpu_percent(interval=None)
         
         # Load settings from config
         await self.apply_config_settings()
@@ -409,6 +410,9 @@ class ByteRacer:
 
         if "imu_turn_timeout" in settings["ai"]:
             self.aicamera_manager.set_imu_turn_timeout(settings["ai"]["imu_turn_timeout"])
+
+        if "circuit_turn_in_place" in settings["ai"]:
+            self.aicamera_manager.set_circuit_turn_in_place(settings["ai"]["circuit_turn_in_place"])
         
         # Apply sensor manager emergency settings
         if "emergency_cooldown" in settings["safety"]:
@@ -1674,6 +1678,10 @@ class ByteRacer:
                 self.config_manager.set("ai.imu_turn_timeout", ai["imu_turn_timeout"])
                 self.aicamera_manager.set_imu_turn_timeout(ai["imu_turn_timeout"])
 
+            if "circuit_turn_in_place" in ai:
+                self.config_manager.set("ai.circuit_turn_in_place", ai["circuit_turn_in_place"])
+                self.aicamera_manager.set_circuit_turn_in_place(ai["circuit_turn_in_place"])
+
         if "led" in settings:
             led = settings["led"]
             
@@ -1976,71 +1984,69 @@ class ByteRacer:
             except Exception as e:
                 logging.error(f"Error sending battery info: {e}")
     
+    def _build_sensor_payload(self):
+        """Collect sensor/IMU/circuit telemetry (sync — run via asyncio.to_thread)."""
+        sensor_data = self.sensor_manager.get_sensor_data()
+        cpu_usage = psutil.cpu_percent(interval=None)
+        ram_usage = psutil.virtual_memory().percent
+        cpu_temperature = self.get_cpu_temperature()
+
+        imu_data = self.imu_manager.get_data()
+        circuit_data = self.aicamera_manager.get_circuit_debug()
+        speed = sensor_data["speed"]
+        turn = sensor_data["turn"]
+        acceleration = sensor_data["acceleration"]
+        motion_source = "control"
+
+        if imu_data.get("available"):
+            circuit_active = (
+                sensor_data["settings"]["circuit_mode"]
+                or self.aicamera_manager.yolo_detection_active
+            )
+            drive_active = circuit_data.get("driveSpeed", 0) > 0
+            motion = self.imu_manager.get_motion_display(
+                circuit_active=circuit_active,
+                drive_active=drive_active,
+            )
+            if motion:
+                turn = motion["turn"]
+                acceleration = motion["acceleration"]
+                speed = motion["speed"]
+                motion_source = "imu"
+
+        return {
+            "ultrasonicDistance": sensor_data["ultrasonic"],
+            "lineFollowLeft": sensor_data["line_sensors"][0],
+            "lineFollowMiddle": sensor_data["line_sensors"][1],
+            "lineFollowRight": sensor_data["line_sensors"][2],
+            "emergencyState": sensor_data["emergency"]["type"] if sensor_data["emergency"]["active"] else None,
+            "batteryLevel": sensor_data["battery"],
+            "isCollisionAvoidanceActive": sensor_data["settings"]["collision_avoidance"],
+            "isEdgeDetectionActive": sensor_data["settings"]["edge_detection"],
+            "isAutoStopActive": sensor_data["settings"]["auto_stop"],
+            "isTrackingActive": sensor_data["settings"]["tracking"],
+            "isCircuitModeActive": sensor_data["settings"]["circuit_mode"],
+            "isDemoModeActive": sensor_data["settings"]["demo_mode"],
+            "isNormalModeActive": sensor_data["settings"]["normal_mode"],
+            "isGptModeActive": sensor_data["settings"]["gpt_mode"],
+            "clientConnected": self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL,
+            "lastClientActivity": int(self.last_activity_time * 1000),
+            "speed": speed,
+            "turn": turn,
+            "acceleration": acceleration,
+            "motionSource": motion_source,
+            "cpuUsage": cpu_usage,
+            "cpuTemperature": cpu_temperature,
+            "ramUsage": ram_usage,
+            "imu": imu_data,
+            "circuit": circuit_data,
+        }
+
     async def send_sensor_data_to_client(self):
         """Send sensor data to the client"""
         if self.websocket:
             try:
-                # Get raw sensor data
-                sensor_data = self.sensor_manager.get_sensor_data()
-                
-                # Get system resource data
-                cpu_usage = psutil.cpu_percent()
-                ram = psutil.virtual_memory()
-                ram_usage = ram.percent
-                cpu_temperature = self.get_cpu_temperature()
-                
-                # Transform sensor data to match client expectations
-                imu_data = self.imu_manager.get_data()
-                circuit_data = self.aicamera_manager.get_circuit_debug()
-                speed = sensor_data["speed"]
-                turn = sensor_data["turn"]
-                acceleration = sensor_data["acceleration"]
-                motion_source = "control"
-
-                if imu_data.get("available"):
-                    circuit_active = (
-                        sensor_data["settings"]["circuit_mode"]
-                        or self.aicamera_manager.yolo_detection_active
-                    )
-                    drive_active = circuit_data.get("driveSpeed", 0) > 0
-                    motion = self.imu_manager.get_motion_display(
-                        circuit_active=circuit_active,
-                        drive_active=drive_active,
-                    )
-                    if motion:
-                        turn = motion["turn"]
-                        acceleration = motion["acceleration"]
-                        speed = motion["speed"]
-                        motion_source = "imu"
-
-                transformed_data = {
-                    "ultrasonicDistance": sensor_data["ultrasonic"],
-                    "lineFollowLeft": sensor_data["line_sensors"][0],
-                    "lineFollowMiddle": sensor_data["line_sensors"][1],
-                    "lineFollowRight": sensor_data["line_sensors"][2],
-                    "emergencyState": sensor_data["emergency"]["type"] if sensor_data["emergency"]["active"] else None,
-                    "batteryLevel": sensor_data["battery"],
-                    "isCollisionAvoidanceActive": sensor_data["settings"]["collision_avoidance"],
-                    "isEdgeDetectionActive": sensor_data["settings"]["edge_detection"],
-                    "isAutoStopActive": sensor_data["settings"]["auto_stop"],
-                    "isTrackingActive": sensor_data["settings"]["tracking"],
-                    "isCircuitModeActive": sensor_data["settings"]["circuit_mode"],
-                    "isDemoModeActive": sensor_data["settings"]["demo_mode"],
-                    "isNormalModeActive": sensor_data["settings"]["normal_mode"],
-                    "isGptModeActive": sensor_data["settings"]["gpt_mode"],
-                    "clientConnected": self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL,
-                    "lastClientActivity": int(self.last_activity_time * 1000),  # Convert to milliseconds
-                    "speed": speed,
-                    "turn": turn,
-                    "acceleration": acceleration,
-                    "motionSource": motion_source,
-                    "cpuUsage": cpu_usage,  # Add CPU usage
-                    "cpuTemperature": cpu_temperature,
-                    "ramUsage": ram_usage,   # Add RAM usage
-                    "imu": imu_data,
-                    "circuit": circuit_data
-                }
-                
+                transformed_data = await asyncio.to_thread(self._build_sensor_payload)
                 await self.websocket.send(json.dumps({
                     "name": "sensor_data",
                     "data": transformed_data,
@@ -2133,7 +2139,7 @@ class ByteRacer:
                 
                 # Always use a consistent update interval, don't slow down when idle
                 # This ensures continuous data flow
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(0.05)
                 
             except asyncio.CancelledError:
                 logging.info("Periodic tasks cancelled")
