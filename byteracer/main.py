@@ -1997,13 +1997,16 @@ class ByteRacer:
                 acceleration = sensor_data["acceleration"]
                 motion_source = "control"
 
-                use_imu_motion = (
-                    imu_data.get("available")
-                    and sensor_data["settings"]["circuit_mode"]
-                    and circuit_data.get("enabled")
-                )
-                if use_imu_motion:
-                    motion = self.imu_manager.get_motion_display(circuit_active=True)
+                if imu_data.get("available"):
+                    circuit_active = (
+                        sensor_data["settings"]["circuit_mode"]
+                        or self.aicamera_manager.yolo_detection_active
+                    )
+                    drive_active = circuit_data.get("driveSpeed", 0) > 0
+                    motion = self.imu_manager.get_motion_display(
+                        circuit_active=circuit_active,
+                        drive_active=drive_active,
+                    )
                     if motion:
                         turn = motion["turn"]
                         acceleration = motion["acceleration"]

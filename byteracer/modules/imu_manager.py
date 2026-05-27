@@ -552,7 +552,11 @@ class IMUManager:
         with self._lock:
             return float(self.gyro.get("z", 0.0))
 
-    def get_motion_display(self, circuit_active: bool = False) -> Optional[Dict[str, float]]:
+    def get_motion_display(
+        self,
+        circuit_active: bool = False,
+        drive_active: bool = False,
+    ) -> Optional[Dict[str, float]]:
         """Normalized speed/turn/acceleration for the web UI from IMU measurements."""
         if not self.available:
             return None
@@ -560,9 +564,13 @@ class IMUManager:
             turn = max(-1.0, min(1.0, self.gyro["z"] / 120.0))
             acceleration = max(-1.0, min(1.0, self._motion_forward_accel / 0.25))
             speed = self._motion_speed_est
-            # IMU cannot read steady cruise speed (≈0 dynamic accel). Hold a slow
-            # decay from recent motion so the bar does not snap to zero mid-run.
-            if circuit_active and time.time() - self._motion_last_activity < 4.0:
+            if not drive_active:
+                # Decay peak quickly when motors are not commanded so the UI does
+                # not show stale cruise speed after a stop sign / traffic light.
+                self._motion_speed_peak *= 0.85
+            elif circuit_active and time.time() - self._motion_last_activity < 4.0:
+                # IMU cannot read steady cruise speed (≈0 dynamic accel). Hold a
+                # slow decay from recent motion so the bar does not snap to zero mid-run.
                 speed = max(speed, self._motion_speed_peak * 0.85)
             speed = max(0.0, min(1.0, speed))
             return {

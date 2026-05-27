@@ -144,6 +144,7 @@ class AICameraCameraManager:
         # hold must run at tens of Hz; blocking on model inference caused drift.
         self._circuit_drive_thread = None
         self._circuit_drive_lock = threading.Lock()
+        self._motion_command_lock = threading.Lock()
         self._circuit_cruise_speed = 0.0
         
         # Auto-load YOLO model if available in modules directory
@@ -203,11 +204,12 @@ class AICameraCameraManager:
         self.circuit_debug["driveSpeed"] = 0.0
 
         try:
-            self.px.forward(0)
-            self.px.set_motor_speed(1, 0)
-            self.px.set_motor_speed(2, 0)
-            if reset_steering:
-                self.px.set_dir_servo_angle(0)
+            with self._motion_command_lock:
+                self.px.forward(0)
+                self.px.set_motor_speed(1, 0)
+                self.px.set_motor_speed(2, 0)
+                if reset_steering:
+                    self.px.set_dir_servo_angle(0)
         except Exception as e:
             logger.error(f"Error while stopping robot motion: {e}")
 
@@ -1506,6 +1508,8 @@ class AICameraCameraManager:
             
             # Set the flag to indicate a pending turn
             self.right_turn_pending = True
+            # Stop before the delay so we don't coast with stale PWM and no heading hold.
+            self.stop_motion(reset_steering=True)
             
             try:
                 # Use a thread instead of asyncio task
@@ -1584,9 +1588,10 @@ class AICameraCameraManager:
             f"{context} - Left motor: {left_speed * 100:.1f}%, "
             f"Right motor: {right_speed * 100:.1f}%, Steering angle: 35°"
         )
-        self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
-        self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
-        self.px.set_dir_servo_angle(35)
+        with self._motion_command_lock:
+            self.px.set_motor_speed(1, left_speed * 100)    # Left motor (outer wheel)
+            self.px.set_motor_speed(2, -right_speed * 100)  # Right motor (inner wheel, reversed in hardware)
+            self.px.set_dir_servo_angle(35)
         return left_speed, right_speed
 
     def _run_imu_right_turn(self, context="RIGHT TURN", require_yolo_active=False):
@@ -2285,9 +2290,9 @@ class AICameraCameraManager:
             speed (float): Speed value from 0 to 1.0
         """
         if speed == 0:
-            # If speed is 0, just stop both motors
-            self.px.set_motor_speed(1, 0)
-            self.px.set_motor_speed(2, 0)
+            with self._motion_command_lock:
+                self.px.set_motor_speed(1, 0)
+                self.px.set_motor_speed(2, 0)
             return
 
         if self._should_use_imu_circuit():
@@ -2320,7 +2325,6 @@ class AICameraCameraManager:
                 -self.imu_max_steering_deg,
                 self.imu_max_steering_deg,
             )
-            self.px.set_dir_servo_angle(steering)
 
             drive = self.clamp_number(speed, 0.0, 1.0)
             diff = self.clamp_number(
@@ -2330,8 +2334,10 @@ class AICameraCameraManager:
             )
             left_speed = self.clamp_number(drive - diff, 0.0, 1.0)
             right_speed = self.clamp_number(drive + diff, 0.0, 1.0)
-            self.px.set_motor_speed(1, int(left_speed * 100))
-            self.px.set_motor_speed(2, -int(right_speed * 100))  # Right motor reversed
+            with self._motion_command_lock:
+                self.px.set_dir_servo_angle(steering)
+                self.px.set_motor_speed(1, int(left_speed * 100))
+                self.px.set_motor_speed(2, -int(right_speed * 100))  # Right motor reversed
 
             self.circuit_debug.update({
                 "imuActive": True,
@@ -2357,9 +2363,10 @@ class AICameraCameraManager:
         # Non-IMU path: classic motor-balance behaviour with straight steering.
         left_speed, right_speed = self.apply_motor_balance(speed)
         logger.info(f"Applying motor speeds - Left: {left_speed*100:.1f}%, Right: {right_speed*100:.1f}%")
-        self.px.set_motor_speed(1, int(left_speed * 100))
-        self.px.set_motor_speed(2, -int(right_speed * 100))  # Right motor is reversed
-        self.px.set_dir_servo_angle(0)  # Center steering
+        with self._motion_command_lock:
+            self.px.set_motor_speed(1, int(left_speed * 100))
+            self.px.set_motor_speed(2, -int(right_speed * 100))  # Right motor is reversed
+            self.px.set_dir_servo_angle(0)  # Center steering
         
     async def calibrate_motors(self, command="start"):
         """
