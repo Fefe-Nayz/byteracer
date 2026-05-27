@@ -111,6 +111,7 @@ class AICameraCameraManager:
         self.imu_heading_reference_ready = False
         self.imu_heading_kp = float(self.config_manager.get("ai.imu_heading_kp") or 0.8)
         self.imu_max_correction = float(self.config_manager.get("ai.imu_max_correction") or 0.05)
+        self.imu_max_steering_deg = float(self.config_manager.get("ai.imu_max_steering_deg") or 30.0)
         self.imu_turn_target_deg = float(self.config_manager.get("ai.imu_turn_target_deg") or 90)
         self.imu_turn_tolerance_deg = float(self.config_manager.get("ai.imu_turn_tolerance_deg") or 3)
         self.imu_turn_timeout = float(self.config_manager.get("ai.imu_turn_timeout") or 4.0)
@@ -138,6 +139,10 @@ class AICameraCameraManager:
         self.FORWARD_FACTOR   = 1500.0  # Speed scaling factor
         self.MAX_SPEED        = 75      # maximum absolute speed (±75)
         self.SPEED_DEAD_ZONE  = 50      # movement dead zone around 0 speed
+
+        # IMU circuit-assist constants
+        self.IMU_MAX_STEERING_DEG = 30.0  # max steering servo correction for heading hold
+        self.IMU_TURN_BRAKE_GAIN  = 0.12  # stop a turn this many degrees early per deg/s of spin
 
         # Steering constants
         self.TURN_FACTOR = 35.0         # final multiplier for turning
@@ -1496,11 +1501,14 @@ class AICameraCameraManager:
         if not self._should_use_imu_circuit():
             return False
 
+        # Pure-gyro yaw: immune to magnetometer interference from the motors,
+        # which is what made powered turns under-read while hand turns were exact.
         start_yaw = self.imu_manager.get_yaw_deg()
         target = abs(self.imu_turn_target_deg)
         tolerance = max(0.5, abs(self.imu_turn_tolerance_deg))
         deadline = time.monotonic() + max(0.5, self.imu_turn_timeout)
         reached_target = False
+        last_debug = 0.0
 
         logger.info(
             "%s - IMU turn target %.1f° ± %.1f° from yaw %.2f",
@@ -1517,9 +1525,22 @@ class AICameraCameraManager:
 
             delta = self.imu_manager.angle_delta_from(start_yaw)
             remaining = target - abs(delta)
-            if remaining <= tolerance:
+
+            # Anticipate inertia: the faster it spins, the earlier we cut power so
+            # the robot coasts onto the target instead of overshooting past it.
+            rate = abs(self.imu_manager.get_gyro_rate_z())
+            brake_margin = max(tolerance, rate * self.IMU_TURN_BRAKE_GAIN)
+            if remaining <= brake_margin:
                 reached_target = True
                 break
+
+            now = time.monotonic()
+            if now - last_debug > 0.2:
+                logger.info(
+                    "%s - delta %.1f°/%.1f°, remaining %.1f°, rate %.0f°/s, brake %.1f°",
+                    context, abs(delta), target, remaining, rate, brake_margin,
+                )
+                last_debug = now
 
             # Keep enough PWM to avoid motor stall, then slow near target.
             speed_scale = max(0.08, min(self.turn_speed, remaining / target * self.turn_speed))
@@ -1527,7 +1548,19 @@ class AICameraCameraManager:
             time.sleep(0.02)
 
         self.stop_motion()
-        self.imu_manager.reset_heading_reference()
+
+        # Hold the *intended* heading (start + target) rather than wherever the
+        # turn physically stopped. If it under/overshot, the straight-line
+        # controller then trims the residual error toward the exact target
+        # (e.g. stopped at 80° -> keeps steering toward 90°).
+        final_delta = self.imu_manager.angle_delta_from(start_yaw)
+        if abs(final_delta) >= max(5.0, tolerance):
+            turn_sign = 1.0 if final_delta >= 0 else -1.0
+            target_yaw = start_yaw + turn_sign * target
+            self.imu_manager.set_heading_reference(target_yaw)
+        else:
+            # Turn barely moved (stall/failure): don't command a big correction.
+            self.imu_manager.reset_heading_reference()
         self.imu_heading_reference_ready = True
 
         if reached_target:
@@ -2148,37 +2181,47 @@ class AICameraCameraManager:
             self.px.set_motor_speed(1, 0)
             self.px.set_motor_speed(2, 0)
             return
-            
-        # Calculate adjusted speeds with motor balance
-        left_speed, right_speed = self.apply_motor_balance(speed)
 
         if self._should_use_imu_circuit():
+            # IMU heading hold. On an Ackermann robot the steering servo is the
+            # primary actuator that keeps the heading, so we steer it proportionally
+            # to the heading error (clamped by Max Steering Correction). The manual
+            # motor_balance differential is skipped here (it would fight the IMU),
+            # but Max Heading Correction is kept as a small secondary motor
+            # differential that helps at low speed / with weak steering authority.
             heading_error = self.imu_manager.get_heading_error_deg()
-            correction = self.clamp_number(
+            steering = self.clamp_number(
+                -heading_error * self.imu_heading_kp,
+                -self.imu_max_steering_deg,
+                self.imu_max_steering_deg,
+            )
+            self.px.set_dir_servo_angle(steering)
+
+            drive = self.clamp_number(speed, 0.0, 1.0)
+            diff = self.clamp_number(
                 (heading_error * self.imu_heading_kp) / 100.0,
                 -abs(self.imu_max_correction),
                 abs(self.imu_max_correction),
             )
-            left_speed = self.clamp_number(left_speed - correction, 0.0, 1.0)
-            right_speed = self.clamp_number(right_speed + correction, 0.0, 1.0)
+            left_speed = self.clamp_number(drive - diff, 0.0, 1.0)
+            right_speed = self.clamp_number(drive + diff, 0.0, 1.0)
+            self.px.set_motor_speed(1, int(left_speed * 100))
+            self.px.set_motor_speed(2, -int(right_speed * 100))  # Right motor reversed
             logger.info(
-                "IMU heading hold - error %.2f°, correction %.3f, left %.3f, right %.3f",
+                "IMU heading hold - error %.2f°, steering %.1f°, diff %.3f, L %.0f%% R %.0f%%",
                 heading_error,
-                correction,
-                left_speed,
-                right_speed,
+                steering,
+                diff,
+                left_speed * 100,
+                right_speed * 100,
             )
-        
-        # Apply speeds to motors
+            return
+
+        # Non-IMU path: classic motor-balance behaviour with straight steering.
+        left_speed, right_speed = self.apply_motor_balance(speed)
         logger.info(f"Applying motor speeds - Left: {left_speed*100:.1f}%, Right: {right_speed*100:.1f}%")
-        
-        # Capture the actual PWM values applied (after boost)
-        left_speed_pwm = int(left_speed * 100)    # Convert to percentage for set_motor_speed
-        right_speed_pwm = -int(right_speed * 100)  # Right motor is reversed
-        
-        # Set speeds and direction
-        self.px.set_motor_speed(1, left_speed_pwm)
-        self.px.set_motor_speed(2, right_speed_pwm)
+        self.px.set_motor_speed(1, int(left_speed * 100))
+        self.px.set_motor_speed(2, -int(right_speed * 100))  # Right motor is reversed
         self.px.set_dir_servo_angle(0)  # Center steering
         
     async def calibrate_motors(self, command="start"):
@@ -2295,11 +2338,16 @@ class AICameraCameraManager:
         return self.turn_speed
 
     def set_circuit_imu_enabled(self, enabled):
-        self.circuit_use_imu = bool(enabled)
-        logger.info("Circuit IMU assistance %s", "enabled" if self.circuit_use_imu else "disabled")
-        if self.circuit_use_imu and self.yolo_detection_active:
+        enabled = bool(enabled)
+        was_enabled = self.circuit_use_imu
+        self.circuit_use_imu = enabled
+        logger.info("Circuit IMU assistance %s", "enabled" if enabled else "disabled")
+        # Only (re)capture the heading reference on a genuine off->on transition.
+        # Re-sending the same settings while a circuit is running must NOT reset
+        # the reference mid-run, otherwise the robot loses its target heading.
+        if enabled and not was_enabled and self.yolo_detection_active:
             self.prepare_imu_circuit_mode()
-        elif not self.circuit_use_imu:
+        elif not enabled:
             self.imu_circuit_active = False
             self.imu_heading_reference_ready = False
         return self.circuit_use_imu
@@ -2317,6 +2365,13 @@ class AICameraCameraManager:
         except (TypeError, ValueError):
             logger.warning(f"Invalid IMU max correction: {value}")
         return self.imu_max_correction
+
+    def set_imu_max_steering_deg(self, value):
+        try:
+            self.imu_max_steering_deg = self.clamp_number(float(value), 0.0, 45.0)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid IMU max steering angle: {value}")
+        return self.imu_max_steering_deg
 
     def set_imu_turn_target_deg(self, value):
         try:

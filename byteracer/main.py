@@ -395,6 +395,9 @@ class ByteRacer:
         if "imu_max_correction" in settings["ai"]:
             self.aicamera_manager.set_imu_max_correction(settings["ai"]["imu_max_correction"])
 
+        if "imu_max_steering_deg" in settings["ai"]:
+            self.aicamera_manager.set_imu_max_steering_deg(settings["ai"]["imu_max_steering_deg"])
+
         if "imu_turn_target_deg" in settings["ai"]:
             self.aicamera_manager.set_imu_turn_target_deg(settings["ai"]["imu_turn_target_deg"])
 
@@ -1647,6 +1650,10 @@ class ByteRacer:
             if "imu_max_correction" in ai:
                 self.config_manager.set("ai.imu_max_correction", ai["imu_max_correction"])
                 self.aicamera_manager.set_imu_max_correction(ai["imu_max_correction"])
+
+            if "imu_max_steering_deg" in ai:
+                self.config_manager.set("ai.imu_max_steering_deg", ai["imu_max_steering_deg"])
+                self.aicamera_manager.set_imu_max_steering_deg(ai["imu_max_steering_deg"])
 
             if "imu_turn_target_deg" in ai:
                 self.config_manager.set("ai.imu_turn_target_deg", ai["imu_turn_target_deg"])

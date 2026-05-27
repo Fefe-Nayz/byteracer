@@ -235,6 +235,7 @@ export interface RobotSettings {
     circuit_use_imu: boolean;
     imu_heading_kp: number;
     imu_max_correction: number;
+    imu_max_steering_deg: number;
     imu_turn_target_deg: number;
     imu_turn_tolerance_deg: number;
     imu_turn_timeout: number;

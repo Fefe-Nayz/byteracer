@@ -70,6 +70,12 @@ class IMUManager:
         self.gyro = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.mag = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.angles = {"roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+        # Pure gyro-integrated yaw, used for short-term closed-loop control
+        # (straight-line heading hold and timed turns). Unlike angles["yaw"], it
+        # is never pulled by the magnetometer, so motor magnetic interference
+        # cannot corrupt it during a powered turn. It drifts slowly over minutes,
+        # which is irrelevant for the few-second circuit manoeuvres.
+        self.gyro_yaw_deg = 0.0
         # Orientation quaternion sent to the UI for the 3D visualizer. Built from
         # the instantaneous accelerometer tilt + fused yaw, so it stays fluid (no
         # gyro-integration overshoot) and consistent (no Euler axis coupling).
@@ -419,6 +425,8 @@ class IMUManager:
 
             # Integrate the gyro first; this is the responsive, low-latency yaw.
             yaw_gyro = self._normalize_angle(self.angles["yaw"] + gyro["z"] * dt)
+            # Separate pure-gyro accumulator for closed-loop control (no mag pull).
+            self.gyro_yaw_deg = self._normalize_angle(self.gyro_yaw_deg + gyro["z"] * dt)
 
             mag_heading = self._compute_mag_heading(mag, roll, pitch) if mag else None
             if mag_heading is not None:
@@ -485,25 +493,46 @@ class IMUManager:
         return bool(self.enabled and self.available and self.calibrated)
 
     def reset_heading_reference(self):
+        # Reference the pure-gyro yaw: closed-loop control must not be dragged by
+        # the magnetometer (motor interference) during a manoeuvre.
         with self._lock:
-            self.heading_reference_deg = self.angles["yaw"]
-        logger.info("IMU heading reference reset to %.2f degrees", self.heading_reference_deg)
+            self.heading_reference_deg = self.gyro_yaw_deg
+        logger.info("IMU heading reference reset to %.2f degrees (gyro)", self.heading_reference_deg)
+
+    def set_heading_reference(self, heading_deg: float):
+        """Pin the straight-line hold reference to a specific (gyro-frame) heading.
+
+        Used after a turn so the robot holds the *intended* heading (start + target)
+        even if the turn stopped a few degrees short or long; the straight-line
+        controller then trims the residual error away.
+        """
+        with self._lock:
+            self.heading_reference_deg = self._normalize_angle(heading_deg)
+        logger.info("IMU heading reference set to %.2f degrees", self.heading_reference_deg)
 
     def get_heading_error_deg(self) -> float:
         with self._lock:
-            return self._normalize_angle(self.angles["yaw"] - self.heading_reference_deg)
+            return self._normalize_angle(self.gyro_yaw_deg - self.heading_reference_deg)
 
     def angle_delta_from(self, start_yaw: float) -> float:
+        # Delta on the pure-gyro yaw, for EMI-immune turn measurement.
         with self._lock:
-            return self._normalize_angle(self.angles["yaw"] - start_yaw)
+            return self._normalize_angle(self.gyro_yaw_deg - start_yaw)
 
     def get_yaw_deg(self) -> float:
+        # Returns the control yaw (pure gyro) so a captured start matches
+        # angle_delta_from(). Use get_data()["heading"] for the absolute heading.
         with self._lock:
-            return float(self.angles["yaw"])
+            return float(self.gyro_yaw_deg)
+
+    def get_gyro_rate_z(self) -> float:
+        """Current yaw angular rate in deg/s (used to brake turns before overshoot)."""
+        with self._lock:
+            return float(self.gyro.get("z", 0.0))
 
     def get_data(self) -> Dict[str, Any]:
         with self._lock:
-            heading_error = self._normalize_angle(self.angles["yaw"] - self.heading_reference_deg)
+            heading_error = self._normalize_angle(self.gyro_yaw_deg - self.heading_reference_deg)
             return {
                 "enabled": self.enabled,
                 "available": self.available,

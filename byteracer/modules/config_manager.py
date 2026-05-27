@@ -141,7 +141,8 @@ class ConfigManager:
                 "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
                 "circuit_use_imu": False, # Use the inertial sensor for circuit straight/turn control
                 "imu_heading_kp": 0.8, # Heading hold gain for circuit mode
-                "imu_max_correction": 0.05, # Max per-wheel correction while driving straight
+                "imu_max_correction": 0.05, # Max per-wheel motor differential while holding heading
+                "imu_max_steering_deg": 30, # Max steering servo correction (deg) for heading hold
                 "imu_turn_target_deg": 90, # Target turn angle for circuit signs
                 "imu_turn_tolerance_deg": 3, # Acceptable turn angle error
                 "imu_turn_timeout": 4.0, # Max seconds allowed for an IMU turn
@@ -500,7 +501,8 @@ class ConfigManager:
                 "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
                 "circuit_use_imu": False, # Use the inertial sensor for circuit straight/turn control
                 "imu_heading_kp": 0.8, # Heading hold gain for circuit mode
-                "imu_max_correction": 0.05, # Max per-wheel correction while driving straight
+                "imu_max_correction": 0.05, # Max per-wheel motor differential while holding heading
+                "imu_max_steering_deg": 30, # Max steering servo correction (deg) for heading hold
                 "imu_turn_target_deg": 90, # Target turn angle for circuit signs
                 "imu_turn_tolerance_deg": 3, # Acceptable turn angle error
                 "imu_turn_timeout": 4.0, # Max seconds allowed for an IMU turn

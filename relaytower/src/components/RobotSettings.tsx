@@ -550,6 +550,41 @@ export default function RobotSettings() {
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span>Calibration Samples</span>
+                    <span>{imuSettings.calibration_samples ?? 120}</span>
+                  </div>
+                  <Slider
+                    value={[imuSettings.calibration_samples ?? 120]}
+                    min={20}
+                    max={400}
+                    step={10}
+                    disabled={!imuSettings.enabled}
+                    onValueChange={(value) =>
+                      updateSetting("imu", "calibration_samples", value[0])
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs">
+                    <span>Gyro Deadband</span>
+                    <span>{(imuSettings.gyro_deadband_dps ?? 0.35).toFixed(2)}°/s</span>
+                  </div>
+                  <Slider
+                    value={[imuSettings.gyro_deadband_dps ?? 0.35]}
+                    min={0}
+                    max={3}
+                    step={0.05}
+                    disabled={!imuSettings.enabled}
+                    onValueChange={(value) =>
+                      updateSetting("imu", "gyro_deadband_dps", value[0])
+                    }
+                  />
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <div className="text-sm">Inertial Circuit Mode</div>
@@ -585,12 +620,32 @@ export default function RobotSettings() {
 
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
+                  <span>Max Steering Correction</span>
+                  <span>{(localSettings.ai.imu_max_steering_deg ?? 30).toFixed(0)}°</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.imu_max_steering_deg ?? 30]}
+                  min={5}
+                  max={45}
+                  step={1}
+                  disabled={!localSettings.ai.circuit_use_imu}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "imu_max_steering_deg", value[0])
+                  }
+                />
+                <div className="text-[10px] text-muted-foreground">
+                  Steering servo limit for heading hold (primary correction).
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
                   <span>Max Heading Correction</span>
                   <span>{(((localSettings.ai.imu_max_correction ?? 0.05) * 100)).toFixed(1)}%</span>
                 </div>
                 <Slider
                   value={[(localSettings.ai.imu_max_correction ?? 0.05) * 100]}
-                  min={1}
+                  min={0}
                   max={20}
                   step={0.5}
                   disabled={!localSettings.ai.circuit_use_imu}
@@ -598,6 +653,10 @@ export default function RobotSettings() {
                     updateSetting("ai", "imu_max_correction", value[0] / 100)
                   }
                 />
+                <div className="text-[10px] text-muted-foreground">
+                  Secondary motor differential (helps at low speed). Set 0 to use
+                  the steering servo alone.
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
