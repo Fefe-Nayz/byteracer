@@ -11,17 +11,38 @@ interface Quat {
   z: number;
 }
 
+interface CircuitDebug {
+  enabled: boolean;
+  imuActive: boolean;
+  headingReference: number;
+  currentHeading?: number;
+  headingError: number;
+  steeringCommand: number;
+  integral: number;
+  gyroRateZ?: number;
+  driveSpeed?: number;
+  headingKp: number;
+  headingKi: number;
+  maxSteeringDeg: number;
+  turnActive: boolean;
+  turnStartYaw: number;
+  turnTargetDeg: number;
+  turnGoalDelta: number;
+  turnCurrentDelta: number;
+}
+
 interface ImuVisualizerProps {
   quaternion?: Quat;
   available: boolean;
+  circuit?: CircuitDebug;
 }
 
 const ZERO_STORAGE_KEY = "byteracer-imu-zero-quat";
+const DEG2RAD = Math.PI / 180;
 
-// Build the little robot car in the IMU body frame: X = forward (nose), Y = left,
-// Z = up. The whole model is later tipped by a pivot so this Z-up frame is shown
-// in three.js's Y-up world.
-function buildRobot(): THREE.Group {
+// Build the robot car in the IMU body frame: X = forward (nose), Y = left,
+// Z = up. Returns the group plus the front wheels so they can be steered.
+function buildRobot(): { group: THREE.Group; frontWheels: THREE.Mesh[] } {
   const group = new THREE.Group();
 
   const bodyMat = new THREE.MeshStandardMaterial({
@@ -46,59 +67,66 @@ function buildRobot(): THREE.Group {
     metalness: 0.1,
     roughness: 0.9,
   });
+  const frontWheelMat = new THREE.MeshStandardMaterial({
+    color: 0x2563eb,
+    metalness: 0.1,
+    roughness: 0.85,
+  });
 
-  // Chassis: length along X (forward), width along Y, height along Z.
   const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 0.4), bodyMat);
   chassis.position.z = 0.35;
   group.add(chassis);
 
-  // Cabin, set back toward the rear (-X).
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.1, 0.45), darkMat);
   cabin.position.set(-0.25, 0, 0.72);
   group.add(cabin);
 
-  // Front marker (arrow) pointing to +X so heading is unambiguous.
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.28, 0.6, 4), frontMat);
-  nose.rotation.z = -Math.PI / 2; // cone points +Y by default -> rotate to +X
+  nose.rotation.z = -Math.PI / 2;
   nose.position.set(1.35, 0, 0.4);
   group.add(nose);
 
-  // Wheels: cylinders with their axle along Y (the lateral axis).
   const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.22, 20);
-  const wheelPositions: [number, number, number][] = [
-    [0.75, 0.75, 0.32],
-    [0.75, -0.75, 0.32],
-    [-0.75, 0.75, 0.32],
-    [-0.75, -0.75, 0.32],
+  const frontWheels: THREE.Mesh[] = [];
+  const wheels: [number, number, number, boolean][] = [
+    [0.75, 0.75, 0.32, true],
+    [0.75, -0.75, 0.32, true],
+    [-0.75, 0.75, 0.32, false],
+    [-0.75, -0.75, 0.32, false],
   ];
-  for (const [x, y, z] of wheelPositions) {
-    const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+  for (const [x, y, z, isFront] of wheels) {
+    const wheel = new THREE.Mesh(wheelGeo, isFront ? frontWheelMat : wheelMat);
     wheel.position.set(x, y, z);
     group.add(wheel);
+    if (isFront) frontWheels.push(wheel);
   }
 
-  return group;
+  return { group, frontWheels };
+}
+
+function fmt(value: number | undefined, digits = 1) {
+  if (value === undefined || value === null || Number.isNaN(value)) return "–";
+  return value.toFixed(digits);
 }
 
 export default function ImuVisualizer({
   quaternion,
   available,
+  circuit,
 }: ImuVisualizerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
-  // Latest orientation, read inside the animation loop without re-running setup.
   const quatRef = useRef<Quat>({ w: 1, x: 0, y: 0, z: 0 });
-  const availableRef = useRef(available);
+  const steerRef = useRef(0); // latest steering command in degrees
   const zeroRef = useRef<THREE.Quaternion>(new THREE.Quaternion());
   const [hasZero, setHasZero] = useState(false);
 
   if (quaternion) quatRef.current = quaternion;
-  availableRef.current = available;
+  steerRef.current = circuit?.steeringCommand ?? 0;
 
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
 
-    // Restore a previously saved level reference.
     try {
       const saved = localStorage.getItem(ZERO_STORAGE_KEY);
       if (saved) {
@@ -113,10 +141,9 @@ export default function ImuVisualizer({
     }
 
     const width = mount.clientWidth || 320;
-    const height = 220;
+    const height = 240;
 
     const scene = new THREE.Scene();
-
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
     camera.position.set(4.6, 3.2, 5.0);
     camera.lookAt(0, 0.5, 0);
@@ -131,18 +158,16 @@ export default function ImuVisualizer({
     dir.position.set(5, 8, 6);
     scene.add(dir);
 
-    // Ground grid in the three.js Y-up world.
     const grid = new THREE.GridHelper(12, 24, 0x0891b2, 0x334155);
     (grid.material as THREE.Material).opacity = 0.35;
     (grid.material as THREE.Material).transparent = true;
     scene.add(grid);
 
-    // Pivot tips the body Z-up frame into the scene Y-up frame for viewing.
     const pivot = new THREE.Group();
     pivot.rotation.x = -Math.PI / 2;
     scene.add(pivot);
 
-    const robot = buildRobot();
+    const { group: robot, frontWheels } = buildRobot();
     pivot.add(robot);
 
     const qCurrent = new THREE.Quaternion();
@@ -150,15 +175,20 @@ export default function ImuVisualizer({
     const qZeroInv = new THREE.Quaternion();
 
     let frameId = 0;
+    let shownSteer = 0;
     const animate = () => {
       const q = quatRef.current;
       qCurrent.set(q.x, q.y, q.z, q.w);
-      // Show orientation relative to the captured "level" reference, which
-      // cancels the robot's mounting offset (e.g. roll ~180 deg when flat).
       qZeroInv.copy(zeroRef.current).invert();
       qDisplay.copy(qZeroInv).multiply(qCurrent);
-      // Smooth toward the target; slerp avoids any wrap/gimbal artifacts.
       robot.quaternion.slerp(qDisplay, 0.25);
+
+      // Steer the (blue) front wheels by the live servo command so you can see
+      // how the controller is correcting the course.
+      const targetSteer = -steerRef.current * DEG2RAD;
+      shownSteer += (targetSteer - shownSteer) * 0.25;
+      for (const w of frontWheels) w.rotation.z = shownSteer;
+
       renderer.render(scene, camera);
       frameId = requestAnimationFrame(animate);
     };
@@ -215,19 +245,112 @@ export default function ImuVisualizer({
     setHasZero(false);
   };
 
+  const showCircuit = !!circuit?.enabled;
+  const turnPct =
+    circuit && circuit.turnTargetDeg > 0
+      ? Math.min(100, (circuit.turnCurrentDelta / circuit.turnTargetDeg) * 100)
+      : 0;
+
   return (
     <div className="space-y-2">
       <div
         ref={mountRef}
         className="relative w-full overflow-hidden rounded-md bg-gradient-to-b from-slate-100 to-slate-200 dark:from-slate-900 dark:to-slate-950"
-        style={{ height: 220 }}
+        style={{ height: 240 }}
       >
         {!available && (
           <div className="absolute inset-0 flex items-center justify-center bg-background/60 text-xs font-medium text-muted-foreground">
             IMU unavailable
           </div>
         )}
+
+        {/* Circuit-mode control overlay */}
+        {available && showCircuit && (
+          <div className="absolute left-2 top-2 right-2 rounded bg-black/55 p-2 text-[10px] leading-tight text-white backdrop-blur-sm">
+            {circuit?.turnActive ? (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between font-semibold text-amber-300">
+                  <span>TURNING</span>
+                  <span>
+                    {fmt(circuit.turnCurrentDelta, 0)}° / {fmt(circuit.turnTargetDeg, 0)}°
+                  </span>
+                </div>
+                <div className="flex justify-between text-white/80">
+                  <span>rate {fmt(circuit.gyroRateZ, 0)}°/s</span>
+                  <span>yaw {fmt(circuit.currentHeading, 0)}°</span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded bg-white/20">
+                  <div
+                    className="h-full bg-amber-400 transition-[width] duration-100"
+                    style={{ width: `${turnPct}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                  <div className="flex items-center gap-1">
+                    <span
+                      className={`inline-block h-1.5 w-1.5 rounded-full ${
+                        circuit?.imuActive ? "bg-green-400" : "bg-gray-500"
+                      }`}
+                    />
+                    <span>{circuit?.imuActive ? "Heading hold" : "Hold idle"}</span>
+                  </div>
+                  <div className="text-right">
+                    steer <span className="font-semibold">{fmt(circuit?.steeringCommand)}°</span>
+                  </div>
+                  <div>
+                    ref{" "}
+                    <span className="font-semibold">{fmt(circuit?.headingReference, 0)}°</span>
+                  </div>
+                  <div className="text-right">
+                    cur{" "}
+                    <span className="font-semibold">{fmt(circuit?.currentHeading, 0)}°</span>
+                  </div>
+                  <div>
+                    err <span className="font-semibold">{fmt(circuit?.headingError)}°</span>
+                  </div>
+                  <div className="text-right">
+                    rate <span className="font-semibold">{fmt(circuit?.gyroRateZ, 0)}°/s</span>
+                  </div>
+                  <div>
+                    ∫ <span className="font-semibold">{fmt(circuit?.integral)}</span>
+                  </div>
+                  <div className="text-right">
+                    spd <span className="font-semibold">{fmt((circuit?.driveSpeed ?? 0) * 100, 0)}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Live steering bar (servo angle) */}
+        {available && showCircuit && !circuit?.turnActive && (
+          <div className="absolute bottom-2 left-1/2 w-32 -translate-x-1/2">
+            <div className="relative h-1.5 w-full rounded bg-white/25">
+              <div className="absolute left-1/2 top-1/2 h-3 w-px -translate-y-1/2 bg-white/60" />
+              <div
+                className="absolute top-1/2 h-1.5 rounded bg-cyan-400"
+                style={{
+                  left: "50%",
+                  width: `${Math.min(
+                    50,
+                    (Math.abs(circuit?.steeringCommand ?? 0) /
+                      (circuit?.maxSteeringDeg || 30)) *
+                      50
+                  )}%`,
+                  transform: `translateY(-50%) ${
+                    (circuit?.steeringCommand ?? 0) < 0 ? "translateX(-100%)" : ""
+                  }`,
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
+
       <div className="flex items-center gap-2">
         <Button
           variant="outline"

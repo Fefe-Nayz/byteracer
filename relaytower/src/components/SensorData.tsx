@@ -228,6 +228,11 @@ export default function SensorData() {
           <div className="flex items-center mb-2">
             <Car className="h-4 w-4 mr-2" />
             <span className="text-sm font-medium">Motion Data:</span>
+            {sensorData.motionSource === "imu" && sensorData.imu?.available && (
+              <span className="ml-2 rounded bg-cyan-100 px-1.5 py-0.5 text-[10px] font-medium text-cyan-800 dark:bg-cyan-900/50 dark:text-cyan-200">
+                IMU
+              </span>
+            )}
           </div>
           <div className="space-y-2">
             {/* Speed */}
@@ -356,6 +361,7 @@ export default function SensorData() {
             <ImuVisualizer
               quaternion={sensorData.imu?.quaternion}
               available={!!sensorData.imu?.available}
+              circuit={sensorData.circuit}
             />
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">

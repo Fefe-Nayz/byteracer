@@ -620,6 +620,27 @@ export default function RobotSettings() {
 
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
+                  <span>Heading Integral (Ki)</span>
+                  <span>{(localSettings.ai.imu_heading_ki ?? 0).toFixed(2)}</span>
+                </div>
+                <Slider
+                  value={[localSettings.ai.imu_heading_ki ?? 0]}
+                  min={0}
+                  max={3}
+                  step={0.05}
+                  disabled={!localSettings.ai.circuit_use_imu}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "imu_heading_ki", value[0])
+                  }
+                />
+                <div className="text-[10px] text-muted-foreground">
+                  Cancels steady-state drift (the robot slowly veering one way).
+                  Raise gradually; 0 = pure proportional.
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
                   <span>Max Steering Correction</span>
                   <span>{(localSettings.ai.imu_max_steering_deg ?? 30).toFixed(0)}°</span>
                 </div>

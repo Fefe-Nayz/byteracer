@@ -83,6 +83,10 @@ class IMUManager:
         self.temperature_c = 0.0
         self.heading_reference_deg = 0.0
 
+        # UI motion estimates derived from live IMU samples (not motor commands).
+        self._motion_speed_est = 0.0
+        self._motion_forward_accel = 0.0
+
         # Magnetometer runtime state.
         self.mag_available = False
         self.mag_adjust = {"x": 1.0, "y": 1.0, "z": 1.0}
@@ -448,6 +452,16 @@ class IMUManager:
 
             self.accel = accel
             self.gyro = gyro
+            pitch_rad = math.radians(pitch)
+            roll_rad = math.radians(roll)
+            # Gravity in body frame (g) so we can isolate dynamic acceleration.
+            gravity_x = -math.sin(pitch_rad)
+            gravity_y = math.sin(roll_rad) * math.cos(pitch_rad)
+            forward_dynamic = accel["x"] - gravity_x
+            self._motion_forward_accel = forward_dynamic
+            if dt > 0:
+                self._motion_speed_est += forward_dynamic * dt * 2.5
+            self._motion_speed_est = max(0.0, min(1.0, self._motion_speed_est * 0.985))
             if self.sensor_type == "mpu9250":
                 # MPU9250: TEMP_degC = (raw - roomOffset)/333.87 + 21
                 self.temperature_c = raw["temperature_raw"] / 333.87 + 21.0
@@ -530,6 +544,22 @@ class IMUManager:
         with self._lock:
             return float(self.gyro.get("z", 0.0))
 
+    def get_motion_display(self) -> Optional[Dict[str, float]]:
+        """Normalized speed/turn/acceleration for the web UI from IMU measurements."""
+        if not self.available:
+            return None
+        with self._lock:
+            turn = max(-1.0, min(1.0, self.gyro["z"] / 120.0))
+            acceleration = max(-1.0, min(1.0, self._motion_forward_accel / 0.25))
+            speed = max(0.0, min(1.0, self._motion_speed_est))
+            return {
+                "speed": speed,
+                "turn": turn,
+                "acceleration": acceleration,
+                "gyroRateZ": self.gyro["z"],
+                "gyroYaw": self.gyro_yaw_deg,
+            }
+
     def get_data(self) -> Dict[str, Any]:
         with self._lock:
             heading_error = self._normalize_angle(self.gyro_yaw_deg - self.heading_reference_deg)
@@ -550,6 +580,7 @@ class IMUManager:
                 "magHeading": self.mag_heading_deg,
                 "headingReference": self.heading_reference_deg,
                 "headingError": heading_error,
+                "gyroYaw": self.gyro_yaw_deg,
                 "temperature": self.temperature_c,
                 "lastUpdated": int(self.last_update * 1000) if self.last_update else None,
                 "error": self.error,

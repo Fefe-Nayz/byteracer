@@ -110,11 +110,41 @@ class AICameraCameraManager:
         self.imu_circuit_active = False
         self.imu_heading_reference_ready = False
         self.imu_heading_kp = float(self.config_manager.get("ai.imu_heading_kp") or 0.8)
+        self.imu_heading_ki = float(self.config_manager.get("ai.imu_heading_ki") or 0.0)
         self.imu_max_correction = float(self.config_manager.get("ai.imu_max_correction") or 0.05)
         self.imu_max_steering_deg = float(self.config_manager.get("ai.imu_max_steering_deg") or 30.0)
         self.imu_turn_target_deg = float(self.config_manager.get("ai.imu_turn_target_deg") or 90)
         self.imu_turn_tolerance_deg = float(self.config_manager.get("ai.imu_turn_tolerance_deg") or 3)
         self.imu_turn_timeout = float(self.config_manager.get("ai.imu_turn_timeout") or 4.0)
+
+        # PI heading-hold state. The integral term removes the steady-state drift
+        # a P-only controller leaves against a constant disturbance (e.g. a robot
+        # that always pulls slightly right).
+        self._heading_integral = 0.0
+        self._heading_hold_last_time = 0.0
+
+        # Live circuit-control telemetry, surfaced to the web UI for debugging.
+        self.circuit_debug = {
+            "imuActive": False,
+            "headingReference": 0.0,
+            "currentHeading": 0.0,
+            "headingError": 0.0,
+            "steeringCommand": 0.0,
+            "integral": 0.0,
+            "gyroRateZ": 0.0,
+            "driveSpeed": 0.0,
+            "turnActive": False,
+            "turnStartYaw": 0.0,
+            "turnTargetDeg": 0.0,
+            "turnGoalDelta": 0.0,
+            "turnCurrentDelta": 0.0,
+        }
+
+        # High-rate cruise loop decoupled from YOLO inference (~1 fps). Heading
+        # hold must run at tens of Hz; blocking on model inference caused drift.
+        self._circuit_drive_thread = None
+        self._circuit_drive_lock = threading.Lock()
+        self._circuit_cruise_speed = 0.0
         
         # Auto-load YOLO model if available in modules directory
         self.model_path = os.path.join(os.path.dirname(__file__), 'model_ncnn_model')
@@ -168,6 +198,10 @@ class AICameraCameraManager:
 
     def stop_motion(self, reset_steering=True):
         """Stop both drive motors and clear the current motion state."""
+        with self._circuit_drive_lock:
+            self._circuit_cruise_speed = 0.0
+        self.circuit_debug["driveSpeed"] = 0.0
+
         try:
             self.px.forward(0)
             self.px.set_motor_speed(1, 0)
@@ -181,6 +215,54 @@ class AICameraCameraManager:
             self.sensor_manager.current_speed = 0.0
             self.sensor_manager.current_turn = 0.0
             self.sensor_manager.previous_speed = 0.0
+
+    def _get_circuit_cruise_speed(self):
+        with self._circuit_drive_lock:
+            return self._circuit_cruise_speed
+
+    def set_circuit_cruise(self, speed):
+        """Set target cruise speed; a background loop applies it at ~20 Hz."""
+        speed = max(0.0, min(1.0, float(speed)))
+        with self._circuit_drive_lock:
+            self._circuit_cruise_speed = speed
+        self.circuit_debug["driveSpeed"] = speed
+
+    def _should_circuit_drive(self):
+        return (
+            self.yolo_detection_active
+            and not self.yolo_detection_paused
+            and not self.waiting_for_green
+            and not self.waiting_at_stop_sign
+            and not self.executing_right_turn
+            and not self.right_turn_pending
+        )
+
+    def _circuit_drive_loop(self):
+        """Apply heading hold / motor balance at control rate, not YOLO rate."""
+        interval = 0.05
+        while self.yolo_detection_active:
+            if self._should_circuit_drive():
+                speed = self._get_circuit_cruise_speed()
+                if speed > 0:
+                    self.forward_with_balance(speed)
+            time.sleep(interval)
+
+    def _start_circuit_drive_thread(self):
+        if self._circuit_drive_thread and self._circuit_drive_thread.is_alive():
+            return
+        self._circuit_drive_thread = threading.Thread(
+            target=self._circuit_drive_loop,
+            daemon=True,
+            name="circuit-drive",
+        )
+        self._circuit_drive_thread.start()
+
+    def _stop_circuit_drive_thread(self):
+        with self._circuit_drive_lock:
+            self._circuit_cruise_speed = 0.0
+        if self._circuit_drive_thread and self._circuit_drive_thread.is_alive():
+            self._circuit_drive_thread.join(timeout=1.0)
+        self._circuit_drive_thread = None
 
     def _say_key_background(self, key, priority=1, **kwargs):
         """Schedule a TTS message without letting speech latency block motors."""
@@ -210,7 +292,13 @@ class AICameraCameraManager:
         """Capture the current heading before circuit mode starts moving."""
         self.imu_circuit_active = bool(self.circuit_use_imu)
         self.imu_heading_reference_ready = False
+        self._reset_heading_hold()
         self._should_use_imu_circuit()
+
+    def _reset_heading_hold(self):
+        """Clear the PI integrator (call whenever the heading reference changes)."""
+        self._heading_integral = 0.0
+        self._heading_hold_last_time = 0.0
 
     def _should_use_imu_circuit(self):
         if not (self.circuit_use_imu and self.imu_circuit_active and self.imu_manager):
@@ -219,6 +307,7 @@ class AICameraCameraManager:
             return False
         if not self.imu_heading_reference_ready:
             self.imu_manager.reset_heading_reference()
+            self._reset_heading_hold()
             self.imu_heading_reference_ready = True
         return True
 
@@ -740,6 +829,7 @@ class AICameraCameraManager:
             daemon=True
         )
         self.yolo_detection_thread.start()
+        self._start_circuit_drive_thread()
         
         return True
     
@@ -764,6 +854,7 @@ class AICameraCameraManager:
         self.yolo_detection_paused = False
         self.imu_circuit_active = False
         self.imu_heading_reference_ready = False
+        self._stop_circuit_drive_thread()
         
         if self.yolo_detection_thread and self.yolo_detection_thread.is_alive():
             self.yolo_detection_thread.join(timeout=2.0)
@@ -899,8 +990,10 @@ class AICameraCameraManager:
                     'original_height': original_height
                 }
                 
-                # Run inference on resized frame
-                results = self.yolo_model(resized_frame, verbose=False)
+                # Run inference off the event loop so sign handlers stay responsive.
+                results = await asyncio.to_thread(
+                    self.yolo_model, resized_frame, verbose=False
+                )
                 
                 # Extract results
                 detections = results[0].boxes
@@ -1055,8 +1148,8 @@ class AICameraCameraManager:
                     best_object = right_turn_object
                 # If no priority objects detected and we're not waiting for anything
                 elif not (self.waiting_for_green or self.waiting_at_stop_sign or self.executing_right_turn or self.right_turn_pending):
-                    # Move forward at default speed
-                    self.forward_with_balance(self.autonomous_speed)  # Use configured autonomous speed
+                    # Cruise speed is applied by the high-rate drive thread.
+                    self.set_circuit_cruise(self.autonomous_speed)
                     # Use closest object for tracking regardless of type
                     best_object = closest_object
                 
@@ -1218,7 +1311,7 @@ class AICameraCameraManager:
             # Handle red and yellow lights (both require stopping)
             if class_name in ["Rouge", "Orange"] and (prev_state not in ["Rouge", "Orange"] or not self.waiting_for_green):
                 # Red or Yellow light - stop and announce
-                self.px.forward(0)
+                self.stop_motion()
                 self.waiting_for_green = True
                 
                 # Turn on LED for stop
@@ -1241,7 +1334,7 @@ class AICameraCameraManager:
                     
                 if self.waiting_for_green:
                     # We were waiting for green after seeing red/yellow, now proceed
-                    self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+                    self.set_circuit_cruise(self.autonomous_speed)
                     self.waiting_for_green = False
                     
                     # Turn off stop light
@@ -1264,7 +1357,7 @@ class AICameraCameraManager:
                     logger.info(f"GREEN LIGHT after stopping - Proceeding at {self.autonomous_speed*100:.1f}% speed")
                 elif prev_state != "Vert":
                     # Green light from no previous light detected
-                    self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+                    self.set_circuit_cruise(self.autonomous_speed)
                     
                     # Turn off any LED patterns
                     self.stop_all_led_patterns(False)
@@ -1276,7 +1369,7 @@ class AICameraCameraManager:
                     logger.info(f"GREEN LIGHT - Proceeding at {self.autonomous_speed*100:.1f}% speed")
         elif not self.waiting_for_green:
             # If not close enough and not waiting for green after red/yellow, move forward
-            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+            self.set_circuit_cruise(self.autonomous_speed)
             logger.info(f"Traffic light not close enough, proceeding at {self.autonomous_speed*100:.1f}% speed")
             
     async def _handle_stop_sign(self, object_info):
@@ -1320,7 +1413,7 @@ class AICameraCameraManager:
         # Handle stop sign behavior
         if is_close_enough and not self.waiting_at_stop_sign:
             # Stop sign is close enough - stop for the configured duration
-            self.px.forward(0)
+            self.stop_motion()
             self.waiting_at_stop_sign = True
             
             # Turn on LED for stop
@@ -1339,7 +1432,7 @@ class AICameraCameraManager:
             # Check if we've waited long enough
             if time.time() - self.stop_sign_timer >= self.stop_sign_wait_time:
                 # Resume movement
-                self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+                self.set_circuit_cruise(self.autonomous_speed)
                 self.waiting_at_stop_sign = False
                 
                 # Turn off stop light
@@ -1362,7 +1455,7 @@ class AICameraCameraManager:
                 logger.info(f"STOP SIGN - Waited {self.stop_sign_wait_time} seconds, now proceeding at {self.autonomous_speed*100:.1f}% speed")
         elif not self.waiting_at_stop_sign:
             # Not close enough yet, continue moving forward
-            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+            self.set_circuit_cruise(self.autonomous_speed)
             logger.info(f"Stop sign detected but not close enough, proceeding at {self.autonomous_speed*100:.1f}% speed")
     
     async def _handle_right_turn_sign(self, object_info):
@@ -1433,7 +1526,7 @@ class AICameraCameraManager:
         
         elif not is_close_enough and not self.right_turn_pending:
             # Not close enough yet, continue moving forward
-            self.forward_with_balance(self.autonomous_speed)  # Use the configured autonomous speed
+            self.set_circuit_cruise(self.autonomous_speed)
             logger.info(f"Right turn sign detected but not close enough, proceeding at {self.autonomous_speed*100:.1f}% speed")
             
     def _thread_delayed_right_turn(self):
@@ -1517,14 +1610,27 @@ class AICameraCameraManager:
             tolerance,
             start_yaw,
         )
+        self.circuit_debug.update({
+            "turnActive": True,
+            "turnStartYaw": start_yaw,
+            "turnTargetDeg": target,
+            "turnGoalDelta": target,
+            "turnCurrentDelta": 0.0,
+        })
 
         while time.monotonic() < deadline:
             if require_yolo_active and not self.yolo_detection_active:
                 logger.info("%s cancelled because circuit mode stopped during IMU turn", context)
+                self.circuit_debug["turnActive"] = False
                 return False
 
             delta = self.imu_manager.angle_delta_from(start_yaw)
             remaining = target - abs(delta)
+            self.circuit_debug.update({
+                "turnCurrentDelta": abs(delta),
+                "currentHeading": self.imu_manager.get_yaw_deg(),
+                "gyroRateZ": self.imu_manager.get_gyro_rate_z(),
+            })
 
             # Anticipate inertia: the faster it spins, the earlier we cut power so
             # the robot coasts onto the target instead of overshooting past it.
@@ -1561,7 +1667,9 @@ class AICameraCameraManager:
         else:
             # Turn barely moved (stall/failure): don't command a big correction.
             self.imu_manager.reset_heading_reference()
+        self._reset_heading_hold()
         self.imu_heading_reference_ready = True
+        self.circuit_debug["turnActive"] = False
 
         if reached_target:
             logger.info(
@@ -1621,7 +1729,7 @@ class AICameraCameraManager:
             self.stop_all_led_patterns(True)
 
             if resume_after and self.yolo_detection_active:
-                self.forward_with_balance(self.autonomous_speed)
+                self.set_circuit_cruise(self.autonomous_speed)
                 logger.info(
                     f"{context} - Turn completed, continuing forward at "
                     f"{self.autonomous_speed * 100:.1f}% speed"
@@ -2190,8 +2298,25 @@ class AICameraCameraManager:
             # but Max Heading Correction is kept as a small secondary motor
             # differential that helps at low speed / with weak steering authority.
             heading_error = self.imu_manager.get_heading_error_deg()
+
+            # PI controller. P reacts immediately to error; I accumulates to cancel
+            # the steady-state drift a P-only loop leaves against a constant pull.
+            now = time.monotonic()
+            dt = now - self._heading_hold_last_time if self._heading_hold_last_time else 0.0
+            dt = min(0.2, max(0.0, dt))
+            self._heading_hold_last_time = now
+            if self.imu_heading_ki > 1e-6:
+                self._heading_integral += heading_error * dt
+                # Anti-windup: cap the integral so it alone can saturate steering.
+                integral_limit = self.imu_max_steering_deg / self.imu_heading_ki
+                self._heading_integral = self.clamp_number(
+                    self._heading_integral, -integral_limit, integral_limit
+                )
+            else:
+                self._heading_integral = 0.0
+
             steering = self.clamp_number(
-                -heading_error * self.imu_heading_kp,
+                -(heading_error * self.imu_heading_kp + self._heading_integral * self.imu_heading_ki),
                 -self.imu_max_steering_deg,
                 self.imu_max_steering_deg,
             )
@@ -2207,11 +2332,23 @@ class AICameraCameraManager:
             right_speed = self.clamp_number(drive + diff, 0.0, 1.0)
             self.px.set_motor_speed(1, int(left_speed * 100))
             self.px.set_motor_speed(2, -int(right_speed * 100))  # Right motor reversed
+
+            self.circuit_debug.update({
+                "imuActive": True,
+                "headingReference": self.imu_manager.heading_reference_deg,
+                "currentHeading": self.imu_manager.get_yaw_deg(),
+                "headingError": heading_error,
+                "steeringCommand": steering,
+                "integral": self._heading_integral,
+                "gyroRateZ": self.imu_manager.get_gyro_rate_z(),
+                "driveSpeed": speed,
+                "turnActive": False,
+            })
             logger.info(
-                "IMU heading hold - error %.2f°, steering %.1f°, diff %.3f, L %.0f%% R %.0f%%",
+                "IMU heading hold - error %.2f°, steering %.1f°, integral %.1f, L %.0f%% R %.0f%%",
                 heading_error,
                 steering,
-                diff,
+                self._heading_integral,
                 left_speed * 100,
                 right_speed * 100,
             )
@@ -2352,12 +2489,29 @@ class AICameraCameraManager:
             self.imu_heading_reference_ready = False
         return self.circuit_use_imu
 
+    def get_circuit_debug(self):
+        """Snapshot of the live IMU circuit-control state for the web UI overlay."""
+        debug = dict(self.circuit_debug)
+        debug["enabled"] = bool(self.circuit_use_imu)
+        debug["headingKp"] = self.imu_heading_kp
+        debug["headingKi"] = self.imu_heading_ki
+        debug["maxSteeringDeg"] = self.imu_max_steering_deg
+        return debug
+
     def set_imu_heading_kp(self, value):
         try:
             self.imu_heading_kp = self.clamp_number(float(value), -3.0, 3.0)
         except (TypeError, ValueError):
             logger.warning(f"Invalid IMU heading gain: {value}")
         return self.imu_heading_kp
+
+    def set_imu_heading_ki(self, value):
+        try:
+            self.imu_heading_ki = self.clamp_number(float(value), 0.0, 5.0)
+            self._reset_heading_hold()
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid IMU heading integral gain: {value}")
+        return self.imu_heading_ki
 
     def set_imu_max_correction(self, value):
         try:

@@ -392,6 +392,9 @@ class ByteRacer:
         if "imu_heading_kp" in settings["ai"]:
             self.aicamera_manager.set_imu_heading_kp(settings["ai"]["imu_heading_kp"])
 
+        if "imu_heading_ki" in settings["ai"]:
+            self.aicamera_manager.set_imu_heading_ki(settings["ai"]["imu_heading_ki"])
+
         if "imu_max_correction" in settings["ai"]:
             self.aicamera_manager.set_imu_max_correction(settings["ai"]["imu_max_correction"])
 
@@ -1647,6 +1650,10 @@ class ByteRacer:
                 self.config_manager.set("ai.imu_heading_kp", ai["imu_heading_kp"])
                 self.aicamera_manager.set_imu_heading_kp(ai["imu_heading_kp"])
 
+            if "imu_heading_ki" in ai:
+                self.config_manager.set("ai.imu_heading_ki", ai["imu_heading_ki"])
+                self.aicamera_manager.set_imu_heading_ki(ai["imu_heading_ki"])
+
             if "imu_max_correction" in ai:
                 self.config_manager.set("ai.imu_max_correction", ai["imu_max_correction"])
                 self.aicamera_manager.set_imu_max_correction(ai["imu_max_correction"])
@@ -1983,6 +1990,23 @@ class ByteRacer:
                 cpu_temperature = self.get_cpu_temperature()
                 
                 # Transform sensor data to match client expectations
+                imu_data = self.imu_manager.get_data()
+                circuit_data = self.aicamera_manager.get_circuit_debug()
+                speed = sensor_data["speed"]
+                turn = sensor_data["turn"]
+                acceleration = sensor_data["acceleration"]
+                motion_source = "control"
+
+                if imu_data.get("available"):
+                    motion = self.imu_manager.get_motion_display()
+                    if motion:
+                        turn = motion["turn"]
+                        acceleration = motion["acceleration"]
+                        speed = motion["speed"]
+                        motion_source = "imu"
+                        if circuit_data.get("driveSpeed", 0) > 0 and sensor_data["settings"]["circuit_mode"]:
+                            speed = max(speed, circuit_data["driveSpeed"])
+
                 transformed_data = {
                     "ultrasonicDistance": sensor_data["ultrasonic"],
                     "lineFollowLeft": sensor_data["line_sensors"][0],
@@ -2000,13 +2024,15 @@ class ByteRacer:
                     "isGptModeActive": sensor_data["settings"]["gpt_mode"],
                     "clientConnected": self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL,
                     "lastClientActivity": int(self.last_activity_time * 1000),  # Convert to milliseconds
-                    "speed": sensor_data["speed"],  # Add speed value
-                    "turn": sensor_data["turn"],    # Add turn value
-                    "acceleration": sensor_data["acceleration"],  # Add acceleration value
+                    "speed": speed,
+                    "turn": turn,
+                    "acceleration": acceleration,
+                    "motionSource": motion_source,
                     "cpuUsage": cpu_usage,  # Add CPU usage
                     "cpuTemperature": cpu_temperature,
                     "ramUsage": ram_usage,   # Add RAM usage
-                    "imu": self.imu_manager.get_data()
+                    "imu": imu_data,
+                    "circuit": circuit_data
                 }
                 
                 await self.websocket.send(json.dumps({

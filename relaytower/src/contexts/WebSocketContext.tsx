@@ -110,6 +110,7 @@ export interface SensorData {
   speed: number;
   turn: number;
   acceleration: number;
+  motionSource?: "imu" | "control";
   ramUsage: number;
   cpuUsage: number;
   cpuTemperature: number | null;
@@ -130,9 +131,29 @@ export interface SensorData {
     magHeading: number;
     headingReference: number;
     headingError: number;
+    gyroYaw?: number;
     temperature: number;
     lastUpdated: number | null;
     error?: string | null;
+  };
+  circuit?: {
+    enabled: boolean;
+    imuActive: boolean;
+    headingReference: number;
+    currentHeading?: number;
+    headingError: number;
+    steeringCommand: number;
+    integral: number;
+    gyroRateZ?: number;
+    driveSpeed?: number;
+    headingKp: number;
+    headingKi: number;
+    maxSteeringDeg: number;
+    turnActive: boolean;
+    turnStartYaw: number;
+    turnTargetDeg: number;
+    turnGoalDelta: number;
+    turnCurrentDelta: number;
   };
 }
 
@@ -234,6 +255,7 @@ export interface RobotSettings {
     turn_factor: number;
     circuit_use_imu: boolean;
     imu_heading_kp: number;
+    imu_heading_ki: number;
     imu_max_correction: number;
     imu_max_steering_deg: number;
     imu_turn_target_deg: number;
