@@ -143,7 +143,20 @@ class AICameraCameraManager:
             "turnTargetDeg": 0.0,
             "turnGoalDelta": 0.0,
             "turnCurrentDelta": 0.0,
+            # Performance counters.
+            "controlFps": 0.0,        # cruise PI loop frequency
+            "controlLoopMs": 0.0,     # per-iteration wall time of the cruise loop
+            "yoloFps": 0.0,           # YOLO outer-loop frequency (frame -> action)
+            "yoloInferenceMs": 0.0,   # time spent inside the NCNN model per frame
+            "yoloObjects": 0,         # detections in the last YOLO frame
         }
+
+        # Internal FPS accumulators (EMA-smoothed).
+        self._control_fps_last_t = 0.0
+        self._control_fps_ema = 0.0
+        self._control_loop_ms_ema = 0.0
+        self._yolo_fps_ema = 0.0
+        self._yolo_inference_ms_ema = 0.0
 
         # High-rate cruise loop decoupled from YOLO inference (~1 fps). Heading
         # hold must run at tens of Hz; blocking on model inference caused drift.
@@ -244,14 +257,74 @@ class AICameraCameraManager:
             and not self.right_turn_pending
         )
 
+    def _boost_thread_priority(self, label="thread"):
+        """Try to give the current thread real-time priority on Linux.
+
+        The PI heading-hold loop must run at a steady ~20 Hz even when YOLO/NCNN
+        is hammering all cores; without an OS-level priority boost it can be
+        preempted under load and the robot drifts. Falls back to nice(-10) and
+        finally to nice(0) on systems where the call isn't allowed.
+        """
+        # Real-time FIFO scheduling (Linux, needs CAP_SYS_NICE / root).
+        try:
+            if hasattr(os, "sched_setscheduler") and hasattr(os, "SCHED_FIFO"):
+                prio = os.sched_get_priority_min(os.SCHED_FIFO) + 10
+                os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(prio))
+                logger.info("[%s] running with SCHED_FIFO priority %d", label, prio)
+                return
+        except (PermissionError, OSError) as exc:
+            logger.info("[%s] SCHED_FIFO not available (%s); trying nice(-10)", label, exc)
+
+        # Negative nice = higher priority on CFS.
+        try:
+            if hasattr(os, "nice"):
+                os.nice(-10)
+                logger.info("[%s] niced to -10", label)
+        except (PermissionError, OSError) as exc:
+            logger.debug("[%s] could not adjust nice (%s)", label, exc)
+
+    def _lower_thread_priority(self, label="thread", delta=10):
+        """Yield CPU to the control loop (used on the YOLO/inference worker)."""
+        try:
+            if hasattr(os, "nice"):
+                os.nice(delta)
+                logger.info("[%s] niced to +%d", label, delta)
+        except (PermissionError, OSError) as exc:
+            logger.debug("[%s] could not lower priority (%s)", label, exc)
+
     def _circuit_drive_loop(self):
         """Apply heading hold / motor balance at control rate, not YOLO rate."""
+        self._boost_thread_priority("circuit-drive")
         interval = 0.05
+        last_iter_start = 0.0
         while self.yolo_detection_active:
+            iter_start = time.perf_counter()
+            # Frequency of the loop (time between iteration starts).
+            if last_iter_start:
+                period = iter_start - last_iter_start
+                if period > 0:
+                    fps = 1.0 / period
+                    # 0.2 weight = ~5-sample low-pass at 20 Hz, quick but stable.
+                    self._control_fps_ema = (
+                        0.8 * self._control_fps_ema + 0.2 * fps
+                        if self._control_fps_ema
+                        else fps
+                    )
+            last_iter_start = iter_start
+
             if self._should_circuit_drive():
                 speed = self._get_circuit_cruise_speed()
                 if speed > 0:
                     self.forward_with_balance(speed)
+
+            iter_ms = (time.perf_counter() - iter_start) * 1000.0
+            self._control_loop_ms_ema = (
+                0.8 * self._control_loop_ms_ema + 0.2 * iter_ms
+                if self._control_loop_ms_ema
+                else iter_ms
+            )
+            self.circuit_debug["controlFps"] = self._control_fps_ema
+            self.circuit_debug["controlLoopMs"] = self._control_loop_ms_ema
             time.sleep(interval)
 
     def _start_circuit_drive_thread(self):
@@ -842,6 +915,10 @@ class AICameraCameraManager:
     
     def _run_async_detection_loop(self):
         """Run the async detection loop in its own event loop"""
+        # Yield CPU to the (FIFO real-time) control thread. asyncio.to_thread
+        # workers spawned from here inherit this nice value, so NCNN inference
+        # also runs at reduced priority - exactly what we want on the Pi.
+        self._lower_thread_priority("yolo-loop", delta=10)
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
@@ -1048,9 +1125,17 @@ class AICameraCameraManager:
 
                 # Keep OpenCV + NCNN off the asyncio thread (and off the main
                 # process event loop) so WebSocket telemetry stays responsive.
+                inf_t0 = time.perf_counter()
                 pack = await asyncio.to_thread(
                     self._process_yolo_frame, frame, model_input_size
                 )
+                inf_ms = (time.perf_counter() - inf_t0) * 1000.0
+                self._yolo_inference_ms_ema = (
+                    0.8 * self._yolo_inference_ms_ema + 0.2 * inf_ms
+                    if self._yolo_inference_ms_ema
+                    else inf_ms
+                )
+                self.circuit_debug["yoloInferenceMs"] = self._yolo_inference_ms_ema
                 if pack is None:
                     await asyncio.sleep(0.05)
                     continue
@@ -1151,13 +1236,16 @@ class AICameraCameraManager:
                 # Calculate FPS
                 t_stop = time.perf_counter()
                 frame_rate_calc = 1 / (t_stop - t_start)
-                
+
                 # Update FPS buffer for average calculation
                 if len(frame_rate_buffer) >= fps_avg_len:
                     frame_rate_buffer.pop(0)
                 frame_rate_buffer.append(frame_rate_calc)
                   # Calculate average FPS
                 avg_frame_rate = np.mean(frame_rate_buffer)
+                self._yolo_fps_ema = avg_frame_rate
+                self.circuit_debug["yoloFps"] = avg_frame_rate
+                self.circuit_debug["yoloObjects"] = int(self.yolo_object_count)
                 
                 # Print detected objects to standard output
                 if self.yolo_object_count > 0:

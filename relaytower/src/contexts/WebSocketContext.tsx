@@ -156,6 +156,12 @@ export interface SensorData {
     turnGoalDelta: number;
     turnCurrentDelta: number;
     turnInPlace?: boolean;
+    // Performance counters
+    controlFps?: number;
+    controlLoopMs?: number;
+    yoloFps?: number;
+    yoloInferenceMs?: number;
+    yoloObjects?: number;
   };
 }
 
