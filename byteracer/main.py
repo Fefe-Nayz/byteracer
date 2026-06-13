@@ -75,6 +75,14 @@ def patch_getlogin_for_service_context():
 
 class ByteRacer:
     """Main ByteRacer class that integrates all modules"""
+
+    @staticmethod
+    def _coerce_telemetry_interval(value):
+        try:
+            interval = float(value)
+        except (TypeError, ValueError):
+            interval = 0.2
+        return max(0.05, min(2.0, interval))
     
     def __init__(self):
         # Initialize logging first
@@ -87,6 +95,7 @@ class ByteRacer:
         
         # Initialize config manager first to get camera settings
         self.config_manager = ConfigManager()
+        system_config = self.config_manager.get("system") or {}
         
         # Get camera settings from config
         camera_config = self.config_manager.get("camera")
@@ -95,6 +104,9 @@ class ByteRacer:
         local_display = camera_config.get("local_display", False)
         web_display = camera_config.get("web_display", True)
         camera_size = tuple(camera_config.get("camera_size", [1920, 1080]))
+        camera_fps = camera_config.get("camera_fps", 15)
+        web_fps = camera_config.get("web_fps", 12)
+        jpeg_quality = camera_config.get("jpeg_quality", 70)
 
         self.led_manager = LEDManager(pin="D1", config_manager=self.config_manager)  # Initialize LED manager with a pin
         
@@ -110,7 +122,10 @@ class ByteRacer:
             hflip=hflip, 
             local=local_display, 
             web=web_display, 
-            camera_size=camera_size
+            camera_size=camera_size,
+            camera_fps=camera_fps,
+            web_fps=web_fps,
+            jpeg_quality=jpeg_quality,
         )
 
         self.aicamera_manager = AICameraCameraManager(self.px, self.sensor_manager, self.camera_manager, self.tts_manager, self.config_manager, self.led_manager, self.imu_manager)
@@ -144,8 +159,20 @@ class ByteRacer:
         self.last_acceleration = 0
         self.last_motion_update = time.time()
         self._battery_warning_logged = False
+        # UI telemetry does not need control-loop frequency. The IMU circuit
+        # drive thread still runs at 20 Hz; this only throttles WebSocket payloads.
+        self._sensor_update_interval = self._coerce_telemetry_interval(
+            system_config.get("telemetry_interval", 0.2)
+        )
+        self._cpu_temperature_cache = None
+        self._cpu_temperature_cache_time = 0.0
+        self._cpu_temperature_cache_ttl = 2.0
         
         logging.info("ByteRacer initialized")
+
+    def set_telemetry_interval(self, interval):
+        self._sensor_update_interval = self._coerce_telemetry_interval(interval)
+        logging.info("UI telemetry interval set to %.2fs", self._sensor_update_interval)
     
     async def start(self):
         """Start all managers and begin operation"""
@@ -172,7 +199,7 @@ class ByteRacer:
             logging.error(f"Network bootstrap failed; continuing with current state: {e}")
         
         # Start TTS introduction
-        await self.tts_manager.say_key("robot.controller_started", priority=1, blocking=True)
+        await self.tts_manager.say_key("robot.controller_started", priority=1, blocking=True, force_volume=100)
         
         # Start IP announcement if no client is connected
         self.ip_speaking_task = asyncio.create_task(self.announce_ip_periodically())
@@ -271,6 +298,9 @@ class ByteRacer:
     async def apply_config_settings(self):
         """Apply settings from config manager to all components"""
         settings = self.config_manager.get()
+
+        if "system" in settings:
+            self.set_telemetry_interval(settings["system"].get("telemetry_interval", 0.2))
         
         # Apply sound settings - updating with detailed volume controls
         self.sound_manager.set_enabled(settings["sound"]["enabled"])
@@ -304,7 +334,9 @@ class ByteRacer:
             self.tts_manager.set_voice(settings["sound"]["tts_voice"])
         if "tts_use_pico_for_uncached" in settings["sound"]:
             self.tts_manager.set_use_pico_for_uncached(settings["sound"]["tts_use_pico_for_uncached"])
-        
+        if "tts_dynamic_cache" in settings["sound"]:
+            self.tts_manager.set_use_dynamic_cache(settings["sound"]["tts_dynamic_cache"])
+
         # Apply TTS volume settings
         self.tts_manager.set_volume(settings["sound"]["tts_volume"])
         
@@ -353,6 +385,9 @@ class ByteRacer:
         if "turn_speed" in settings["ai"]:
             self.aicamera_manager.set_turn_speed(settings["ai"]["turn_speed"])
 
+        if "circuit_turn_speed" in settings["ai"]:
+            self.aicamera_manager.set_circuit_turn_speed(settings["ai"]["circuit_turn_speed"])
+
         if "circuit_camera_tilt" in settings["ai"]:
             self.aicamera_manager.set_circuit_camera_tilt(settings["ai"]["circuit_camera_tilt"])
             
@@ -389,6 +424,12 @@ class ByteRacer:
 
         if "circuit_use_imu" in settings["ai"]:
             self.aicamera_manager.set_circuit_imu_enabled(settings["ai"]["circuit_use_imu"])
+
+        if "circuit_no_inference" in settings["ai"]:
+            self.aicamera_manager.set_circuit_no_inference(settings["ai"]["circuit_no_inference"])
+
+        if "yolo_worker_process" in settings["ai"]:
+            self.aicamera_manager.set_yolo_worker_process(settings["ai"]["yolo_worker_process"])
 
         if "imu_heading_kp" in settings["ai"]:
             self.aicamera_manager.set_imu_heading_kp(settings["ai"]["imu_heading_kp"])
@@ -494,6 +535,14 @@ class ByteRacer:
                     
                     # Determine if we need to make an announcement
                     should_announce = False
+                    active_robot_state = self.sensor_manager.robot_state in {
+                        RobotState.MANUAL_CONTROL,
+                        RobotState.EMERGENCY_CONTROL,
+                        RobotState.GPT_CONTROLLED,
+                        RobotState.CIRCUIT_MODE,
+                        RobotState.DEMO_MODE,
+                        RobotState.TRACKING_MODE,
+                    }
                     
                     # Always announce on first run or when not connected
                     if first_run or not self.sensor_manager.robot_state.isConnected():
@@ -507,6 +556,13 @@ class ByteRacer:
                         
                         # Update client status in sensor manager
                         # self.sensor_manager.update_client_status(False, True)
+
+                    if should_announce and active_robot_state:
+                        logging.info(
+                            "Skipping IP announcement while robot is active (%s)",
+                            self.sensor_manager.robot_state.name,
+                        )
+                        should_announce = False
                     
                     # Make announcement if needed
                     if should_announce:
@@ -542,7 +598,7 @@ class ByteRacer:
                         logging.info(f"Announced IP: {current_ip}, Mode: {current_mode}")
                     
                     # Wait before checking again
-                    if self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL:
+                    if active_robot_state or self.sensor_manager.robot_state == RobotState.MANUAL_CONTROL:
                         # Check less frequently when client is connected
                         await asyncio.sleep(60)
                     else:
@@ -1394,6 +1450,14 @@ class ByteRacer:
                 if modes["normal_mode_enabled"]:
                     self.sensor_manager.robot_state = RobotState.STANDBY
                     self.stop_robot_motion("normal mode enabled")
+
+        if "system" in settings:
+            system = settings["system"]
+            if "telemetry_interval" in system:
+                interval = self._coerce_telemetry_interval(system["telemetry_interval"])
+                self.config_manager.set("system.telemetry_interval", interval)
+                self.set_telemetry_interval(interval)
+
         if "sound" in settings:
             sound = settings["sound"]
             if "enabled" in sound:
@@ -1431,6 +1495,10 @@ class ByteRacer:
             if "tts_use_pico_for_uncached" in sound:
                 self.config_manager.set("sound.tts_use_pico_for_uncached", sound["tts_use_pico_for_uncached"])
                 self.tts_manager.set_use_pico_for_uncached(sound["tts_use_pico_for_uncached"])
+
+            if "tts_dynamic_cache" in sound:
+                self.config_manager.set("sound.tts_dynamic_cache", sound["tts_dynamic_cache"])
+                self.tts_manager.set_use_dynamic_cache(sound["tts_dynamic_cache"])
 
             if "driving_volume" in sound:
                 self.config_manager.set("sound.driving_volume", sound["driving_volume"])
@@ -1569,6 +1637,9 @@ class ByteRacer:
                 "gyro_deadband_dps",
                 "mag_declination_deg",
                 "mag_yaw_invert",
+                "mag_offset",
+                "mag_scale",
+                "mount_orientation",
             }
             for key, value in imu.items():
                 if key in allowed_imu_keys:
@@ -1604,6 +1675,10 @@ class ByteRacer:
             if "turn_speed" in ai:
                 self.config_manager.set("ai.turn_speed", ai["turn_speed"])
                 self.aicamera_manager.set_turn_speed(ai["turn_speed"])
+
+            if "circuit_turn_speed" in ai:
+                self.config_manager.set("ai.circuit_turn_speed", ai["circuit_turn_speed"])
+                self.aicamera_manager.set_circuit_turn_speed(ai["circuit_turn_speed"])
 
             if "circuit_camera_tilt" in ai:
                 self.config_manager.set("ai.circuit_camera_tilt", ai["circuit_camera_tilt"])
@@ -1649,6 +1724,14 @@ class ByteRacer:
             if "circuit_use_imu" in ai:
                 self.config_manager.set("ai.circuit_use_imu", ai["circuit_use_imu"])
                 self.aicamera_manager.set_circuit_imu_enabled(ai["circuit_use_imu"])
+
+            if "circuit_no_inference" in ai:
+                self.config_manager.set("ai.circuit_no_inference", ai["circuit_no_inference"])
+                self.aicamera_manager.set_circuit_no_inference(ai["circuit_no_inference"])
+
+            if "yolo_worker_process" in ai:
+                self.config_manager.set("ai.yolo_worker_process", ai["yolo_worker_process"])
+                self.aicamera_manager.set_yolo_worker_process(ai["yolo_worker_process"])
 
             if "imu_heading_kp" in ai:
                 self.config_manager.set("ai.imu_heading_kp", ai["imu_heading_kp"])
@@ -1725,6 +1808,12 @@ class ByteRacer:
                 self.config_manager.set("camera.camera_size", camera["camera_size"])
                 camera_changes['camera_size'] = camera["camera_size"]
                 self.aicamera_manager.change_camera_resolution(width=camera["camera_size"][0], height=camera["camera_size"][1])
+
+            for numeric_key in ("camera_fps", "web_fps", "jpeg_quality"):
+                if numeric_key in camera and camera[numeric_key] != current_camera_settings.get(numeric_key):
+                    camera_settings_changed = True
+                    self.config_manager.set(f"camera.{numeric_key}", camera[numeric_key])
+                    camera_changes[numeric_key] = camera[numeric_key]
             
             # Only update and restart if camera settings actually changed
             if camera_settings_changed:
@@ -1892,12 +1981,32 @@ class ByteRacer:
                 
                 result["success"] = success
                 result["message"] = "Camera feed restarted" if success else "Failed to restart camera feed"
+
+            elif command == "reset_imu_heading":
+                self.imu_manager.reset_yaw()
+                self.aicamera_manager.prepare_imu_circuit_mode()
+                result["success"] = True
+                result["message"] = "IMU heading reset"
+
+            elif command == "recalibrate_imu":
+                self.stop_robot_motion("IMU recalibration")
+                await self.imu_manager.stop()
+                await self.imu_manager.start()
+                self.imu_manager.reset_yaw()
+                self.aicamera_manager.prepare_imu_circuit_mode()
+                success = self.imu_manager.is_ready()
+                result["success"] = success
+                result["message"] = "IMU recalibrated" if success else "IMU recalibration failed"
                 
             elif command == "check_for_updates":
                 # Check for updates
                 success = self.run_admin_script("update.sh")
                 result["success"] = success
                 result["message"] = "Update check scheduled" if success else "Failed to schedule update check"
+
+            elif command.startswith("simulate_circuit_"):
+                event = command.removeprefix("simulate_circuit_")
+                result = await self.aicamera_manager.simulate_circuit_event(event)
                 
             elif command == "emergency_stop":
                 # Trigger emergency stop
@@ -1951,22 +2060,36 @@ class ByteRacer:
 
     def get_cpu_temperature(self):
         """Return Raspberry Pi CPU temperature in Celsius when available."""
+        now = time.monotonic()
+        if (
+            self._cpu_temperature_cache is not None
+            and now - self._cpu_temperature_cache_time < self._cpu_temperature_cache_ttl
+        ):
+            return self._cpu_temperature_cache
+
+        value = None
         thermal_path = Path("/sys/class/thermal/thermal_zone0/temp")
         try:
             raw_value = thermal_path.read_text(encoding="utf-8").strip()
-            return round(int(raw_value) / 1000, 1)
+            value = round(int(raw_value) / 1000, 1)
         except Exception:
             pass
 
-        try:
-            for entries in psutil.sensors_temperatures().values():
-                for entry in entries:
-                    if entry.current is not None:
-                        return round(float(entry.current), 1)
-        except Exception:
-            pass
+        if value is None:
+            try:
+                for entries in psutil.sensors_temperatures().values():
+                    for entry in entries:
+                        if entry.current is not None:
+                            value = round(float(entry.current), 1)
+                            break
+                    if value is not None:
+                        break
+            except Exception:
+                pass
 
-        return None
+        self._cpu_temperature_cache = value
+        self._cpu_temperature_cache_time = now
+        return value
     
     async def send_battery_info(self, level):
         """Send battery information to the client"""
@@ -2137,9 +2260,10 @@ class ByteRacer:
                     logging.error(f"Error sending periodic sensor data: {e}")
 
                 
-                # Always use a consistent update interval, don't slow down when idle
-                # This ensures continuous data flow
-                await asyncio.sleep(0.05)
+                # Keep UI telemetry responsive without competing with camera and
+                # motor-control work. The circuit drive loop has its own 20 Hz
+                # thread and is intentionally unaffected by this interval.
+                await asyncio.sleep(self._sensor_update_interval)
                 
             except asyncio.CancelledError:
                 logging.info("Periodic tasks cancelled")

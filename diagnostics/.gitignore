@@ -1,0 +1,3 @@
+# Diagnostic run artifacts — keep the scripts, ignore captured data
+*.csv
+__pycache__/

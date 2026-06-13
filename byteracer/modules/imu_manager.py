@@ -39,6 +39,21 @@ class IMUManager:
     # microtesla per LSB in 16-bit mode: 4912 uT range / 32760
     MAG_SCALE_UT = 4912.0 / 32760.0
 
+    # Max dt the yaw integrator will honour. During a turn the gyro rate is nearly
+    # constant, so integrating across an occasional 200-350 ms scheduling stall is
+    # accurate; the cap only exists to reject a pathological multi-second gap (e.g.
+    # a sensor disconnect) that would otherwise inject a huge bogus angle.
+    MAX_INTEGRATION_DT = 0.5
+    # Sample the magnetometer once every N gyro cycles. The heading only needs
+    # ~10 Hz, and skipping it keeps the gyro integration loop short and steady.
+    MAG_SAMPLE_DIVIDER = 5
+
+    # Auto-calibration tuning. The decay must be slow enough to keep a whole
+    # rotation's worth of extremes (a hand turn lasts ~25 s) yet fast enough to
+    # follow the bias drift (measured ~0.017 µT/s from the PWM fan warming up).
+    MAG_AUTOCAL_DECAY_UT_PER_S = 0.05  # rate at which stale min/max extremes are forgotten
+    MAG_AUTOCAL_MIN_SPAN_UT = 20.0     # min horizontal swing before the auto offset is trusted
+
     def __init__(self, config_manager=None):
         self.config_manager = config_manager
         config = self._read_config()
@@ -53,9 +68,23 @@ class IMUManager:
         # Magnetometer options (MPU9250 only).
         self.mag_declination_deg = self._clamp_float(config.get("mag_declination_deg", 0.0), -180, 180)
         self.mag_yaw_invert = bool(config.get("mag_yaw_invert", False))
+        self.mag_offset = self._parse_axis_values(config.get("mag_offset"), {"x": 0.0, "y": 0.0, "z": 0.0})
+        self.mag_scale = self._parse_axis_values(config.get("mag_scale"), {"x": 1.0, "y": 1.0, "z": 1.0})
+        # Continuous hard/soft-iron auto-calibration. A frozen offset cannot
+        # represent this robot's hard-iron bias, which is several times the Earth
+        # field and drifts (the PWM fan / motor currents move it by tens of µT over
+        # minutes). We instead track the magnetic min/max envelope live, with a
+        # slow decay so stale extremes are forgotten and the centre follows drift.
+        self.mag_auto_calibrate = bool(config.get("mag_auto_calibrate", True))
+        self.mount_orientation = self._parse_mount_orientation(config.get("mount_orientation", "standard"))
+        self._axis_map = self._axis_map_for(self.mount_orientation)
 
         self._bus = None
-        self._task: Optional[asyncio.Task] = None
+        # Dedicated OS thread for sampling+integration. Running this off the
+        # asyncio event loop is essential: the motor-control loop blocks the loop
+        # with time.sleep during a turn, which previously starved the async
+        # sampler and made the integrated yaw lose up to a third of the rotation.
+        self._thread: Optional[threading.Thread] = None
         self._running = False
         self._lock = threading.Lock()
 
@@ -64,6 +93,12 @@ class IMUManager:
         self.error: Optional[str] = None
         self.last_update = 0.0
         self._last_sample_time: Optional[float] = None
+
+        # Sampling-health diagnostics (to prove/track integration starvation).
+        self._dt_max = 0.0
+        self._dt_capped_count = 0
+        self._sample_count = 0
+        self._mag_cycle = 0
 
         self.gyro_bias = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.accel = {"x": 0.0, "y": 0.0, "z": 0.0}
@@ -95,6 +130,13 @@ class IMUManager:
         self.mag_heading_deg = 0.0
         self._yaw_initialized = False
 
+        # Live hard/soft-iron auto-calibration state (running min/max envelope).
+        self._mag_min = {"x": math.inf, "y": math.inf, "z": math.inf}
+        self._mag_max = {"x": -math.inf, "y": -math.inf, "z": -math.inf}
+        self._mag_auto_offset: Optional[Dict[str, float]] = None
+        self._mag_auto_scale: Optional[Dict[str, float]] = None
+        self._mag_auto_ready = False
+
     def _read_config(self) -> Dict[str, Any]:
         if not self.config_manager:
             return {}
@@ -123,8 +165,79 @@ class IMUManager:
         return max(low, min(high, value))
 
     @staticmethod
+    def _parse_axis_values(value, defaults: Dict[str, float]) -> Dict[str, float]:
+        parsed = dict(defaults)
+        if isinstance(value, dict):
+            for axis in ("x", "y", "z"):
+                try:
+                    parsed[axis] = float(value.get(axis, parsed[axis]))
+                except (TypeError, ValueError):
+                    parsed[axis] = defaults[axis]
+        return parsed
+
+    @staticmethod
     def _normalize_angle(angle: float) -> float:
         return (angle + 180.0) % 360.0 - 180.0
+
+    @staticmethod
+    def _parse_mount_orientation(value) -> str:
+        text = str(value or "standard").strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "normal": "standard",
+            "default": "standard",
+            "components_up": "standard",
+            "board_up": "standard",
+            "upside": "upside_down",
+            "upside_down_components_down": "upside_down",
+            "components_down": "upside_down",
+            "components_down_pins_rear": "components_down_pins_rear",
+            "upside_down_pins_rear": "components_down_pins_rear",
+            "pins_rear": "components_down_pins_rear",
+            "upside_down_y_axis": "upside_down_y",
+            "components_down_y_axis": "upside_down_y",
+        }
+        text = aliases.get(text, text)
+        if text not in {
+            "standard",
+            "upside_down",
+            "components_down_pins_rear",
+            "upside_down_y",
+            "upside_down_z",
+            "rotated_180",
+        }:
+            logger.warning("Unknown IMU mount_orientation %r, using standard", value)
+            return "standard"
+        return text
+
+    @staticmethod
+    def _axis_map_for(mount_orientation: str) -> Dict[str, str]:
+        # Output frame convention: x=robot forward, y=robot left, z=up.
+        # The current robot has the module components-down. Which horizontal axis
+        # is preserved depends on how the board was flipped, so we keep the common
+        # variants selectable from config for quick field tuning.
+        maps = {
+            "standard": {"x": "x", "y": "y", "z": "z"},
+            "upside_down": {"x": "x", "y": "-y", "z": "-z"},
+            # Current ByteRacer mounting: components face the ground, board back
+            # faces upward, and the long pin row faces the rear. Static gravity
+            # validation confirms Z must be inverted; X/Y are kept as this robot's
+            # frame until the dynamic yaw test proves another horizontal flip.
+            "components_down_pins_rear": {"x": "x", "y": "-y", "z": "-z"},
+            "upside_down_y": {"x": "-x", "y": "y", "z": "-z"},
+            # Diagnostic mirror option: useful when the board is electrically
+            # upside-down but the horizontal axes have already been compensated.
+            "upside_down_z": {"x": "x", "y": "y", "z": "-z"},
+            "rotated_180": {"x": "-x", "y": "-y", "z": "z"},
+        }
+        return maps.get(mount_orientation, maps["standard"])
+
+    def _apply_axis_transform(self, vector: Dict[str, float]) -> Dict[str, float]:
+        transformed = {}
+        for axis, source in self._axis_map.items():
+            sign = -1.0 if source.startswith("-") else 1.0
+            source_axis = source[-1]
+            transformed[axis] = sign * float(vector[source_axis])
+        return transformed
 
     @staticmethod
     def _quaternion_from_euler(roll_deg: float, pitch_deg: float, yaw_deg: float) -> Dict[str, float]:
@@ -172,18 +285,17 @@ class IMUManager:
             logger.warning("IMU initialization failed: %s", exc)
             return
 
-        self._task = asyncio.create_task(self._sample_loop())
+        self._thread = threading.Thread(
+            target=self._thread_loop, name="imu-sampler", daemon=True
+        )
+        self._thread.start()
 
     async def stop(self):
         self._running = False
 
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-            self._task = None
+        if self._thread:
+            await asyncio.to_thread(self._thread.join, 2.0)
+            self._thread = None
 
         if self._bus:
             try:
@@ -214,6 +326,15 @@ class IMUManager:
         self.gyro_deadband_dps = self._clamp_float(config.get("gyro_deadband_dps", self.gyro_deadband_dps), 0, 5)
         self.mag_declination_deg = self._clamp_float(config.get("mag_declination_deg", self.mag_declination_deg), -180, 180)
         self.mag_yaw_invert = bool(config.get("mag_yaw_invert", self.mag_yaw_invert))
+        self.mag_offset = self._parse_axis_values(config.get("mag_offset", self.mag_offset), self.mag_offset)
+        self.mag_scale = self._parse_axis_values(config.get("mag_scale", self.mag_scale), self.mag_scale)
+        self.mag_auto_calibrate = bool(config.get("mag_auto_calibrate", self.mag_auto_calibrate))
+        new_mount_orientation = self._parse_mount_orientation(
+            config.get("mount_orientation", self.mount_orientation)
+        )
+        mount_changed = new_mount_orientation != self.mount_orientation
+        self.mount_orientation = new_mount_orientation
+        self._axis_map = self._axis_map_for(self.mount_orientation)
 
         if not was_running:
             if self.enabled:
@@ -230,6 +351,7 @@ class IMUManager:
             or old_bus_id != self.bus_id
             or old_address != self.address
             or old_sensor_type != self.sensor_type
+            or mount_changed
         ):
             await self.stop()
             self._running = False
@@ -255,6 +377,7 @@ class IMUManager:
 
         self.mag_available = False
         self._yaw_initialized = False
+        self._reset_mag_autocal()
         if self.sensor_type == "mpu9250":
             try:
                 self._initialize_magnetometer()
@@ -263,6 +386,7 @@ class IMUManager:
                 logger.warning("AK8963 magnetometer init failed; falling back to gyro-only yaw: %s", exc)
 
         self._calibrate_gyro()
+        self._reset_yaw_state()
         self.available = True
         self.error = None
         self._last_sample_time = None
@@ -324,25 +448,74 @@ class IMUManager:
         self.calibrated = True
         logger.info("IMU gyro bias calibrated: %s", self.gyro_bias)
 
-    async def _sample_loop(self):
+    def _reset_yaw_state(self):
+        with self._lock:
+            self.gyro_yaw_deg = 0.0
+            self.heading_reference_deg = 0.0
+            self.angles["yaw"] = 0.0
+            self.orientation_quat = self._quaternion_from_euler(
+                self.angles.get("roll", 0.0),
+                self.angles.get("pitch", 0.0),
+                0.0,
+            )
+            self._motion_speed_est = 0.0
+            self._motion_speed_peak = 0.0
+            self._motion_forward_accel = 0.0
+            self._dt_max = 0.0
+            self._dt_capped_count = 0
+            self._sample_count = 0
+        self._yaw_initialized = False
+
+    def reset_yaw(self):
+        """Reset the relative gyro yaw used by the UI and closed-loop control."""
+        self._reset_yaw_state()
+        logger.info("IMU gyro yaw reset")
+
+    def _thread_loop(self):
+        """Sample and integrate at a steady rate on a dedicated OS thread.
+
+        The cadence is paced against an absolute schedule so transient stalls are
+        caught up instead of permanently dropping rotation from the yaw integral.
+        """
+        # Give the sampler real-time priority so model inference / camera load
+        # cannot starve it (a starved sampler is what made the yaw integral lose
+        # rotation). Falls back gracefully where RT scheduling is not permitted.
+        try:
+            import os
+            if hasattr(os, "sched_setscheduler") and hasattr(os, "SCHED_FIFO"):
+                prio = os.sched_get_priority_min(os.SCHED_FIFO) + 8
+                os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(prio))
+                logger.info("IMU sampler running with SCHED_FIFO priority %d", prio)
+            # Share the reserved control core (the last CPU) so model inference on
+            # the other cores cannot starve the yaw integration.
+            ncpu = os.cpu_count() or 1
+            if ncpu >= 2 and hasattr(os, "sched_setaffinity"):
+                os.sched_setaffinity(0, {ncpu - 1})
+                logger.info("IMU sampler pinned to CPU core %d", ncpu - 1)
+        except Exception as exc:
+            logger.debug("IMU sampler priority/affinity boost not available: %s", exc)
+
         period = 1.0 / max(1.0, self.sample_rate_hz)
+        next_t = time.monotonic()
 
         while self._running and self.enabled:
-            started = time.monotonic()
             try:
-                raw = await asyncio.to_thread(self._read_raw_values)
+                raw = self._read_raw_values()
                 self._update_state(raw)
                 self.available = True
                 self.error = None
-            except asyncio.CancelledError:
-                raise
             except Exception as exc:
                 self.available = False
                 self.error = str(exc)
                 logger.debug("IMU sample failed: %s", exc)
 
-            elapsed = time.monotonic() - started
-            await asyncio.sleep(max(0.0, period - elapsed))
+            next_t += period
+            sleep_for = next_t - time.monotonic()
+            if sleep_for > 0:
+                time.sleep(sleep_for)
+            else:
+                # Fell behind (CPU spike): resync the schedule so we don't spin.
+                next_t = time.monotonic()
 
     def _read_raw_values(self) -> Dict[str, Dict[str, float] | float]:
         if self._bus is None:
@@ -354,15 +527,25 @@ class IMUManager:
             value = (data[index] << 8) | data[index + 1]
             return value - 65536 if value & 0x8000 else value
 
+        raw_accel = {"x": word(0), "y": word(2), "z": word(4)}
+        raw_gyro = {"x": word(8), "y": word(10), "z": word(12)}
         result = {
-            "accel": {"x": word(0), "y": word(2), "z": word(4)},
+            "accel": self._apply_axis_transform(raw_accel),
             "temperature_raw": word(6),
-            "gyro": {"x": word(8), "y": word(10), "z": word(12)},
+            "gyro": self._apply_axis_transform(raw_gyro),
             "mag": None,
         }
 
         if self.mag_available:
-            result["mag"] = self._read_magnetometer()
+            # Decouple the (slower) magnetometer from the gyro integration rate:
+            # read it once every MAG_SAMPLE_DIVIDER cycles so the critical gyro
+            # loop stays short and steady.
+            self._mag_cycle += 1
+            if self._mag_cycle >= self.MAG_SAMPLE_DIVIDER:
+                self._mag_cycle = 0
+                mag = self._read_magnetometer()
+                if mag is not None:
+                    result["mag"] = self._apply_axis_transform(mag)
 
         return result
 
@@ -404,7 +587,12 @@ class IMUManager:
         if self._last_sample_time is None:
             dt = 0.0
         else:
-            dt = min(0.2, max(0.0, now - self._last_sample_time))
+            raw_dt = max(0.0, now - self._last_sample_time)
+            self._dt_max = max(self._dt_max, raw_dt)
+            self._sample_count += 1
+            if raw_dt > self.MAX_INTEGRATION_DT:
+                self._dt_capped_count += 1
+            dt = min(self.MAX_INTEGRATION_DT, raw_dt)
         self._last_sample_time = now
 
         accel = {axis: raw["accel"][axis] / self.ACCEL_SCALE for axis in ("x", "y", "z")}
@@ -434,6 +622,8 @@ class IMUManager:
             # Separate pure-gyro accumulator for closed-loop control (no mag pull).
             self.gyro_yaw_deg = self._normalize_angle(self.gyro_yaw_deg + gyro["z"] * dt)
 
+            if mag:
+                self._update_mag_autocal(mag, dt)
             mag_heading = self._compute_mag_heading(mag, roll, pitch) if mag else None
             if mag_heading is not None:
                 self.mag = mag
@@ -476,12 +666,61 @@ class IMUManager:
             else:
                 self.temperature_c = raw["temperature_raw"] / 340.0 + 36.53
             self.angles = {"roll": roll, "pitch": pitch, "yaw": yaw}
-            # Build the display orientation from the instantaneous accelerometer
-            # tilt (not the gyro-fused roll/pitch) so the 3D model tracks the real
-            # pose immediately without the integration overshoot. Pitch is negated
-            # so a real nose-up tilt shows as nose-up in the visualizer.
-            self.orientation_quat = self._quaternion_from_euler(roll_acc, -pitch_acc, yaw)
+            # Build the display orientation from instantaneous accelerometer tilt.
+            # Positive pitch in the robot frame is nose-down in the visualizer's
+            # coordinate convention; using pitch_acc directly keeps "nose down" as
+            # front-down instead of visually lifting the front/rear-inverting it.
+            # Yaw uses the pure gyro accumulator so the preview is not dragged by
+            # noisy or uncalibrated magnetometer data.
+            self.orientation_quat = self._quaternion_from_euler(roll_acc, pitch_acc, self.gyro_yaw_deg)
             self.last_update = time.time()
+
+    def _reset_mag_autocal(self):
+        self._mag_min = {"x": math.inf, "y": math.inf, "z": math.inf}
+        self._mag_max = {"x": -math.inf, "y": -math.inf, "z": -math.inf}
+        self._mag_auto_offset = None
+        self._mag_auto_scale = None
+        self._mag_auto_ready = False
+
+    def _update_mag_autocal(self, mag: Dict[str, float], dt: float):
+        """Track the magnetic min/max envelope to estimate hard/soft-iron live.
+
+        Each axis envelope expands to include the new sample, then slowly contracts
+        so stale extremes are forgotten and the centre follows the (drifting) bias.
+        The offset is the envelope centre; the scale equalizes each axis swing to
+        the mean swing (soft-iron). The offset is only trusted once the horizontal
+        axes have seen enough rotation, otherwise heading stays on the config value.
+        """
+        if not self.mag_auto_calibrate:
+            return
+        decay = self.MAG_AUTOCAL_DECAY_UT_PER_S * dt if dt > 0 else 0.0
+        for axis in ("x", "y", "z"):
+            v = float(mag[axis])
+            mn = self._mag_min[axis]
+            mx = self._mag_max[axis]
+            if decay > 0 and mx > mn:
+                # Creep the bounds inward, but never past the current sample.
+                mn = min(mn + decay, v)
+                mx = max(mx - decay, v)
+            self._mag_min[axis] = min(mn, v)
+            self._mag_max[axis] = max(mx, v)
+
+        spans = {a: self._mag_max[a] - self._mag_min[a] for a in ("x", "y", "z")}
+        if spans["x"] < self.MAG_AUTOCAL_MIN_SPAN_UT or spans["y"] < self.MAG_AUTOCAL_MIN_SPAN_UT:
+            return
+        offset = {a: (self._mag_max[a] + self._mag_min[a]) / 2.0 for a in ("x", "y", "z")}
+        # Soft-iron: only equalize the horizontal axes (X/Y) to each other. Z barely
+        # swings during a flat yaw rotation, so scaling it off the horizontal span
+        # would explode mz and wreck the tilt compensation; leave Z at unity.
+        avg_h = (spans["x"] + spans["y"]) / 2.0
+        scale = {
+            "x": avg_h / spans["x"] if spans["x"] > 1e-3 else 1.0,
+            "y": avg_h / spans["y"] if spans["y"] > 1e-3 else 1.0,
+            "z": 1.0,
+        }
+        self._mag_auto_offset = offset
+        self._mag_auto_scale = scale
+        self._mag_auto_ready = True
 
     def _compute_mag_heading(self, mag: Dict[str, float], roll_deg: float, pitch_deg: float) -> Optional[float]:
         """Tilt-compensated magnetic heading in degrees, in the gyro-yaw convention.
@@ -494,7 +733,17 @@ class IMUManager:
         try:
             roll = math.radians(roll_deg)
             pitch = math.radians(pitch_deg)
-            mx, my, mz = mag["x"], mag["y"], mag["z"]
+            # Prefer the live auto-calibration once it has seen enough rotation;
+            # fall back to the static config offset/scale until then.
+            if self.mag_auto_calibrate and self._mag_auto_ready and self._mag_auto_offset:
+                offset = self._mag_auto_offset
+                scale = self._mag_auto_scale or self.mag_scale
+            else:
+                offset = self.mag_offset
+                scale = self.mag_scale
+            mx = (mag["x"] - offset.get("x", 0.0)) * scale.get("x", 1.0)
+            my = (mag["y"] - offset.get("y", 0.0)) * scale.get("y", 1.0)
+            mz = (mag["z"] - offset.get("z", 0.0)) * scale.get("z", 1.0)
 
             xh = mx * math.cos(pitch) + mz * math.sin(pitch)
             yh = (
@@ -532,9 +781,16 @@ class IMUManager:
             self.heading_reference_deg = self._normalize_angle(heading_deg)
         logger.info("IMU heading reference set to %.2f degrees", self.heading_reference_deg)
 
+    def get_heading_reference_deg(self) -> float:
+        with self._lock:
+            return float(self.heading_reference_deg)
+
     def get_heading_error_deg(self) -> float:
         with self._lock:
-            return self._normalize_angle(self.gyro_yaw_deg - self.heading_reference_deg)
+            # Control error convention: target/reference minus current heading.
+            # A positive value means the controller still needs to rotate toward
+            # the positive yaw direction; a negative value means the opposite.
+            return self._normalize_angle(self.heading_reference_deg - self.gyro_yaw_deg)
 
     def angle_delta_from(self, start_yaw: float) -> float:
         # Delta on the pure-gyro yaw, for EMI-immune turn measurement.
@@ -546,6 +802,15 @@ class IMUManager:
         # angle_delta_from(). Use get_data()["heading"] for the absolute heading.
         with self._lock:
             return float(self.gyro_yaw_deg)
+
+    def get_mag_heading_deg(self) -> Optional[float]:
+        """Return the latest magnetometer heading when the compass is usable."""
+        with self._lock:
+            if not self.available or not self.mag_available:
+                return None
+            if not self.last_update or time.time() - self.last_update > 1.0:
+                return None
+            return float(self.mag_heading_deg)
 
     def get_gyro_rate_z(self) -> float:
         """Current yaw angular rate in deg/s (used to brake turns before overshoot)."""
@@ -584,18 +849,25 @@ class IMUManager:
 
     def get_data(self) -> Dict[str, Any]:
         with self._lock:
-            heading_error = self._normalize_angle(self.gyro_yaw_deg - self.heading_reference_deg)
+            heading_error = self._normalize_angle(self.heading_reference_deg - self.gyro_yaw_deg)
             return {
                 "enabled": self.enabled,
                 "available": self.available,
                 "calibrated": self.calibrated,
                 "sensorType": self.sensor_type,
                 "magnetometer": self.mag_available,
+                "mountOrientation": self.mount_orientation,
                 "bus": self.bus_id,
                 "address": f"0x{self.address:02x}",
                 "accel": dict(self.accel),
                 "gyro": dict(self.gyro),
                 "mag": dict(self.mag),
+                "magOffset": dict(self.mag_offset),
+                "magScale": dict(self.mag_scale),
+                "magAutoCalibrate": self.mag_auto_calibrate,
+                "magAutoReady": self._mag_auto_ready,
+                "magAutoOffset": dict(self._mag_auto_offset) if self._mag_auto_offset else None,
+                "magAutoScale": dict(self._mag_auto_scale) if self._mag_auto_scale else None,
                 "angles": dict(self.angles),
                 "quaternion": dict(self.orientation_quat),
                 "heading": self.angles["yaw"],
@@ -606,5 +878,8 @@ class IMUManager:
                 "forwardAccelG": self._motion_forward_accel,
                 "temperature": self.temperature_c,
                 "lastUpdated": int(self.last_update * 1000) if self.last_update else None,
+                "dtMaxMs": round(self._dt_max * 1000, 1),
+                "dtCappedCount": self._dt_capped_count,
+                "sampleCount": self._sample_count,
                 "error": self.error,
             }

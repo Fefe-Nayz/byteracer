@@ -3,6 +3,7 @@ import { useWebSocket } from "@/contexts/WebSocketContext";
 import { useEffect, useState } from "react";
 import { Card } from "./ui/card";
 import { Progress } from "./ui/progress";
+import { Button } from "./ui/button";
 import ImuVisualizer from "./ImuVisualizer";
 import { getMotionBarValues } from "@/lib/motionDisplay";
 import { 
@@ -22,7 +23,7 @@ import {
 } from "lucide-react";
 
 export default function SensorData() {
-  const { sensorData, status, settings } = useWebSocket();
+  const { sensorData, status, settings, sendRobotCommand } = useWebSocket();
   const [emergencyAlert, setEmergencyAlert] = useState<boolean>(false);
   
   // These states track the last non-zero sign of speed and turn
@@ -363,6 +364,13 @@ export default function SensorData() {
               quaternion={sensorData.imu?.quaternion}
               available={!!sensorData.imu?.available}
               circuit={sensorData.circuit}
+              circuitModeActive={sensorData.isCircuitModeActive}
+              speed={sensorData.speed}
+              heading={sensorData.imu?.heading}
+              magHeading={sensorData.imu?.magHeading}
+              gyroYaw={sensorData.imu?.gyroYaw}
+              magnetometer={sensorData.imu?.magnetometer}
+              mountOrientation={sensorData.imu?.mountOrientation}
             />
           </div>
           <div className="grid grid-cols-3 gap-2 text-xs">
@@ -375,21 +383,65 @@ export default function SensorData() {
               <div className="font-medium">{formatImuValue(sensorData.imu?.angles?.pitch)}°</div>
             </div>
             <div>
-              <div className="text-muted-foreground">Yaw</div>
+              <div className="text-muted-foreground">Fused Yaw</div>
               <div className="font-medium">{formatImuValue(sensorData.imu?.angles?.yaw)}°</div>
             </div>
             <div>
-              <div className="text-muted-foreground">Heading Error</div>
-              <div className="font-medium">{formatImuValue(sensorData.imu?.headingError)}°</div>
+              <div className="text-muted-foreground">Gyro Yaw</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.gyroYaw)}°</div>
             </div>
             <div>
-              <div className="text-muted-foreground">Gyro Z</div>
-              <div className="font-medium">{formatImuValue(sensorData.imu?.gyro?.z)} °/s</div>
+              <div className="text-muted-foreground">Mag Heading</div>
+              <div className="font-medium">{formatImuValue(sensorData.imu?.magHeading)}°</div>
             </div>
             <div>
               <div className="text-muted-foreground">IMU Temp</div>
               <div className="font-medium">{formatImuValue(sensorData.imu?.temperature)}°C</div>
             </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+            <div className="rounded border border-cyan-100 bg-white/50 p-2 dark:border-cyan-900 dark:bg-black/10">
+              <div className="mb-1 font-medium text-muted-foreground">Accel (g)</div>
+              <div>X {formatImuValue(sensorData.imu?.accel?.x, 3)}</div>
+              <div>Y {formatImuValue(sensorData.imu?.accel?.y, 3)}</div>
+              <div>Z {formatImuValue(sensorData.imu?.accel?.z, 3)}</div>
+            </div>
+            <div className="rounded border border-cyan-100 bg-white/50 p-2 dark:border-cyan-900 dark:bg-black/10">
+              <div className="mb-1 font-medium text-muted-foreground">Gyro (°/s)</div>
+              <div>X {formatImuValue(sensorData.imu?.gyro?.x)}</div>
+              <div>Y {formatImuValue(sensorData.imu?.gyro?.y)}</div>
+              <div>Z {formatImuValue(sensorData.imu?.gyro?.z)}</div>
+            </div>
+            <div className="rounded border border-cyan-100 bg-white/50 p-2 dark:border-cyan-900 dark:bg-black/10">
+              <div className="mb-1 font-medium text-muted-foreground">Mag (µT)</div>
+              <div>X {formatImuValue(sensorData.imu?.mag?.x)}</div>
+              <div>Y {formatImuValue(sensorData.imu?.mag?.y)}</div>
+              <div>Z {formatImuValue(sensorData.imu?.mag?.z)}</div>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted-foreground">
+            <span>Mount: {sensorData.imu?.mountOrientation || "unknown"}</span>
+            <span>Heading error: {formatImuValue(sensorData.imu?.headingError)}°</span>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              disabled={!sensorData.imu?.available}
+              onClick={() => sendRobotCommand("reset_imu_heading")}
+            >
+              Reset IMU yaw
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              disabled={!sensorData.imu?.enabled}
+              onClick={() => sendRobotCommand("recalibrate_imu")}
+            >
+              Recalibrate IMU
+            </Button>
           </div>
           {sensorData.imu?.error && (
             <div className="mt-2 flex items-center text-xs text-yellow-700 dark:text-yellow-300">

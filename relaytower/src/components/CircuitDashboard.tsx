@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Card } from "./ui/card";
+import { Button } from "./ui/button";
 import { useWebSocket } from "@/contexts/WebSocketContext";
 import { Activity, Cpu, Gauge, Compass, Route, Timer } from "lucide-react";
 
@@ -122,9 +123,10 @@ function fmt(value: number | undefined | null, digits = 1) {
 }
 
 export default function CircuitDashboard() {
-  const { sensorData, settings } = useWebSocket();
+  const { sensorData, settings, sendRobotCommand } = useWebSocket();
   const circuitModeOn = !!settings?.modes?.circuit_mode_enabled;
   const circuit = sensorData?.circuit;
+  const noInference = !!settings?.ai?.circuit_no_inference;
 
   const seriesRef = useRef<Series>({
     yaw: [],
@@ -182,6 +184,13 @@ export default function CircuitDashboard() {
 
   // Compose y-axis bounds for the steering chart against the configured max.
   const maxSteer = circuit?.maxSteeringDeg || 30;
+  const hasTurnCompass =
+    circuit?.turnStartMagHeading !== undefined ||
+    circuit?.turnTargetMagHeading !== undefined ||
+    circuit?.turnFinalMagHeading !== undefined ||
+    circuit?.turnMagDelta !== undefined ||
+    circuit?.turnMagError !== undefined ||
+    circuit?.turnAppliedMagError !== undefined;
 
   return (
     <Card className="p-4">
@@ -238,6 +247,47 @@ export default function CircuitDashboard() {
         />
       </div>
 
+      {noInference && (
+        <div className="mb-3 rounded-md border border-cyan-500/25 bg-cyan-500/5 p-2">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-medium text-cyan-700 dark:text-cyan-300">
+                Simulation controls
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                YOLO is bypassed; these buttons inject the real circuit handlers.
+              </div>
+            </div>
+            <span className="rounded bg-cyan-500/15 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-300">
+              NO INFERENCE
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Button size="sm" variant="outline" onClick={() => sendRobotCommand("simulate_circuit_green_light")}>
+              Green
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => sendRobotCommand("simulate_circuit_red_light")}>
+              Red
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => sendRobotCommand("simulate_circuit_stop_sign")}>
+              Stop
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => sendRobotCommand("simulate_circuit_right_turn")}>
+              Turn
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => sendRobotCommand("simulate_circuit_resume")}>
+              Resume
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => sendRobotCommand("simulate_circuit_reset_heading")}>
+              Reset heading
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => sendRobotCommand("simulate_circuit_stop_motion")}>
+              Pause
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Heading state */}
       <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Stat
@@ -257,6 +307,27 @@ export default function CircuitDashboard() {
           label="Steering"
           value={`${fmt(circuit?.steeringCommand, 1)}°`}
           hint={`max ${fmt(maxSteer, 0)}°`}
+        />
+      </div>
+
+      <div className="mb-3 grid grid-cols-3 gap-2">
+        <Stat
+          label="Motor diff"
+          value={fmt((circuit?.motorDifferential ?? 0) * 100, 1)}
+          unit="%"
+          tone={Math.abs(circuit?.motorDifferential ?? 0) > 0.01 ? "warn" : "muted"}
+        />
+        <Stat
+          label="Left motor"
+          value={fmt((circuit?.leftMotorCommand ?? 0) * 100, 0)}
+          unit="%"
+          tone={(circuit?.leftMotorCommand ?? 0) > 0 ? "good" : "muted"}
+        />
+        <Stat
+          label="Right motor"
+          value={fmt((circuit?.rightMotorCommand ?? 0) * 100, 0)}
+          unit="%"
+          tone={(circuit?.rightMotorCommand ?? 0) > 0 ? "good" : "muted"}
         />
       </div>
 
@@ -283,6 +354,46 @@ export default function CircuitDashboard() {
               }}
             />
           </div>
+        </div>
+      )}
+
+      {hasTurnCompass && (
+        <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-6">
+          <Stat
+            label="Turn ref"
+            value={
+              circuit?.turnReferenceSource === "magnetometer"
+                ? "Compass"
+                : circuit?.turnReferenceSource === "magnetometer-clamped"
+                ? "Clamped"
+                : "Gyro"
+            }
+            tone={
+              circuit?.turnReferenceSource === "magnetometer"
+                ? "good"
+                : circuit?.turnReferenceSource === "magnetometer-clamped"
+                ? "warn"
+                : "muted"
+            }
+          />
+          <Stat label="Mag start" value={`${fmt(circuit?.turnStartMagHeading, 1)}°`} />
+          <Stat label="Mag target" value={`${fmt(circuit?.turnTargetMagHeading, 1)}°`} />
+          <Stat label="Mag final" value={`${fmt(circuit?.turnFinalMagHeading, 1)}°`} />
+          <Stat
+            label="Mag error"
+            value={`${fmt(circuit?.turnAppliedMagError ?? circuit?.turnMagError, 1)}°`}
+            hint={
+              circuit?.turnAppliedMagError !== undefined && circuit?.turnAppliedMagError !== circuit?.turnMagError
+                ? `raw ${fmt(circuit?.turnMagError, 1)}°`
+                : undefined
+            }
+            tone={Math.abs((circuit?.turnAppliedMagError ?? circuit?.turnMagError) ?? 0) < 5 ? "good" : "warn"}
+          />
+          <Stat
+            label="Mag/gyro diff"
+            value={`${fmt(circuit?.turnMagAgreementError, 1)}°`}
+            tone={Math.abs(circuit?.turnMagAgreementError ?? 0) < 15 ? "good" : "warn"}
+          />
         </div>
       )}
 

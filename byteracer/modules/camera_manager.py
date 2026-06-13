@@ -24,12 +24,25 @@ class CameraManager:
     Manages the camera feed and monitoring.
     Handles restart requests initiated by client.
     """
-    def __init__(self, vflip=False, hflip=False, local=False, web=True, camera_size=(1920, 1080)):
+    def __init__(
+        self,
+        vflip=False,
+        hflip=False,
+        local=False,
+        web=True,
+        camera_size=(1920, 1080),
+        camera_fps=15,
+        web_fps=12,
+        jpeg_quality=70,
+    ):
         self.vflip = vflip
         self.hflip = hflip
         self.local = local
         self.web = web
         self.camera_size = camera_size
+        self.camera_fps = self._clamp_int(camera_fps, 5, 30)
+        self.web_fps = self._clamp_int(web_fps, 3, 20)
+        self.jpeg_quality = self._clamp_int(jpeg_quality, 40, 90)
         self.state = CameraState.INACTIVE
         self.last_error = None
         self.last_start_time = 0
@@ -48,6 +61,19 @@ class CameraManager:
         self.current_colors = None
         
         logger.info(f"Camera Manager initialized with resolution {self.camera_size}")
+
+    @staticmethod
+    def _clamp_int(value, low, high):
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = low
+        return max(low, min(high, value))
+
+    def _apply_vilib_limits(self):
+        Vilib.camera_fps = self.camera_fps
+        Vilib.web_fps = self.web_fps
+        Vilib.web_jpeg_quality = self.jpeg_quality
     
     async def start(self, status_callback=None):
         """
@@ -102,6 +128,7 @@ class CameraManager:
                 
                 # Start the camera with vilib, using the specified resolution
                 logger.info(f"Starting camera with resolution {camera_size}")
+                self._apply_vilib_limits()
                 Vilib.camera_start(vflip=self.vflip, hflip=self.hflip, size=camera_size)
                 Vilib.display(local=self.local, web=self.web)
                 
@@ -304,6 +331,7 @@ class CameraManager:
             # Ensure camera_size is a tuple
             camera_size = tuple(self.camera_size) if isinstance(self.camera_size, list) else self.camera_size
             Vilib.camera_size = camera_size
+            self._apply_vilib_limits()
             
             # Wait a bit more for the new instance to initialize
             await asyncio.sleep(1)
@@ -329,12 +357,25 @@ class CameraManager:
                 "hflip": self.hflip,
                 "local": self.local,
                 "web": self.web,
-                "resolution": f"{self.camera_size[0]}x{self.camera_size[1]}"
+                "resolution": f"{self.camera_size[0]}x{self.camera_size[1]}",
+                "cameraFps": self.camera_fps,
+                "webFps": self.web_fps,
+                "jpegQuality": self.jpeg_quality,
             }
         }
         return status
     
-    def update_settings(self, vflip=None, hflip=None, local=None, web=None, camera_size=None):
+    def update_settings(
+        self,
+        vflip=None,
+        hflip=None,
+        local=None,
+        web=None,
+        camera_size=None,
+        camera_fps=None,
+        web_fps=None,
+        jpeg_quality=None,
+    ):
         """
         Update camera settings.
         
@@ -367,6 +408,27 @@ class CameraManager:
                 self.camera_size = camera_size
                 logger.info(f"Camera resolution changed to {self.camera_size}")
                 restart_needed = True
+
+            if camera_fps is not None:
+                camera_fps = self._clamp_int(camera_fps, 5, 30)
+                if camera_fps != self.camera_fps:
+                    self.camera_fps = camera_fps
+                    logger.info(f"Camera FPS limit changed to {self.camera_fps}")
+                    restart_needed = True
+
+            if web_fps is not None:
+                web_fps = self._clamp_int(web_fps, 3, 20)
+                if web_fps != self.web_fps:
+                    self.web_fps = web_fps
+                    logger.info(f"Web stream FPS limit changed to {self.web_fps}")
+                    restart_needed = True
+
+            if jpeg_quality is not None:
+                jpeg_quality = self._clamp_int(jpeg_quality, 40, 90)
+                if jpeg_quality != self.jpeg_quality:
+                    self.jpeg_quality = jpeg_quality
+                    logger.info(f"Web stream JPEG quality changed to {self.jpeg_quality}")
+                    restart_needed = True
         
         return restart_needed
     def switch_face_detect(self, enable):

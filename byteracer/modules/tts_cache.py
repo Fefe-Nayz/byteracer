@@ -21,12 +21,21 @@ logger = logging.getLogger(__name__)
 
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_TTS_CACHE_DIR = PROJECT_DIR / ".venv" / "tts-cache"
+# Kept separate from the static cache so LRU eviction can never delete the
+# pre-generated static system messages.
+DEFAULT_DYNAMIC_TTS_CACHE_DIR = PROJECT_DIR / ".venv" / "tts-cache-dynamic"
+DEFAULT_DYNAMIC_CACHE_MAX_FILES = 256
 CACHE_VERSION = 2
 
 
 def get_tts_cache_dir(value: str | Path | None = None) -> Path:
     configured = value or os.environ.get("BYTERACER_TTS_CACHE_DIR")
     return Path(configured).expanduser() if configured else DEFAULT_TTS_CACHE_DIR
+
+
+def get_dynamic_tts_cache_dir(value: str | Path | None = None) -> Path:
+    configured = value or os.environ.get("BYTERACER_TTS_DYNAMIC_CACHE_DIR")
+    return Path(configured).expanduser() if configured else DEFAULT_DYNAMIC_TTS_CACHE_DIR
 
 
 def _template_has_fields(template: str) -> bool:
@@ -160,6 +169,66 @@ def generate_cached_tts_file(
                     path.unlink()
             except OSError:
                 pass
+
+
+def _evict_dynamic_cache(cache_dir: Path, max_files: int) -> None:
+    """Keep the dynamic cache bounded by deleting the least-recently-used files."""
+    if max_files <= 0:
+        return
+    try:
+        files = [p for p in cache_dir.rglob("*.wav") if not p.name.startswith(".")]
+    except OSError:
+        return
+    if len(files) <= max_files:
+        return
+    try:
+        files.sort(key=lambda p: p.stat().st_mtime)  # oldest first
+    except OSError:
+        return
+    for path in files[: len(files) - max_files]:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def generate_dynamic_cached_tts_file(
+    text: str,
+    lang: str,
+    engine: str = "piper",
+    voice: str | None = "auto",
+    volume_percent: int = 100,
+    gain_db: int = 0,
+    piper_data_dir: str | Path | None = None,
+    supertonic_cache_dir: str | Path | None = None,
+    cache_dir: str | Path | None = None,
+    max_files: int = DEFAULT_DYNAMIC_CACHE_MAX_FILES,
+) -> Path | None:
+    """Content-addressed cache for *dynamic* strings (e.g. the spoken IP address).
+
+    Same hashing as the static cache, but stored in a separate, LRU-bounded dir:
+    a string is synthesised once, then reused on every later occurrence instead of
+    re-running Piper. Returns the ready-to-play cached file, or None on failure.
+    """
+    cache_dir = get_dynamic_tts_cache_dir(cache_dir)
+    output_file = generate_cached_tts_file(
+        text,
+        lang,
+        engine=engine,
+        voice=voice,
+        volume_percent=volume_percent,
+        gain_db=gain_db,
+        piper_data_dir=piper_data_dir,
+        supertonic_cache_dir=supertonic_cache_dir,
+        cache_dir=cache_dir,
+    )
+    if output_file is not None:
+        try:
+            output_file.touch()  # bump mtime so reused entries survive eviction
+        except OSError:
+            pass
+        _evict_dynamic_cache(cache_dir, max_files)
+    return output_file
 
 
 def pregenerate_static_tts(

@@ -8,7 +8,11 @@ import subprocess
 from pathlib import Path
 import pygame
 from modules.i18n import translate
-from modules.tts_cache import generate_cached_tts_file, is_static_message_key
+from modules.tts_cache import (
+    generate_cached_tts_file,
+    generate_dynamic_cached_tts_file,
+    is_static_message_key,
+)
 from modules.tts_backends import (
     generate_tts_wav,
     get_piper_data_dir,
@@ -35,6 +39,7 @@ class TTSManager:
         use_pico_for_uncached=False,
         piper_data_dir=None,
         supertonic_cache_dir=None,
+        use_dynamic_cache=True,
     ):
         self.lang = lang
         self.enabled = enabled
@@ -42,6 +47,10 @@ class TTSManager:
         self.engine = engine
         self.voice = voice
         self.use_pico_for_uncached = bool(use_pico_for_uncached)
+        # Cache synthesised audio for dynamic (non-static-key) strings too, so a
+        # recurring string (e.g. the spoken IP address) is generated once and then
+        # replayed from disk instead of re-running the engine.
+        self.use_dynamic_cache = bool(use_dynamic_cache)
         self.piper_data_dir = str(get_piper_data_dir(piper_data_dir))
         self.supertonic_cache_dir = str(get_supertonic_cache_dir(supertonic_cache_dir))
         self.user_tts_volume = 100  # Volume for user-triggered TTS
@@ -235,8 +244,14 @@ class TTSManager:
         
         # Stop playback now - OUTSIDE the lock, following sound_manager pattern
         if current_channel is not None:
-            pygame.mixer.Channel(current_channel).stop()
-            logger.debug(f"Stopped TTS on channel {current_channel}")
+            if pygame.mixer.get_init():
+                try:
+                    pygame.mixer.Channel(current_channel).stop()
+                    logger.debug(f"Stopped TTS on channel {current_channel}")
+                except pygame.error as exc:
+                    logger.debug("Unable to stop TTS channel %s: %s", current_channel, exc)
+            else:
+                logger.debug("Skipping TTS channel stop because pygame mixer is not initialized")
             
             # Clean up tracking in sound manager
             if self.sound_manager and "tts" in self.sound_manager.current_sounds:
@@ -308,6 +323,25 @@ class TTSManager:
                     final_file = str(cached_file)
                     cleanup_file = False
                     logger.debug("Using cached TTS file: %s", final_file)
+
+            # Dynamic cache: reuse previously synthesised audio for any recurring
+            # string (volume/gain are baked into the cached file, so the sox
+            # adjustment below is skipped via cleanup_file=False).
+            if final_file is None and self.use_dynamic_cache:
+                dynamic_file = generate_dynamic_cached_tts_file(
+                    text,
+                    lang,
+                    engine=self.engine,
+                    voice=self.voice,
+                    volume_percent=round(effective_volume * 100),
+                    gain_db=self.audio_gain,
+                    piper_data_dir=self.piper_data_dir,
+                    supertonic_cache_dir=self.supertonic_cache_dir,
+                )
+                if dynamic_file:
+                    final_file = str(dynamic_file)
+                    cleanup_file = False
+                    logger.debug("Using dynamic cached TTS file: %s", final_file)
 
             if final_file is None:
                 temp_file = f"/tmp/tts_{uuid.uuid4().hex}.wav"
@@ -543,6 +577,11 @@ class TTSManager:
         """Use pico2wave directly for dynamic/non-cached TTS messages."""
         self.use_pico_for_uncached = bool(enabled)
         logger.info("Pico fallback for uncached TTS set to %s", self.use_pico_for_uncached)
+
+    def set_use_dynamic_cache(self, enabled):
+        """Cache and reuse synthesised audio for recurring dynamic strings."""
+        self.use_dynamic_cache = bool(enabled)
+        logger.info("Dynamic TTS cache set to %s", self.use_dynamic_cache)
 
     def set_piper_data_dir(self, data_dir):
         """Set the Piper voice model directory."""

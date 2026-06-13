@@ -40,6 +40,7 @@ class ConfigManager:
                 "tts_engine": "piper",
                 "tts_voice": "fr_FR-siwis-medium",
                 "tts_use_pico_for_uncached": False,
+                "tts_dynamic_cache": True,  # Cache+reuse synthesised audio for recurring dynamic strings (e.g. spoken IP)
                 "tts_audio_gain": 15,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
@@ -58,6 +59,9 @@ class ConfigManager:
                 "local_display": False,
                 "web_display": True,
                 "camera_size": [640, 480],  # Default camera resolution [width, height]
+                "camera_fps": 15,
+                "web_fps": 12,
+                "jpeg_quality": 70,
             },
             
             # Safety settings
@@ -110,9 +114,12 @@ class ConfigManager:
                 "openai_api_key": "",
                 "model": "gpt-5.5"
             },
+            "system": {
+                "telemetry_interval": 0.2,  # WebSocket/UI telemetry period; 0.05s min (20 FPS)
+            },
             "imu": {
                 "enabled": True,
-                "sensor_type": "mpu6050",  # "mpu6050" or "mpu9250" (adds magnetometer)
+                "sensor_type": "mpu9250",  # "mpu6050" or "mpu9250" (adds magnetometer)
                 "bus": 1,
                 "i2c_address": "0x68",
                 "sample_rate_hz": 50,
@@ -120,6 +127,10 @@ class ConfigManager:
                 "gyro_deadband_dps": 0.35,
                 "mag_declination_deg": 0.0,  # MPU9250: local magnetic declination
                 "mag_yaw_invert": False,  # MPU9250: flip if fused yaw oscillates
+                "mag_offset": {"x": -50.776, "y": -68.970, "z": -564.275},  # Hard-iron seed (fallback before auto-cal converges)
+                "mag_scale": {"x": 1.0, "y": 1.0, "z": 1.0},  # Soft-iron scale compensation
+                "mag_auto_calibrate": True,  # Track hard/soft-iron live (the frozen offset cannot follow the drifting bias)
+                "mount_orientation": "components_down_pins_rear",  # Components down, pin row toward rear
             },
             "ai": {
                 "speak_pause_threshold": 1.2,
@@ -129,6 +140,7 @@ class ConfigManager:
                 "motor_balance": 0, # -50 to +50, negative for left bias, positive for right bias
                 "autonomous_speed": 0.05, # Default speed for autonomous driving (5%)
                 "turn_speed": 0.15, # Motor speed used during right-turn rotations (5-30%)
+                "circuit_turn_speed": 0.18, # Pivot speed for circuit turn-in-place (8-40%)
                 "circuit_camera_tilt": 12, # Default upward camera tilt when entering circuit mode
                 "wait_to_turn_time": 2.0, # Time to wait before turning after seeing a turn sign (seconds)
                 "stop_sign_wait_time": 2.0, # Time to wait at a stop sign (seconds)
@@ -140,6 +152,9 @@ class ConfigManager:
                 "speed_dead_zone": 0.5, # Speed dead zone for face tracking (0.0-1.0)
                 "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
                 "circuit_use_imu": False, # Use the inertial sensor for circuit straight/turn control
+                "circuit_no_inference": False, # Circuit test mode: no YOLO, actions are simulated from UI
+                "yolo_worker_process": True, # Isolate YOLO/NCNN from the controller process
+                "circuit_turn_use_mag": False, # Anchor post-turn heading on the magnetometer (only with a trustworthy compass)
                 "imu_heading_kp": 0.8, # Heading hold proportional gain for circuit mode
                 "imu_heading_ki": 0.0, # Heading hold integral gain (cancels steady-state drift)
                 "imu_max_correction": 0.05, # Max per-wheel motor differential while holding heading
@@ -403,6 +418,7 @@ class ConfigManager:
                 "tts_engine": "piper",
                 "tts_voice": "fr_FR-siwis-medium",
                 "tts_use_pico_for_uncached": False,
+                "tts_dynamic_cache": True,  # Cache+reuse synthesised audio for recurring dynamic strings (e.g. spoken IP)
                 "tts_audio_gain": 15,  # Gain in dB to make TTS louder
                 # Individual category volumes
                 "driving_volume": 80,  # For acceleration, braking, drift sounds
@@ -421,6 +437,9 @@ class ConfigManager:
                 "local_display": False,
                 "web_display": True,
                 "camera_size": [640, 480],  # Default camera resolution
+                "camera_fps": 15,
+                "web_fps": 12,
+                "jpeg_quality": 70,
             },
             
             # Safety settings
@@ -472,9 +491,12 @@ class ConfigManager:
                 "openai_api_key": "",
                 "model": "gpt-5.5"
             },
+            "system": {
+                "telemetry_interval": 0.2,  # WebSocket/UI telemetry period; 0.05s min (20 FPS)
+            },
             "imu": {
                 "enabled": True,
-                "sensor_type": "mpu6050",  # "mpu6050" or "mpu9250" (adds magnetometer)
+                "sensor_type": "mpu9250",  # "mpu6050" or "mpu9250" (adds magnetometer)
                 "bus": 1,
                 "i2c_address": "0x68",
                 "sample_rate_hz": 50,
@@ -482,6 +504,10 @@ class ConfigManager:
                 "gyro_deadband_dps": 0.35,
                 "mag_declination_deg": 0.0,  # MPU9250: local magnetic declination
                 "mag_yaw_invert": False,  # MPU9250: flip if fused yaw oscillates
+                "mag_offset": {"x": -50.776, "y": -68.970, "z": -564.275},
+                "mag_scale": {"x": 1.0, "y": 1.0, "z": 1.0},
+                "mag_auto_calibrate": True,
+                "mount_orientation": "components_down_pins_rear",
             },
             "ai": {
                 "speak_pause_threshold": 1.2,
@@ -491,6 +517,7 @@ class ConfigManager:
                 "motor_balance": 0, # -50 to +50, negative for left bias, positive for right bias
                 "autonomous_speed": 0.05, # Default speed for autonomous driving (5%)
                 "turn_speed": 0.15, # Motor speed used during right-turn rotations (5-30%)
+                "circuit_turn_speed": 0.18, # Pivot speed for circuit turn-in-place (8-40%)
                 "circuit_camera_tilt": 12, # Default upward camera tilt when entering circuit mode
                 "wait_to_turn_time": 2.0, # Time to wait before turning after seeing a turn sign (seconds)
                 "stop_sign_wait_time": 2.0, # Time to wait at a stop sign (seconds)
@@ -502,6 +529,9 @@ class ConfigManager:
                 "speed_dead_zone": 0.5, # Speed dead zone for face tracking (0.0-1.0)
                 "turn_factor": 35.0, # Turn factor for face tracking (10.0-50.0)
                 "circuit_use_imu": False, # Use the inertial sensor for circuit straight/turn control
+                "circuit_no_inference": False, # Circuit test mode: no YOLO, actions are simulated from UI
+                "yolo_worker_process": True, # Isolate YOLO/NCNN from the controller process
+                "circuit_turn_use_mag": False, # Anchor post-turn heading on the magnetometer (only with a trustworthy compass)
                 "imu_heading_kp": 0.8, # Heading hold proportional gain for circuit mode
                 "imu_heading_ki": 0.0, # Heading hold integral gain (cancels steady-state drift)
                 "imu_max_correction": 0.05, # Max per-wheel motor differential while holding heading

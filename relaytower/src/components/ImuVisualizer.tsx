@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Button } from "./ui/button";
 
@@ -29,6 +29,14 @@ interface CircuitDebug {
   turnTargetDeg: number;
   turnGoalDelta: number;
   turnCurrentDelta: number;
+  turnStartMagHeading?: number | null;
+  turnTargetMagHeading?: number | null;
+  turnFinalMagHeading?: number | null;
+  turnMagDelta?: number | null;
+  turnMagError?: number | null;
+  turnAppliedMagError?: number | null;
+  turnMagAgreementError?: number | null;
+  turnReferenceSource?: string;
   turnInPlace?: boolean;
 }
 
@@ -36,10 +44,24 @@ interface ImuVisualizerProps {
   quaternion?: Quat;
   available: boolean;
   circuit?: CircuitDebug;
+  circuitModeActive?: boolean;
+  speed?: number;
+  heading?: number;
+  magHeading?: number;
+  gyroYaw?: number;
+  magnetometer?: boolean;
+  mountOrientation?: string;
 }
 
 const ZERO_STORAGE_KEY = "byteracer-imu-zero-quat";
 const DEG2RAD = Math.PI / 180;
+const TRAIL_MAX_POINTS = 900;
+const TRAIL_SPEED_SCALE = 4.0;
+
+interface TrailPoint {
+  x: number;
+  y: number;
+}
 
 // Build the robot car in the IMU body frame: X = forward (nose), Y = left,
 // Z = up. Returns the group plus the front wheels so they can be steered.
@@ -110,26 +132,127 @@ function fmt(value: number | undefined, digits = 1) {
   return value.toFixed(digits);
 }
 
+function compassDegrees(value: number | undefined) {
+  if (value === undefined || value === null || Number.isNaN(value)) return undefined;
+  return ((value % 360) + 360) % 360;
+}
+
+function normalizeAngle(value: number) {
+  return ((value + 180) % 360 + 360) % 360 - 180;
+}
+
 export default function ImuVisualizer({
   quaternion,
   available,
   circuit,
+  circuitModeActive = false,
+  speed,
+  heading,
+  magHeading,
+  gyroYaw,
+  magnetometer,
+  mountOrientation,
 }: ImuVisualizerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const quatRef = useRef<Quat>({ w: 1, x: 0, y: 0, z: 0 });
   const steerRef = useRef(0); // latest steering command in degrees
+  const topDownRef = useRef(false);
+  const yawRef = useRef(0);
+  const speedRef = useRef(0);
+  const driveSpeedRef = useRef(0);
+  const pathRef = useRef<TrailPoint[]>([{ x: 0, y: 0 }]);
+  const poseRef = useRef({ x: 0, y: 0 });
+  const baseYawRef = useRef(0);
+  const lastPathTimeRef = useRef(0);
+  const wasCircuitRef = useRef(false);
+  const trailDirtyRef = useRef(true);
   const zeroRef = useRef<THREE.Quaternion>(new THREE.Quaternion());
   const [hasZero, setHasZero] = useState(false);
+  const [trailPoints, setTrailPoints] = useState(1);
+  const zeroStorageKey = `${ZERO_STORAGE_KEY}:${mountOrientation || "default"}`;
 
   if (quaternion) quatRef.current = quaternion;
   steerRef.current = circuit?.steeringCommand ?? 0;
+  topDownRef.current = !!circuitModeActive;
+  yawRef.current = circuit?.currentHeading ?? gyroYaw ?? heading ?? 0;
+  speedRef.current = Math.abs(speed ?? 0);
+  driveSpeedRef.current = Math.max(0, circuit?.driveSpeed ?? 0);
+
+  const resetTrail = useCallback(() => {
+    pathRef.current = [{ x: 0, y: 0 }];
+    poseRef.current = { x: 0, y: 0 };
+    baseYawRef.current = yawRef.current;
+    lastPathTimeRef.current = 0;
+    trailDirtyRef.current = true;
+    setTrailPoints(1);
+  }, []);
+
+  useEffect(() => {
+    if (!available || !circuitModeActive) {
+      wasCircuitRef.current = false;
+      lastPathTimeRef.current = 0;
+      return;
+    }
+
+    if (!wasCircuitRef.current) {
+      resetTrail();
+      wasCircuitRef.current = true;
+      return;
+    }
+
+    const now = performance.now();
+    if (!lastPathTimeRef.current) {
+      lastPathTimeRef.current = now;
+      return;
+    }
+
+    const dt = Math.min(0.25, Math.max(0, (now - lastPathTimeRef.current) / 1000));
+    lastPathTimeRef.current = now;
+
+    const driveSpeed = driveSpeedRef.current;
+    const measuredSpeed = speedRef.current;
+    const pathSpeed =
+      driveSpeed > 0.01
+        ? Math.max(driveSpeed, measuredSpeed)
+        : measuredSpeed > 0.02
+        ? measuredSpeed
+        : 0;
+
+    if (dt <= 0 || pathSpeed <= 0) return;
+
+    const yawRad = normalizeAngle(yawRef.current - baseYawRef.current) * DEG2RAD;
+    const distance = pathSpeed * TRAIL_SPEED_SCALE * dt;
+    const pose = poseRef.current;
+    pose.x += Math.cos(yawRad) * distance;
+    pose.y -= Math.sin(yawRad) * distance;
+
+    const points = pathRef.current;
+    const last = points[points.length - 1];
+    const dx = pose.x - last.x;
+    const dy = pose.y - last.y;
+    if (Math.hypot(dx, dy) > 0.015) {
+      points.push({ x: pose.x, y: pose.y });
+      if (points.length > TRAIL_MAX_POINTS) points.shift();
+      trailDirtyRef.current = true;
+      setTrailPoints(points.length);
+    }
+  }, [
+    available,
+    circuitModeActive,
+    circuit?.currentHeading,
+    circuit?.driveSpeed,
+    gyroYaw,
+    heading,
+    resetTrail,
+    speed,
+  ]);
 
   useEffect(() => {
     const mount = mountRef.current;
     if (!mount) return;
 
     try {
-      const saved = localStorage.getItem(ZERO_STORAGE_KEY);
+      const saved = localStorage.getItem(zeroStorageKey);
       if (saved) {
         const arr = JSON.parse(saved) as number[];
         if (Array.isArray(arr) && arr.length === 4) {
@@ -168,21 +291,71 @@ export default function ImuVisualizer({
     pivot.rotation.x = -Math.PI / 2;
     scene.add(pivot);
 
+    const trailMaterial = new THREE.LineBasicMaterial({
+      color: 0xef4444,
+      linewidth: 2,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const trailLine = new THREE.Line(new THREE.BufferGeometry(), trailMaterial);
+    trailLine.visible = false;
+    pivot.add(trailLine);
+
     const { group: robot, frontWheels } = buildRobot();
     pivot.add(robot);
 
     const qCurrent = new THREE.Quaternion();
     const qDisplay = new THREE.Quaternion();
     const qZeroInv = new THREE.Quaternion();
+    const qYawOnly = new THREE.Quaternion();
+    const normalCameraPos = new THREE.Vector3(4.6, 3.2, 5.0);
+    const normalLookAt = new THREE.Vector3(0, 0.5, 0);
+    const topDownTarget = new THREE.Vector3();
+    const topDownCameraPos = new THREE.Vector3();
+    const robotLocalTarget = new THREE.Vector3();
+    const yawAxis = new THREE.Vector3(0, 0, 1);
 
     let frameId = 0;
     let shownSteer = 0;
     const animate = () => {
-      const q = quatRef.current;
-      qCurrent.set(q.x, q.y, q.z, q.w);
-      qZeroInv.copy(zeroRef.current).invert();
-      qDisplay.copy(qZeroInv).multiply(qCurrent);
-      robot.quaternion.slerp(qDisplay, 0.25);
+      const topDown = topDownRef.current;
+
+      if (trailDirtyRef.current) {
+        const positions = pathRef.current.map(
+          (p) => new THREE.Vector3(p.x, p.y, 0.035)
+        );
+        trailLine.geometry.dispose();
+        trailLine.geometry = new THREE.BufferGeometry().setFromPoints(positions);
+        trailDirtyRef.current = false;
+      }
+
+      if (topDown) {
+        const pose = poseRef.current;
+        robot.position.lerp(robotLocalTarget.set(pose.x, pose.y, 0), 0.35);
+        const yawRad = normalizeAngle(yawRef.current - baseYawRef.current) * DEG2RAD;
+        qYawOnly.setFromAxisAngle(yawAxis, yawRad);
+        robot.quaternion.slerp(qYawOnly, 0.35);
+        trailLine.visible = true;
+
+        pivot.updateWorldMatrix(true, false);
+        topDownTarget.set(pose.x, pose.y, 0).applyMatrix4(pivot.matrixWorld);
+        topDownCameraPos.set(topDownTarget.x, 13.5, topDownTarget.z + 0.001);
+        camera.up.set(0, 0, -1);
+        camera.position.lerp(topDownCameraPos, 0.12);
+        camera.lookAt(topDownTarget);
+      } else {
+        robot.position.lerp(robotLocalTarget.set(0, 0, 0), 0.2);
+        const q = quatRef.current;
+        qCurrent.set(q.x, q.y, q.z, q.w);
+        qZeroInv.copy(zeroRef.current).invert();
+        qDisplay.copy(qZeroInv).multiply(qCurrent);
+        robot.quaternion.slerp(qDisplay, 0.25);
+        trailLine.visible = false;
+
+        camera.up.set(0, 1, 0);
+        camera.position.lerp(normalCameraPos, 0.08);
+        camera.lookAt(normalLookAt);
+      }
 
       // Steer the (blue) front wheels by the live servo command so you can see
       // how the controller is correcting the course.
@@ -219,15 +392,17 @@ export default function ImuVisualizer({
           else mat.dispose();
         }
       });
+      trailLine.geometry.dispose();
+      trailMaterial.dispose();
     };
-  }, []);
+  }, [zeroStorageKey]);
 
   const setLevel = () => {
     const q = quatRef.current;
     zeroRef.current.set(q.x, q.y, q.z, q.w);
     try {
       localStorage.setItem(
-        ZERO_STORAGE_KEY,
+        zeroStorageKey,
         JSON.stringify(zeroRef.current.toArray())
       );
     } catch {
@@ -239,7 +414,7 @@ export default function ImuVisualizer({
   const resetLevel = () => {
     zeroRef.current.identity();
     try {
-      localStorage.removeItem(ZERO_STORAGE_KEY);
+      localStorage.removeItem(zeroStorageKey);
     } catch {
       /* ignore */
     }
@@ -247,10 +422,13 @@ export default function ImuVisualizer({
   };
 
   const showCircuit = !!circuit?.enabled;
+  const topDownMode = available && circuitModeActive;
   const turnPct =
     circuit && circuit.turnTargetDeg > 0
       ? Math.min(100, (circuit.turnCurrentDelta / circuit.turnTargetDeg) * 100)
       : 0;
+  const compassHeading = compassDegrees(magnetometer ? magHeading : heading);
+  const compassNeedle = compassHeading === undefined ? 0 : -compassHeading;
 
   return (
     <div className="space-y-2">
@@ -327,6 +505,13 @@ export default function ImuVisualizer({
           </div>
         )}
 
+        {topDownMode && (
+          <div className="absolute left-2 bottom-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
+            <div className="font-semibold text-red-300">Top-down trail</div>
+            <div className="text-white/75">{trailPoints} pts · relative path</div>
+          </div>
+        )}
+
         {/* Live steering bar (servo angle) */}
         {available && showCircuit && !circuit?.turnActive && (
           <div className="absolute bottom-2 left-1/2 w-32 -translate-x-1/2">
@@ -350,6 +535,29 @@ export default function ImuVisualizer({
             </div>
           </div>
         )}
+
+        {available && (
+          <div className="absolute bottom-2 right-2 flex items-center gap-2 rounded bg-black/55 px-2 py-1 text-[10px] text-white backdrop-blur-sm">
+            <div className="relative h-11 w-11 rounded-full border border-white/45 bg-white/10">
+              <div className="absolute left-1/2 top-1 h-1 w-px -translate-x-1/2 bg-white/60" />
+              <div className="absolute bottom-1 left-1/2 h-1 w-px -translate-x-1/2 bg-white/35" />
+              <div className="absolute left-1 top-1/2 h-px w-1 -translate-y-1/2 bg-white/35" />
+              <div className="absolute right-1 top-1/2 h-px w-1 -translate-y-1/2 bg-white/35" />
+              <div
+                className="absolute left-1/2 top-1/2 h-8 w-0.5 origin-center rounded bg-amber-300"
+                style={{ transform: `translate(-50%, -50%) rotate(${compassNeedle}deg)` }}
+              >
+                <div className="absolute -top-1 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 bg-amber-300" />
+              </div>
+              <div className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+            </div>
+            <div className="min-w-14 leading-tight">
+              <div className="font-semibold">{magnetometer ? "MAG" : "YAW"}</div>
+              <div>{fmt(compassHeading, 0)}°</div>
+              <div className="text-white/60">gyro {fmt(gyroYaw, 0)}°</div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -363,6 +571,17 @@ export default function ImuVisualizer({
         >
           Set as level
         </Button>
+        {topDownMode && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={resetTrail}
+            title="Clear the top-down circuit trail"
+          >
+            Clear trail
+          </Button>
+        )}
         {hasZero && (
           <Button
             variant="ghost"

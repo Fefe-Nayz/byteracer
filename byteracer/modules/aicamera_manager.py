@@ -4,9 +4,12 @@ import threading
 import math
 import os
 import sys
+import multiprocessing as mp
+import queue as queue_module
 import numpy as np
 import cv2
 import asyncio
+from modules.yolo_worker import run_yolo_worker
 logger = logging.getLogger(__name__)
 
 class AICameraCameraManager:
@@ -68,6 +71,20 @@ class AICameraCameraManager:
         self.yolo_min_confidence = 0.5
         self.yolo_results = []
         self.yolo_object_count = 0
+        self.yolo_labels = {}
+        self.yolo_worker_process_enabled = True
+        self.yolo_worker_process = None
+        self._yolo_mp_context = None
+        self._yolo_frame_queue = None
+        self._yolo_result_queue = None
+        self._yolo_stop_event = None
+        self._yolo_frame_seq = 0
+        self._latest_yolo_detections = []
+        self._latest_yolo_result_time = 0.0
+        self._yolo_result_fps_last_t = 0.0
+        self._yolo_frame_in_flight = False
+        self._yolo_worker_ready = False
+        self._yolo_worker_last_error = None
         # Extract camera width and height from config
         camera_size = self.config_manager.get("camera.camera_size")
         self.camera_width = camera_size[0]  # First element is width
@@ -98,8 +115,18 @@ class AICameraCameraManager:
         self.continuous_turning = False  # Flag to track if continuous turning is active
 
         # Initialize speed and timing configuration from config or use defaults
-        self.autonomous_speed = self.config_manager.get("ai.autonomous_speed") or 0.05  # Default 5% speed
+        autonomous_speed_setting = self.config_manager.get("ai.autonomous_speed")
+        self.autonomous_speed = 0.05 if autonomous_speed_setting is None else float(autonomous_speed_setting)
         self.turn_speed = self.config_manager.get("ai.turn_speed") or 0.15  # Default 15% turn speed
+        circuit_turn_speed = self.config_manager.get("ai.circuit_turn_speed")
+        try:
+            self.circuit_turn_speed = self.clamp_number(
+                float(circuit_turn_speed if circuit_turn_speed is not None else max(self.turn_speed, 0.18)),
+                0.08,
+                0.4,
+            )
+        except (TypeError, ValueError):
+            self.circuit_turn_speed = 0.18
         circuit_camera_tilt = self.config_manager.get("ai.circuit_camera_tilt")
         self.circuit_camera_tilt = 12 if circuit_camera_tilt is None else circuit_camera_tilt  # Slight upward tilt
         self.wait_to_turn_time = self.config_manager.get("ai.wait_to_turn_time") or 2.0  # Default 2 seconds
@@ -107,6 +134,9 @@ class AICameraCameraManager:
         self.stop_sign_ignore_time = self.config_manager.get("ai.stop_sign_ignore_time") or 3.0  # Default 3 seconds
         self.traffic_light_ignore_time = self.config_manager.get("ai.traffic_light_ignore_time") or 3.0  # Default 3 seconds
         self.circuit_use_imu = bool(self.config_manager.get("ai.circuit_use_imu") or False)
+        self.circuit_no_inference = bool(self.config_manager.get("ai.circuit_no_inference") or False)
+        yolo_worker_setting = self.config_manager.get("ai.yolo_worker_process")
+        self.yolo_worker_process_enabled = True if yolo_worker_setting is None else bool(yolo_worker_setting)
         self.imu_circuit_active = False
         self.imu_heading_reference_ready = False
         self.imu_heading_kp = float(self.config_manager.get("ai.imu_heading_kp") or 0.8)
@@ -114,6 +144,16 @@ class AICameraCameraManager:
         self.imu_max_correction = float(self.config_manager.get("ai.imu_max_correction") or 0.05)
         self.imu_max_steering_deg = float(self.config_manager.get("ai.imu_max_steering_deg") or 30.0)
         self.imu_turn_target_deg = float(self.config_manager.get("ai.imu_turn_target_deg") or 90)
+        # The on-board magnetometer is too disturbed by the motors/fan/chassis to
+        # serve as the post-turn heading reference (it injects tens of degrees of
+        # error per turn). Default to pure gyro for the turn consigne; the mag is
+        # still measured for telemetry/display. Flip this on only once the compass
+        # is properly auto-calibrated and trustworthy.
+        self.circuit_turn_use_mag = bool(self.config_manager.get("ai.circuit_turn_use_mag") or False)
+        # Absolute heading the robot had when it entered the first straight road.
+        # Every post-turn heading is snapped to origin + N*turn_target so the four
+        # intersections stay on an exact grid and per-turn errors never accumulate.
+        self.circuit_origin_heading = None
         self.imu_turn_tolerance_deg = float(self.config_manager.get("ai.imu_turn_tolerance_deg") or 3)
         self.imu_turn_timeout = float(self.config_manager.get("ai.imu_turn_timeout") or 4.0)
         self.circuit_turn_in_place = bool(
@@ -135,6 +175,9 @@ class AICameraCameraManager:
             "currentHeading": 0.0,
             "headingError": 0.0,
             "steeringCommand": 0.0,
+            "motorDifferential": 0.0,
+            "leftMotorCommand": 0.0,
+            "rightMotorCommand": 0.0,
             "integral": 0.0,
             "gyroRateZ": 0.0,
             "driveSpeed": 0.0,
@@ -143,12 +186,25 @@ class AICameraCameraManager:
             "turnTargetDeg": 0.0,
             "turnGoalDelta": 0.0,
             "turnCurrentDelta": 0.0,
+            "turnStartMagHeading": None,
+            "turnTargetMagHeading": None,
+            "turnFinalMagHeading": None,
+            "turnMagDelta": None,
+            "turnMagError": None,
+            "turnAppliedMagError": None,
+            "turnMagAgreementError": None,
+            "turnReferenceSource": "gyro",
             # Performance counters.
             "controlFps": 0.0,        # cruise PI loop frequency
             "controlLoopMs": 0.0,     # per-iteration wall time of the cruise loop
             "yoloFps": 0.0,           # YOLO outer-loop frequency (frame -> action)
             "yoloInferenceMs": 0.0,   # time spent inside the NCNN model per frame
             "yoloObjects": 0,         # detections in the last YOLO frame
+            "yoloWorkerProcess": False,
+            "yoloWorkerReady": False,
+            "yoloDriveReady": False,
+            "yoloResultAgeMs": 0.0,
+            "noInference": False,     # circuit debug mode: drive/IMU active, no YOLO loop
         }
 
         # Internal FPS accumulators (EMA-smoothed).
@@ -167,7 +223,11 @@ class AICameraCameraManager:
         
         # Auto-load YOLO model if available in modules directory
         self.model_path = os.path.join(os.path.dirname(__file__), 'model_ncnn_model')
-        if os.path.exists(self.model_path):
+        if self.circuit_no_inference:
+            logger.info("Skipping YOLO auto-load because circuit no-inference test mode is enabled")
+        elif self.yolo_worker_process_enabled:
+            logger.info("YOLO worker process mode enabled; model will load outside the controller process")
+        elif os.path.exists(self.model_path):
             try:
                 # Try to load the model during initialization but don't block if it fails
                 threading.Thread(target=self.load_yolo_model, args=(self.model_path,), daemon=True).start()
@@ -192,6 +252,7 @@ class AICameraCameraManager:
         # IMU circuit-assist constants
         self.IMU_MAX_STEERING_DEG = 30.0  # max steering servo correction for heading hold
         self.IMU_TURN_BRAKE_GAIN  = 0.12  # stop a turn this many degrees early per deg/s of spin
+        self.IMU_TURN_MAX_MAG_CORRECTION_DEG = 45.0  # cap post-turn compass correction for safety
 
         # Steering constants
         self.TURN_FACTOR = 35.0         # final multiplier for turning
@@ -215,11 +276,46 @@ class AICameraCameraManager:
         return max(min(num, max(lower_bound, upper_bound)),
                    min(lower_bound, upper_bound))
 
+    @staticmethod
+    def _normalize_angle(angle):
+        return (float(angle) + 180.0) % 360.0 - 180.0
+
+    @classmethod
+    def _circular_mean_deg(cls, values):
+        values = [v for v in values if v is not None and math.isfinite(float(v))]
+        if not values:
+            return None
+        sin_sum = sum(math.sin(math.radians(float(v))) for v in values)
+        cos_sum = sum(math.cos(math.radians(float(v))) for v in values)
+        if abs(sin_sum) < 1e-9 and abs(cos_sum) < 1e-9:
+            return None
+        return cls._normalize_angle(math.degrees(math.atan2(sin_sum, cos_sum)))
+
+    def _read_stable_mag_heading(self, samples=5, interval=0.02):
+        if not self.imu_manager or not hasattr(self.imu_manager, "get_mag_heading_deg"):
+            return None
+        readings = []
+        for _ in range(max(1, int(samples))):
+            try:
+                readings.append(self.imu_manager.get_mag_heading_deg())
+            except Exception as exc:
+                logger.debug("Unable to read magnetometer heading: %s", exc)
+                return None
+            time.sleep(max(0.0, float(interval)))
+        return self._circular_mean_deg(readings)
+
     def stop_motion(self, reset_steering=True):
         """Stop both drive motors and clear the current motion state."""
         with self._circuit_drive_lock:
             self._circuit_cruise_speed = 0.0
-        self.circuit_debug["driveSpeed"] = 0.0
+        self.circuit_debug.update({
+            "driveSpeed": 0.0,
+            "motorDifferential": 0.0,
+            "leftMotorCommand": 0.0,
+            "rightMotorCommand": 0.0,
+        })
+        if reset_steering:
+            self.circuit_debug["steeringCommand"] = 0.0
 
         try:
             with self._motion_command_lock:
@@ -247,14 +343,22 @@ class AICameraCameraManager:
             self._circuit_cruise_speed = speed
         self.circuit_debug["driveSpeed"] = speed
 
+    def _is_inference_ready_to_drive(self):
+        """Circuit drive may start only after inference can produce decisions."""
+        if self.circuit_no_inference:
+            return True
+        if not self.yolo_worker_process_enabled:
+            return True
+        return bool(self._yolo_worker_ready and self._latest_yolo_result_time > 0)
+
     def _should_circuit_drive(self):
         return (
             self.yolo_detection_active
+            and self._is_inference_ready_to_drive()
             and not self.yolo_detection_paused
             and not self.waiting_for_green
             and not self.waiting_at_stop_sign
             and not self.executing_right_turn
-            and not self.right_turn_pending
         )
 
     def _boost_thread_priority(self, label="thread"):
@@ -283,6 +387,34 @@ class AICameraCameraManager:
         except (PermissionError, OSError) as exc:
             logger.debug("[%s] could not adjust nice (%s)", label, exc)
 
+    @staticmethod
+    def _reserved_control_core():
+        """The CPU core kept for the real-time control loop (the last one)."""
+        ncpu = os.cpu_count() or 1
+        return ncpu - 1 if ncpu >= 2 else None
+
+    @staticmethod
+    def _inference_cores():
+        """Cores inference may use: everything except the reserved control core."""
+        ncpu = os.cpu_count() or 1
+        return set(range(ncpu - 1)) if ncpu >= 2 else None
+
+    def _trace(self, event, **kw):
+        """Timestamped, thread-tagged circuit event trace for ordering debug."""
+        extra = " ".join(f"{k}={v}" for k, v in kw.items())
+        logger.info("CIRCUIT-TRACE [%s] %s %s",
+                    threading.current_thread().name, event, extra)
+
+    def _pin_thread_to_cores(self, cores, label="thread"):
+        """Pin the current thread to a set of CPU cores (Linux only)."""
+        if not cores or not hasattr(os, "sched_setaffinity"):
+            return
+        try:
+            os.sched_setaffinity(0, set(cores))
+            logger.info("[%s] pinned to CPU core(s) %s", label, sorted(cores))
+        except (OSError, ValueError) as exc:
+            logger.debug("[%s] could not set CPU affinity (%s)", label, exc)
+
     def _lower_thread_priority(self, label="thread", delta=10):
         """Yield CPU to the control loop (used on the YOLO/inference worker)."""
         try:
@@ -295,6 +427,11 @@ class AICameraCameraManager:
     def _circuit_drive_loop(self):
         """Apply heading hold / motor balance at control rate, not YOLO rate."""
         self._boost_thread_priority("circuit-drive")
+        # Reserve a dedicated core so a ~1 s inference burst on the other cores can
+        # never starve the heading-hold loop (this is what caused the zig-zag).
+        core = self._reserved_control_core()
+        if core is not None:
+            self._pin_thread_to_cores({core}, "circuit-drive")
         interval = 0.05
         last_iter_start = 0.0
         while self.yolo_detection_active:
@@ -372,6 +509,7 @@ class AICameraCameraManager:
         """Capture the current heading before circuit mode starts moving."""
         self.imu_circuit_active = bool(self.circuit_use_imu)
         self.imu_heading_reference_ready = False
+        self.circuit_origin_heading = None
         self._reset_heading_hold()
         self._should_use_imu_circuit()
 
@@ -387,8 +525,11 @@ class AICameraCameraManager:
             return False
         if not self.imu_heading_reference_ready:
             self.imu_manager.reset_heading_reference()
+            # Pin the circuit grid origin to this initial straight heading.
+            self.circuit_origin_heading = self.imu_manager.get_heading_reference_deg()
             self._reset_heading_hold()
             self.imu_heading_reference_ready = True
+            logger.info("Circuit grid origin heading set to %.2f°", self.circuit_origin_heading)
         return True
 
     # ------------------------------------------------------------------
@@ -748,7 +889,201 @@ class AICameraCameraManager:
     
     # ------------------------------------------------------------------
     # YOLO Object Detection
-    # ------------------------------------------------------------------    
+    # ------------------------------------------------------------------
+    def _get_yolo_mp_context(self):
+        if self._yolo_mp_context is not None:
+            return self._yolo_mp_context
+        try:
+            self._yolo_mp_context = mp.get_context("fork" if sys.platform != "win32" else "spawn")
+        except ValueError:
+            self._yolo_mp_context = mp.get_context()
+        return self._yolo_mp_context
+
+    def _queue_replace(self, target_queue, item):
+        if target_queue is None:
+            return False
+        try:
+            while True:
+                target_queue.get_nowait()
+        except queue_module.Empty:
+            pass
+
+        try:
+            target_queue.put_nowait(item)
+            return True
+        except queue_module.Full:
+            return False
+
+    def _start_yolo_worker_process(self, model_path=None):
+        if not self.yolo_worker_process_enabled:
+            return False
+
+        if model_path is None:
+            model_path = self.model_path
+
+        if not os.path.exists(model_path):
+            logger.error(f"Model path is invalid or model not found: {model_path}")
+            return False
+
+        if self.yolo_worker_process and self.yolo_worker_process.is_alive():
+            return True
+
+        self._stop_yolo_worker_process()
+        ctx = self._get_yolo_mp_context()
+        self._yolo_frame_queue = ctx.Queue(maxsize=1)
+        self._yolo_result_queue = ctx.Queue(maxsize=3)
+        self._yolo_stop_event = ctx.Event()
+        self._latest_yolo_detections = []
+        self._latest_yolo_result_time = 0.0
+        self._yolo_result_fps_last_t = 0.0
+        self._yolo_frame_in_flight = False
+        self._yolo_worker_ready = False
+        self._yolo_worker_last_error = None
+
+        cores = sorted(self._inference_cores() or [])
+        self.yolo_worker_process = ctx.Process(
+            target=run_yolo_worker,
+            args=(
+                model_path,
+                self._yolo_frame_queue,
+                self._yolo_result_queue,
+                self._yolo_stop_event,
+                cores,
+            ),
+            daemon=True,
+            name="byteracer-yolo-worker",
+        )
+        self.yolo_worker_process.start()
+        self.circuit_debug["yoloWorkerProcess"] = True
+        self.circuit_debug["yoloWorkerReady"] = False
+        logger.info(
+            "Started YOLO worker process pid=%s cores=%s",
+            self.yolo_worker_process.pid,
+            cores or "default",
+        )
+        return True
+
+    def _stop_yolo_worker_process(self):
+        process = self.yolo_worker_process
+        if self._yolo_stop_event is not None:
+            try:
+                self._yolo_stop_event.set()
+            except Exception:
+                pass
+
+        if process is not None and process.is_alive():
+            process.join(timeout=2.0)
+            if process.is_alive():
+                logger.warning("YOLO worker process did not exit; terminating pid=%s", process.pid)
+                process.terminate()
+                process.join(timeout=1.0)
+
+        self.yolo_worker_process = None
+        self._yolo_frame_queue = None
+        self._yolo_result_queue = None
+        self._yolo_stop_event = None
+        self._yolo_worker_ready = False
+        self._yolo_frame_in_flight = False
+        self.circuit_debug["yoloWorkerProcess"] = False
+        self.circuit_debug["yoloWorkerReady"] = False
+        self.circuit_debug["yoloDriveReady"] = False
+
+    def _submit_yolo_worker_frame(self, frame, model_input_size):
+        if (
+            not self.yolo_worker_process_enabled
+            or self._yolo_frame_queue is None
+            or self.yolo_worker_process is None
+            or not self.yolo_worker_process.is_alive()
+        ):
+            return False
+        if self._yolo_frame_in_flight:
+            return False
+
+        self._yolo_frame_seq += 1
+        submitted = self._queue_replace(
+            self._yolo_frame_queue,
+            {
+                "seq": self._yolo_frame_seq,
+                "frame": frame,
+                "model_input_size": tuple(model_input_size),
+                "min_confidence": self.yolo_min_confidence,
+                "timestamp": time.time(),
+            },
+        )
+        if submitted:
+            self._yolo_frame_in_flight = True
+        return submitted
+
+    def _apply_worker_detection_distances(self, detections):
+        enriched = []
+        for obj in detections or []:
+            try:
+                item = dict(obj)
+                distance_cm = self.calculate_object_distance(item)
+                if distance_cm is not None:
+                    item["distance_cm"] = distance_cm
+                enriched.append(item)
+            except Exception as exc:
+                logger.debug("Skipping malformed YOLO worker detection: %s", exc)
+        return enriched
+
+    def _drain_yolo_worker_results(self):
+        if self._yolo_result_queue is None:
+            return False
+
+        updated = False
+        while True:
+            try:
+                message = self._yolo_result_queue.get_nowait()
+            except queue_module.Empty:
+                break
+
+            if not isinstance(message, dict):
+                continue
+
+            message_type = message.get("type")
+            if message_type == "ready":
+                self.yolo_labels = message.get("labels") or {}
+                self._yolo_worker_ready = True
+                self.circuit_debug["yoloWorkerReady"] = True
+                logger.info(
+                    "YOLO worker ready pid=%s classes=%d cores=%s",
+                    message.get("pid"),
+                    len(self.yolo_labels),
+                    message.get("cores"),
+                )
+            elif message_type == "result":
+                self._yolo_frame_in_flight = False
+                detections = self._apply_worker_detection_distances(
+                    message.get("detections") or []
+                )
+                self._latest_yolo_detections = detections
+                self._latest_yolo_result_time = float(message.get("timestamp") or time.time())
+                self.yolo_results = detections
+                self.yolo_object_count = int(message.get("object_count") or len(detections))
+                self.circuit_debug["yoloDriveReady"] = self._is_inference_ready_to_drive()
+                inf_ms = float(message.get("inference_ms") or 0.0)
+                self._yolo_inference_ms_ema = (
+                    0.8 * self._yolo_inference_ms_ema + 0.2 * inf_ms
+                    if self._yolo_inference_ms_ema
+                    else inf_ms
+                )
+                self.circuit_debug["yoloInferenceMs"] = self._yolo_inference_ms_ema
+                self.circuit_debug["yoloObjects"] = self.yolo_object_count
+                updated = True
+            elif message_type in {"error", "fatal"}:
+                self._yolo_frame_in_flight = False
+                self._yolo_worker_last_error = message.get("error") or "unknown worker error"
+                logger.error("YOLO worker %s: %s", message_type, self._yolo_worker_last_error)
+                if message_type == "fatal":
+                    self.yolo_detection_active = False
+
+        if self._latest_yolo_result_time:
+            self.circuit_debug["yoloResultAgeMs"] = max(
+                0.0, (time.time() - self._latest_yolo_result_time) * 1000.0
+            )
+        return updated
+
     def load_yolo_model(self, model_path=None):
         """
         Load the YOLO model from the specified path.
@@ -778,7 +1113,9 @@ class AICameraCameraManager:
                 logger.error("Please install with: pip install ultralytics opencv-python")
                 return False
                 
-            # Load the model
+            # Create the model (and its NCNN thread pool) already pinned off the
+            # reserved control core, so inference threads never land on it.
+            self._pin_thread_to_cores(self._inference_cores(), "yolo-load")
             self.yolo_model = YOLO(model_path, task='detect')
             logger.info(f"YOLO model loaded successfully from {model_path}")
             
@@ -887,21 +1224,48 @@ class AICameraCameraManager:
         if self.yolo_detection_active:
             logger.warning("YOLO object detection is already running!")
             return False
+
+        if self.circuit_no_inference:
+            logger.info("Starting circuit test mode without YOLO inference")
+            self.yolo_detection_active = True
+            self.yolo_detection_paused = False
+            self.yolo_detection_thread = None
+            self.yolo_results = []
+            self.yolo_object_count = 0
+            self.circuit_debug.update({
+                "noInference": True,
+                "yoloFps": 0.0,
+                "yoloInferenceMs": 0.0,
+                "yoloObjects": 0,
+            })
+            self.set_circuit_camera_pose()
+            self.prepare_imu_circuit_mode()
+            self.led_manager.turn_off()
+            self.set_circuit_cruise(0.0)
+            self._start_circuit_drive_thread()
+            return True
         
-        # Load model if not already loaded
-        if self.yolo_model is None:
+        if self.yolo_worker_process_enabled:
+            if not self._start_yolo_worker_process(model_path):
+                logger.error("Failed to start YOLO worker process.")
+                return False
+        # Load model if not already loaded when using the legacy in-process path.
+        elif self.yolo_model is None:
             if not self.load_yolo_model(model_path):
                 logger.error("Failed to load YOLO model.")
                 return False
         
         logger.info("Starting YOLO object detection...")
         self.yolo_detection_active = True
+        self.circuit_debug["noInference"] = False
+        self.circuit_debug["yoloDriveReady"] = False
         
         # Start circuit mode with the camera raised slightly to see signs.
         self.set_circuit_camera_pose()
         self.prepare_imu_circuit_mode()
 
         self.led_manager.turn_off()
+        self.set_circuit_cruise(0.0)
         
         # Start the detection thread
         self.yolo_detection_thread = threading.Thread(
@@ -944,6 +1308,8 @@ class AICameraCameraManager:
             self.yolo_detection_thread.join(timeout=2.0)
             if self.yolo_detection_thread.is_alive():
                 logger.warning("YOLO detection thread did not stop within timeout; motors remain forced off")
+
+        self._stop_yolo_worker_process()
         
         self.yolo_detection_thread = None
         self.yolo_results = []
@@ -977,11 +1343,16 @@ class AICameraCameraManager:
             logger.error(f"Error disabling vilib drawing: {e}")
 
         self.stop_motion()
+        self.circuit_debug["noInference"] = False
         return True
     
     def _process_yolo_frame(self, frame, model_input_size):
         """Blocking crop/resize/inference/parse — must not run on the asyncio loop."""
         import cv2
+
+        # Keep this worker (and the NCNN threads it spawns) off the core reserved
+        # for the control loop, so inference can be CPU-heavy without freezing it.
+        self._pin_thread_to_cores(self._inference_cores(), "yolo-worker")
 
         if frame is None:
             return None
@@ -1105,9 +1476,11 @@ class AICameraCameraManager:
         
         # Expected model input size for NCNN model - 480x480 is recommended for NCNN models
         model_input_size = (640, 640)
+        worker_mode = bool(self.yolo_worker_process_enabled)
         
         while self.yolo_detection_active:
             try:
+                fresh_detections = True
                 # Check if detection is paused (e.g. during turns)
                 if self.yolo_detection_paused:
                     # Skip processing but continue the loop at reduced frequency
@@ -1123,31 +1496,75 @@ class AICameraCameraManager:
                     await asyncio.sleep(0.1)
                     continue
 
-                # Keep OpenCV + NCNN off the asyncio thread (and off the main
-                # process event loop) so WebSocket telemetry stays responsive.
-                inf_t0 = time.perf_counter()
-                pack = await asyncio.to_thread(
-                    self._process_yolo_frame, frame, model_input_size
-                )
-                inf_ms = (time.perf_counter() - inf_t0) * 1000.0
-                self._yolo_inference_ms_ema = (
-                    0.8 * self._yolo_inference_ms_ema + 0.2 * inf_ms
-                    if self._yolo_inference_ms_ema
-                    else inf_ms
-                )
-                self.circuit_debug["yoloInferenceMs"] = self._yolo_inference_ms_ema
-                if pack is None:
-                    await asyncio.sleep(0.05)
-                    continue
+                if worker_mode:
+                    if (
+                        self.yolo_worker_process is None
+                        or not self.yolo_worker_process.is_alive()
+                    ):
+                        logger.error("YOLO worker process is not running; stopping circuit inference")
+                        self.yolo_detection_active = False
+                        break
 
-                results = pack["results"]
-                self.yolo_results = results
-                self.transform_params = pack["transform_params"]
-                transformed_detections = pack["detections"]
-                self.yolo_object_count = pack["object_count"]
+                    worker_updated = self._drain_yolo_worker_results()
+                    fresh_detections = worker_updated
+                    self._submit_yolo_worker_frame(frame, model_input_size)
+                    transformed_detections = list(self._latest_yolo_detections)
+                    if worker_updated:
+                        result_t = self._latest_yolo_result_time or time.time()
+                        if getattr(self, "_yolo_result_fps_last_t", 0.0):
+                            period = result_t - self._yolo_result_fps_last_t
+                            if period > 0:
+                                fps = 1.0 / period
+                                self._yolo_fps_ema = (
+                                    0.8 * self._yolo_fps_ema + 0.2 * fps
+                                    if self._yolo_fps_ema
+                                    else fps
+                                )
+                        self._yolo_result_fps_last_t = result_t
+                        self.circuit_debug["yoloFps"] = self._yolo_fps_ema
+                    self.circuit_debug["yoloObjects"] = int(self.yolo_object_count)
+                    ready_to_drive = self._is_inference_ready_to_drive()
+                    self.circuit_debug["yoloDriveReady"] = ready_to_drive
+                    if not ready_to_drive:
+                        self.set_circuit_cruise(0.0)
+                        await asyncio.sleep(0.05)
+                        continue
+                else:
+                    # Legacy fallback. It is intentionally not the default: NCNN
+                    # in this Python process can hold the GIL and starve control.
+                    inf_t0 = time.perf_counter()
+                    pack = await asyncio.to_thread(
+                        self._process_yolo_frame, frame, model_input_size
+                    )
+                    inf_ms = (time.perf_counter() - inf_t0) * 1000.0
+                    self._yolo_inference_ms_ema = (
+                        0.8 * self._yolo_inference_ms_ema + 0.2 * inf_ms
+                        if self._yolo_inference_ms_ema
+                        else inf_ms
+                    )
+                    self.circuit_debug["yoloInferenceMs"] = self._yolo_inference_ms_ema
+                    if pack is None:
+                        await asyncio.sleep(0.05)
+                        continue
+
+                    results = pack["results"]
+                    self.yolo_results = results
+                    self.transform_params = pack["transform_params"]
+                    transformed_detections = pack["detections"]
+                    self.yolo_object_count = pack["object_count"]
 
                 if not self.yolo_detection_active:
                     break
+
+                if worker_mode and not fresh_detections:
+                    # The worker produces a result roughly at inference FPS, while
+                    # this bridge loop runs much faster. Reusing the same detection
+                    # every tick makes the pan/tilt servo chase stale coordinates
+                    # and can also dispatch the same traffic-sign decision multiple
+                    # times. Keep the latest frame queued, but only update overlays,
+                    # actions, and tracking when a fresh YOLO result arrives.
+                    await asyncio.sleep(0.03)
+                    continue
                 
                 # Display detections with corrected coordinates on vilib camera feed
                 self.camera_manager.display_yolo_detections_on_vilib(
@@ -1209,6 +1626,12 @@ class AICameraCameraManager:
                 # 2. Stop signs
                 # 3. Right turn signs
                 
+                self._trace("dispatch",
+                            light=bool(traffic_light_object), stop=bool(stop_sign_object),
+                            turn=bool(right_turn_object),
+                            waitGreen=self.waiting_for_green, waitStop=self.waiting_at_stop_sign,
+                            turning=self.executing_right_turn, pending=self.right_turn_pending,
+                            paused=self.yolo_detection_paused)
                 # Handle traffic light detection and behavior
                 if traffic_light_object:
                     await self._handle_traffic_light(traffic_light_object['class'], traffic_light_object)
@@ -1237,26 +1660,32 @@ class AICameraCameraManager:
                 t_stop = time.perf_counter()
                 frame_rate_calc = 1 / (t_stop - t_start)
 
-                # Update FPS buffer for average calculation
-                if len(frame_rate_buffer) >= fps_avg_len:
-                    frame_rate_buffer.pop(0)
-                frame_rate_buffer.append(frame_rate_calc)
-                  # Calculate average FPS
-                avg_frame_rate = np.mean(frame_rate_buffer)
-                self._yolo_fps_ema = avg_frame_rate
-                self.circuit_debug["yoloFps"] = avg_frame_rate
+                # Update FPS buffer for average calculation. In worker-process
+                # mode, yoloFps is the worker result cadence, not this lightweight
+                # bridge loop cadence.
+                if not worker_mode:
+                    if len(frame_rate_buffer) >= fps_avg_len:
+                        frame_rate_buffer.pop(0)
+                    frame_rate_buffer.append(frame_rate_calc)
+                    avg_frame_rate = np.mean(frame_rate_buffer)
+                    self._yolo_fps_ema = avg_frame_rate
+                    self.circuit_debug["yoloFps"] = avg_frame_rate
                 self.circuit_debug["yoloObjects"] = int(self.yolo_object_count)
                 
-                # Print detected objects to standard output
-                if self.yolo_object_count > 0:
-                    objects_info = []
-                    for obj in transformed_detections:
-                        objects_info.append(f"{obj['class']} ({obj['confidence']:.2f})")
-                    
-                    logger.info(f"Detected objects: {', '.join(objects_info)}")
-                
-                logger.info(f"YOLO detection: {self.yolo_object_count} objects, FPS: {avg_frame_rate:.1f}")
-                
+                # Per-frame logging at debug level only: at info level it spammed
+                # the log and added avoidable work on every inference.
+                if logger.isEnabledFor(logging.DEBUG) and self.yolo_object_count > 0:
+                    objects_info = [
+                        f"{obj['class']} ({obj['confidence']:.2f})"
+                        for obj in transformed_detections
+                    ]
+                    logger.debug("Detected objects: %s", ", ".join(objects_info))
+                logger.debug("YOLO detection: %d objects, FPS: %.1f",
+                             self.yolo_object_count, self.circuit_debug.get("yoloFps", 0.0))
+
+                if worker_mode:
+                    await asyncio.sleep(0.03)
+
             except Exception as e:
                 logger.error(f"Error in YOLO detection loop: {e}")
                 await asyncio.sleep(0.1)
@@ -1580,13 +2009,17 @@ class AICameraCameraManager:
         
         # Handle right turn sign behavior
         if is_close_enough and not self.executing_right_turn and not self.right_turn_pending:
-            # Right turn sign is close enough - prepare to turn after the configured waiting time
-            logger.info(f"RIGHT TURN SIGN - Will turn right in {self.wait_to_turn_time} seconds")
+            # Right turn sign is close enough - keep driving for the configured
+            # approach time, then stop immediately before the turn sequence.
+            logger.info(
+                "RIGHT TURN SIGN - Continuing for %.1f seconds before turning",
+                self.wait_to_turn_time,
+            )
+            self._trace("right_turn_armed", wait=self.wait_to_turn_time)
             
             # Set the flag to indicate a pending turn
             self.right_turn_pending = True
-            # Stop before the delay so we don't coast with stale PWM and no heading hold.
-            self.stop_motion(reset_steering=True)
+            self.set_circuit_cruise(self.autonomous_speed)
             
             try:
                 # Use a thread instead of asyncio task
@@ -1617,11 +2050,12 @@ class AICameraCameraManager:
         """
         try:
             logger.info(f"Delayed turn thread started, waiting {self.wait_to_turn_time} seconds...")
-            
+            self._trace("delay_wait_start", wait=self.wait_to_turn_time)
             # Wait for the configured time using standard sleep
             time.sleep(self.wait_to_turn_time)
-            logger.info(f"Thread sleep completed, about to execute turn")
-            
+            self._trace("delay_wait_done",
+                        active=self.yolo_detection_active, pending=self.right_turn_pending)
+
             # Execute the turn only if circuit detection is still active.
             if self.yolo_detection_active and self.right_turn_pending:
                 logger.info("Executing right turn from thread...")
@@ -1660,8 +2094,8 @@ class AICameraCameraManager:
 
     def _apply_pivot_turn_motor_command(self, speed_value=None, context="PIVOT RIGHT"):
         """Spin in place (steering centered) so gyro yaw tracks rotation, not an arc."""
-        base_speed = self.turn_speed if speed_value is None else float(speed_value)
-        power = int(max(0.08, min(0.35, base_speed)) * 100)
+        base_speed = self.circuit_turn_speed if speed_value is None else float(speed_value)
+        power = int(max(0.08, min(0.4, base_speed)) * 100)
         logger.info(
             "%s - pivot in place, both motors %d%%, steering centered",
             context,
@@ -1695,13 +2129,14 @@ class AICameraCameraManager:
         return left_speed, right_speed
 
     def _run_imu_right_turn(self, context="RIGHT TURN", require_yolo_active=False):
-        """Turn until the IMU reports the configured target angle."""
+        """Turn until gyro reaches the target, then align the hold target by compass."""
         if not self._should_use_imu_circuit():
             return False
 
         # Pure-gyro yaw: immune to magnetometer interference from the motors,
         # which is what made powered turns under-read while hand turns were exact.
         start_yaw = self.imu_manager.get_yaw_deg()
+        start_mag = self._read_stable_mag_heading(samples=5, interval=0.015)
         target = abs(self.imu_turn_target_deg)
         tolerance = max(0.5, abs(self.imu_turn_tolerance_deg))
         deadline = time.monotonic() + max(0.5, self.imu_turn_timeout)
@@ -1721,12 +2156,37 @@ class AICameraCameraManager:
             "turnTargetDeg": target,
             "turnGoalDelta": target,
             "turnCurrentDelta": 0.0,
+            "turnStartMagHeading": start_mag,
+            "turnTargetMagHeading": None,
+            "turnFinalMagHeading": None,
+            "turnMagDelta": None,
+            "turnMagError": None,
+            "turnAppliedMagError": None,
+            "turnMagAgreementError": None,
+            "turnReferenceSource": "gyro",
         })
 
+        # Pulsed closed-loop turn. Instead of one continuous spin (whose coast
+        # after power-cut varied 20°+, landing turns anywhere from 74° to 108°),
+        # we push a short angle-proportional pivot, STOP, let momentum die, then
+        # read a *static* angle before deciding the next pulse. Two big wins:
+        #  - no coast/braking variance, so it lands consistently on target;
+        #  - we only ever pivot in the turn direction (never reverse), so it can
+        #    never "nudge the wrong way" and over-rotate.
+        # It is slower than a continuous turn, which matches the goal of a slow,
+        # highly repeatable circuit manoeuvre.
+        # Generous deadline: reliability over speed. The turn must reach the target,
+        # never get cut short by a timeout. It still exits the instant it lands.
+        deadline = time.monotonic() + 25.0
+        # Gentle pulses for precision; the pulse *duration* (below), not the power,
+        # is what guarantees each pulse actually breaks static friction and moves.
+        pulse_power = max(0.14, min(0.18,
+            self.circuit_turn_speed if self.circuit_turn_in_place else self.turn_speed))
         while time.monotonic() < deadline:
             if require_yolo_active and not self.yolo_detection_active:
                 logger.info("%s cancelled because circuit mode stopped during IMU turn", context)
                 self.circuit_debug["turnActive"] = False
+                self.stop_motion()
                 return False
 
             delta = self.imu_manager.angle_delta_from(start_yaw)
@@ -1736,58 +2196,137 @@ class AICameraCameraManager:
                 "currentHeading": self.imu_manager.get_yaw_deg(),
                 "gyroRateZ": self.imu_manager.get_gyro_rate_z(),
             })
-
-            # Anticipate inertia: the faster it spins, the earlier we cut power so
-            # the robot coasts onto the target instead of overshooting past it.
-            rate = abs(self.imu_manager.get_gyro_rate_z())
-            brake_margin = max(tolerance, rate * self.IMU_TURN_BRAKE_GAIN)
-            if remaining <= brake_margin:
+            if remaining <= tolerance:
                 reached_target = True
                 break
 
             now = time.monotonic()
-            if now - last_debug > 0.2:
-                logger.info(
-                    "%s - delta %.1f°/%.1f°, remaining %.1f°, rate %.0f°/s, brake %.1f°",
-                    context, abs(delta), target, remaining, rate, brake_margin,
-                )
+            if now - last_debug > 0.3:
+                logger.info("%s - pulsed delta %.1f°/%.1f°, remaining %.1f°",
+                            context, abs(delta), target, remaining)
                 last_debug = now
 
-            # Keep enough PWM to avoid motor stall, then slow near target.
-            speed_scale = max(0.08, min(self.turn_speed, remaining / target * self.turn_speed))
-            self._apply_right_turn_motor_command(speed_scale, context=f"{context} IMU")
-            time.sleep(0.02)
+            # Shrink the pulse as we approach so the final step is only a few
+            # degrees, bounding any overshoot to roughly one small pulse. The 0.07s
+            # floor is long enough to reliably break static friction (a too-short
+            # pulse just stalls and the turn crawls).
+            pulse_t = max(0.07, min(0.20, remaining / 90.0 * 0.25))
+            self._apply_pivot_turn_motor_command(pulse_power, context=f"{context} IMU")
+            time.sleep(pulse_t)
+            self.stop_motion()
+            time.sleep(0.06)  # settle so the next reading is a static, coast-free angle
 
         self.stop_motion()
+        logger.info(
+            "%s - turn landed at %.1f° (target %.1f° ± %.1f°)",
+            context, abs(self.imu_manager.angle_delta_from(start_yaw)), target, tolerance,
+        )
 
-        # Hold the *intended* heading (start + target) rather than wherever the
-        # turn physically stopped. If it under/overshot, the straight-line
-        # controller then trims the residual error toward the exact target
-        # (e.g. stopped at 80° -> keeps steering toward 90°).
+        # Hold the *intended* heading rather than wherever the turn physically
+        # stopped. The gyro remains the real-time actuator signal, but when a
+        # magnetometer is available we define the intended absolute direction as:
+        # initial magnetic heading + turn sign * requested angle. The residual
+        # magnetic error is converted back into the gyro control frame so the
+        # straight-line controller corrects an under/over-rotation while driving.
         final_delta = self.imu_manager.angle_delta_from(start_yaw)
+        final_yaw = self.imu_manager.get_yaw_deg()
+        final_mag = None
+        target_mag = None
+        mag_delta = None
+        mag_error = None
+        applied_mag_error = None
+        mag_agreement_error = None
+        reference_source = "gyro"
         if abs(final_delta) >= max(5.0, tolerance):
             turn_sign = 1.0 if final_delta >= 0 else -1.0
-            target_yaw = start_yaw + turn_sign * target
+            # Snap the post-turn heading onto the absolute circuit grid
+            # (origin + N*turn_target). This re-anchors every exit to where it
+            # *should* be relative to the very first road, so a few degrees of
+            # per-turn error are absorbed instead of compounding over the 4
+            # intersections. The straight-line controller then trims the residual.
+            if self.circuit_origin_heading is not None:
+                grid = max(1.0, target)
+                steps = round(self._normalize_angle(final_yaw - self.circuit_origin_heading) / grid)
+                target_yaw = self._normalize_angle(self.circuit_origin_heading + steps * grid)
+                reference_source = "gyro-grid"
+                logger.info(
+                    "%s - snapped exit heading to grid: final %.1f° -> %.1f° (origin %.1f°, step %d×%.0f°)",
+                    context, final_yaw, target_yaw, self.circuit_origin_heading, steps, grid,
+                )
+            else:
+                target_yaw = start_yaw + turn_sign * target
+            if start_mag is not None:
+                target_mag = self._normalize_angle(start_mag + turn_sign * target)
+                time.sleep(0.15)
+                final_mag = self._read_stable_mag_heading(samples=8, interval=0.025)
+                if final_mag is not None:
+                    mag_delta = self._normalize_angle(final_mag - start_mag)
+                    mag_agreement_error = abs(self._normalize_angle(mag_delta - final_delta))
+                    mag_error = self._normalize_angle(target_mag - final_mag)
+                    applied_mag_error = self.clamp_number(
+                        mag_error,
+                        -self.IMU_TURN_MAX_MAG_CORRECTION_DEG,
+                        self.IMU_TURN_MAX_MAG_CORRECTION_DEG,
+                    )
+                    if self.circuit_turn_use_mag:
+                        # Compass-anchored consigne (opt-in): hold the absolute
+                        # magnetic direction. Only safe with a trustworthy compass.
+                        target_yaw = final_yaw + applied_mag_error
+                        if abs(applied_mag_error - mag_error) > 0.1:
+                            reference_source = "magnetometer-clamped"
+                            logger.warning(
+                                "%s - clamping magnetometer turn correction: mag_delta=%.2f°, "
+                                "gyro_delta=%.2f°, agreement_error=%.2f°, mag_error=%.2f°, applied=%.2f°",
+                                context,
+                                mag_delta,
+                                final_delta,
+                                mag_agreement_error,
+                                mag_error,
+                                applied_mag_error,
+                            )
+                        else:
+                            reference_source = "magnetometer"
+                    else:
+                        # Default: gyro-only consigne. The mag numbers above are
+                        # kept purely for telemetry/display so we can watch the
+                        # compass without letting it steer the robot.
+                        reference_source = "gyro"
             self.imu_manager.set_heading_reference(target_yaw)
         else:
             # Turn barely moved (stall/failure): don't command a big correction.
             self.imu_manager.reset_heading_reference()
+        self.circuit_debug.update({
+            "turnTargetMagHeading": target_mag,
+            "turnFinalMagHeading": final_mag,
+            "turnMagDelta": mag_delta,
+            "turnMagError": mag_error,
+            "turnAppliedMagError": applied_mag_error,
+            "turnMagAgreementError": mag_agreement_error,
+            "turnReferenceSource": reference_source,
+            "headingReference": self.imu_manager.get_heading_reference_deg(),
+            "headingError": self.imu_manager.get_heading_error_deg(),
+            "currentHeading": final_yaw,
+        })
         self._reset_heading_hold()
         self.imu_heading_reference_ready = True
         self.circuit_debug["turnActive"] = False
 
         if reached_target:
             logger.info(
-                "%s - IMU turn completed at %.2f° delta",
+                "%s - IMU turn completed at %.2f° delta; reference source=%s, mag_error=%s",
                 context,
                 self.imu_manager.angle_delta_from(start_yaw),
+                reference_source,
+                f"{mag_error:.2f}°" if mag_error is not None else "n/a",
             )
             return True
 
         logger.warning(
-            "%s - IMU turn timed out at %.2f° delta",
+            "%s - IMU turn timed out at %.2f° delta; reference source=%s, mag_error=%s",
             context,
             self.imu_manager.angle_delta_from(start_yaw),
+            reference_source,
+            f"{mag_error:.2f}°" if mag_error is not None else "n/a",
         )
         return False
 
@@ -1808,6 +2347,7 @@ class AICameraCameraManager:
             self.executing_right_turn = True
             self.right_turn_pending = False
             self.yolo_detection_paused = True
+            self._trace("turn_seq_start", context=context)
 
             # Give the detection loop one short tick to observe the pause flag
             # before motors receive a turn command.
@@ -1857,6 +2397,8 @@ class AICameraCameraManager:
             self.executing_right_turn = False
             self.right_turn_pending = False
             self.yolo_detection_paused = previous_pause_state if not require_yolo_active else False
+            self._trace("turn_seq_end", context=context, completed=completed,
+                        paused=self.yolo_detection_paused)
             self._right_turn_lock.release()
 
     async def _execute_right_turn(self):
@@ -2393,6 +2935,12 @@ class AICameraCameraManager:
             with self._motion_command_lock:
                 self.px.set_motor_speed(1, 0)
                 self.px.set_motor_speed(2, 0)
+            self.circuit_debug.update({
+                "driveSpeed": 0.0,
+                "motorDifferential": 0.0,
+                "leftMotorCommand": 0.0,
+                "rightMotorCommand": 0.0,
+            })
             return
 
         if self._should_use_imu_circuit():
@@ -2445,6 +2993,9 @@ class AICameraCameraManager:
                 "currentHeading": self.imu_manager.get_yaw_deg(),
                 "headingError": heading_error,
                 "steeringCommand": steering,
+                "motorDifferential": diff,
+                "leftMotorCommand": left_speed,
+                "rightMotorCommand": right_speed,
                 "integral": self._heading_integral,
                 "gyroRateZ": self.imu_manager.get_gyro_rate_z(),
                 "driveSpeed": speed,
@@ -2552,13 +3103,20 @@ class AICameraCameraManager:
         Set the default autonomous driving speed.
         
         Args:
-            speed (float): Speed value from 0.01 to 0.2 (1% - 20%)
+            speed (float): Speed value from 0.0 to 0.2 (0% - 20%)
         """
-        if 0.01 <= speed <= 0.2:
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid autonomous speed value: {speed}. Must be a number.")
+            return self.autonomous_speed
+
+        if 0.0 <= speed <= 0.2:
             self.autonomous_speed = speed
             logger.info(f"Autonomous driving speed set to {speed*100:.1f}%")
         else:
-            logger.warning(f"Invalid autonomous speed: {speed}. Must be between 0.01 (1%) and 0.2 (20%)")
+            logger.warning(f"Invalid autonomous speed: {speed}. Must be between 0.0 (0%) and 0.2 (20%)")
+        return self.autonomous_speed
 
     def set_turn_speed(self, speed):
         """
@@ -2581,6 +3139,23 @@ class AICameraCameraManager:
 
         return self.turn_speed
 
+    def set_circuit_turn_speed(self, speed):
+        """
+        Set the pivot-in-place motor speed used by circuit mode turns.
+
+        Args:
+            speed (float): Speed value from 0.08 to 0.4 (8% - 40%)
+        """
+        try:
+            speed = float(speed)
+        except (TypeError, ValueError):
+            logger.warning(f"Invalid circuit turn speed value: {speed}. Must be a number.")
+            return self.circuit_turn_speed
+
+        self.circuit_turn_speed = self.clamp_number(speed, 0.08, 0.4)
+        logger.info(f"Circuit turn-in-place speed set to {self.circuit_turn_speed*100:.1f}%")
+        return self.circuit_turn_speed
+
     def set_circuit_imu_enabled(self, enabled):
         enabled = bool(enabled)
         was_enabled = self.circuit_use_imu
@@ -2596,6 +3171,111 @@ class AICameraCameraManager:
             self.imu_heading_reference_ready = False
         return self.circuit_use_imu
 
+    def set_circuit_no_inference(self, enabled):
+        """Enable circuit test mode: no YOLO inference, events come from the UI."""
+        enabled = bool(enabled)
+        if enabled == self.circuit_no_inference:
+            return self.circuit_no_inference
+
+        if self.yolo_detection_active:
+            logger.info(
+                "Circuit no-inference setting changed while circuit is active; restart circuit mode to apply"
+            )
+        self.circuit_no_inference = enabled
+        self.circuit_debug["noInference"] = enabled and self.yolo_detection_active
+        logger.info("Circuit no-inference test mode %s", "enabled" if enabled else "disabled")
+        return self.circuit_no_inference
+
+    def set_yolo_worker_process(self, enabled):
+        """Run YOLO/NCNN in a separate process instead of the controller process."""
+        enabled = bool(enabled)
+        if enabled == self.yolo_worker_process_enabled:
+            return self.yolo_worker_process_enabled
+
+        if self.yolo_detection_active:
+            logger.info(
+                "YOLO worker process setting changed while circuit is active; restart circuit mode to apply"
+            )
+        self.yolo_worker_process_enabled = enabled
+        logger.info(
+            "YOLO worker process mode %s",
+            "enabled" if self.yolo_worker_process_enabled else "disabled",
+        )
+        if not enabled:
+            self._stop_yolo_worker_process()
+        return self.yolo_worker_process_enabled
+
+    def _close_fake_detection(self, class_name):
+        return {
+            "class": class_name,
+            "confidence": 1.0,
+            "x": self.camera_width // 2,
+            "y": self.camera_height // 2,
+            "width": max(80, self.camera_width // 5),
+            "height": max(80, self.camera_height // 5),
+            "xmin": self.camera_width // 2 - 40,
+            "ymin": self.camera_height // 2 - 40,
+            "xmax": self.camera_width // 2 + 40,
+            "ymax": self.camera_height // 2 + 40,
+            "distance_cm": max(1.0, self.distance_threshold_cm * 0.5),
+        }
+
+    def _resume_after_simulated_stop(self):
+        time.sleep(max(0.0, self.stop_sign_wait_time))
+        if not self.yolo_detection_active or not self.waiting_at_stop_sign:
+            return
+        self.set_circuit_cruise(self.autonomous_speed)
+        self.waiting_at_stop_sign = False
+        self.stop_all_led_patterns(False)
+        self.x_angle = 0
+        self.y_angle = 0
+        self.px.set_cam_pan_angle(0)
+        self.px.set_cam_tilt_angle(0)
+        self.ignore_stop_signs_until = time.time() + self.stop_sign_ignore_time
+        self._say_key_background("ai.proceed_after_stop", priority=1)
+        logger.info("Simulated STOP SIGN - resumed after %.1fs", self.stop_sign_wait_time)
+
+    async def simulate_circuit_event(self, event):
+        """Inject a circuit detection event while the no-inference test mode is active."""
+        event = str(event or "").strip().lower()
+        if not self.yolo_detection_active:
+            return {"success": False, "message": "Circuit mode is not active"}
+
+        if not self.circuit_no_inference:
+            return {
+                "success": False,
+                "message": "Circuit no-inference test mode is disabled",
+            }
+
+        logger.info("Simulating circuit event: %s", event)
+        if event in {"red", "red_light", "rouge"}:
+            await self._handle_traffic_light("Rouge", self._close_fake_detection("Rouge"))
+        elif event in {"yellow", "orange", "yellow_light"}:
+            await self._handle_traffic_light("Orange", self._close_fake_detection("Orange"))
+        elif event in {"green", "green_light", "vert"}:
+            await self._handle_traffic_light("Vert", self._close_fake_detection("Vert"))
+        elif event in {"stop", "stop_sign"}:
+            await self._handle_stop_sign(self._close_fake_detection("Stop"))
+            if self.waiting_at_stop_sign:
+                threading.Thread(target=self._resume_after_simulated_stop, daemon=True).start()
+        elif event in {"right", "right_turn", "turn"}:
+            await self._handle_right_turn_sign(self._close_fake_detection("Tourner"))
+        elif event in {"resume", "go"}:
+            self.waiting_for_green = False
+            self.waiting_at_stop_sign = False
+            self.right_turn_pending = False
+            self.executing_right_turn = False
+            self.stop_all_led_patterns(False)
+            self.set_circuit_cruise(self.autonomous_speed)
+        elif event in {"reset_heading", "heading"}:
+            self.prepare_imu_circuit_mode()
+        elif event in {"stop_motion", "pause"}:
+            self.stop_motion(reset_steering=True)
+        else:
+            return {"success": False, "message": f"Unknown circuit event: {event}"}
+
+        return {"success": True, "message": f"Simulated circuit event: {event}"}
+
     def get_circuit_debug(self):
         """Snapshot of the live IMU circuit-control state for the web UI overlay."""
         debug = dict(self.circuit_debug)
@@ -2604,6 +3284,12 @@ class AICameraCameraManager:
         debug["headingKi"] = self.imu_heading_ki
         debug["maxSteeringDeg"] = self.imu_max_steering_deg
         debug["turnInPlace"] = bool(self.circuit_turn_in_place)
+        debug["noInference"] = bool(self.circuit_no_inference and self.yolo_detection_active)
+        debug["yoloWorkerProcess"] = bool(
+            self.yolo_worker_process_enabled and self.yolo_detection_active
+        )
+        debug["yoloWorkerReady"] = bool(self._yolo_worker_ready)
+        debug["yoloDriveReady"] = bool(self._is_inference_ready_to_drive())
         return debug
 
     def set_imu_heading_kp(self, value):

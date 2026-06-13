@@ -3247,7 +3247,7 @@ Valid settings by type:
 - camera: vflip, hflip, local_display, web_display, camera_size
 - drive: max_speed, max_turn_angle, acceleration_factor, enhanced_turning, turn_in_place, motor_balance
 - safety: collision_avoidance, edge_detection, auto_stop, collision_threshold, edge_threshold, client_timeout
-- ai: speak_pause_threshold, distance_threshold_cm, turn_time, yolo_confidence, circuit_use_imu, imu_heading_kp, imu_max_correction, imu_turn_target_deg, imu_turn_tolerance_deg, imu_turn_timeout
+- ai: speak_pause_threshold, distance_threshold_cm, turn_time, yolo_confidence, circuit_use_imu, circuit_turn_speed, imu_heading_kp, imu_max_correction, imu_turn_target_deg, imu_turn_tolerance_deg, imu_turn_timeout
 - imu: enabled, bus, i2c_address, sample_rate_hz, calibration_samples, gyro_deadband_dps
 
 Example:

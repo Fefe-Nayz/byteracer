@@ -59,9 +59,19 @@ export type RobotCommand =
   | "restart_web_server"
   | "restart_python_service"
   | "restart_camera_feed"
+  | "reset_imu_heading"
+  | "recalibrate_imu"
   | "check_for_updates"
   | "emergency_stop"
-  | "clear_emergency";
+  | "clear_emergency"
+  | "simulate_circuit_red_light"
+  | "simulate_circuit_yellow_light"
+  | "simulate_circuit_green_light"
+  | "simulate_circuit_stop_sign"
+  | "simulate_circuit_right_turn"
+  | "simulate_circuit_resume"
+  | "simulate_circuit_reset_heading"
+  | "simulate_circuit_stop_motion";
 
 // Define network action types
 export type NetworkAction =
@@ -125,6 +135,8 @@ export interface SensorData {
     accel: { x: number; y: number; z: number };
     gyro: { x: number; y: number; z: number };
     mag: { x: number; y: number; z: number };
+    magOffset?: { x: number; y: number; z: number };
+    magScale?: { x: number; y: number; z: number };
     angles: { roll: number; pitch: number; yaw: number };
     quaternion?: { w: number; x: number; y: number; z: number };
     heading: number;
@@ -133,6 +145,7 @@ export interface SensorData {
     headingError: number;
     gyroYaw?: number;
     forwardAccelG?: number;
+    mountOrientation?: string;
     temperature: number;
     lastUpdated: number | null;
     error?: string | null;
@@ -144,6 +157,9 @@ export interface SensorData {
     currentHeading?: number;
     headingError: number;
     steeringCommand: number;
+    motorDifferential?: number;
+    leftMotorCommand?: number;
+    rightMotorCommand?: number;
     integral: number;
     gyroRateZ?: number;
     driveSpeed?: number;
@@ -155,6 +171,14 @@ export interface SensorData {
     turnTargetDeg: number;
     turnGoalDelta: number;
     turnCurrentDelta: number;
+    turnStartMagHeading?: number | null;
+    turnTargetMagHeading?: number | null;
+    turnFinalMagHeading?: number | null;
+    turnMagDelta?: number | null;
+    turnMagError?: number | null;
+    turnAppliedMagError?: number | null;
+    turnMagAgreementError?: number | null;
+    turnReferenceSource?: string;
     turnInPlace?: boolean;
     // Performance counters
     controlFps?: number;
@@ -162,6 +186,11 @@ export interface SensorData {
     yoloFps?: number;
     yoloInferenceMs?: number;
     yoloObjects?: number;
+    yoloWorkerProcess?: boolean;
+    yoloWorkerReady?: boolean;
+    yoloDriveReady?: boolean;
+    yoloResultAgeMs?: number;
+    noInference?: boolean;
   };
 }
 
@@ -207,6 +236,9 @@ export interface RobotSettings {
     local_display: boolean;
     web_display: boolean;
     camera_size: Array<number>;
+    camera_fps: number;
+    web_fps: number;
+    jpeg_quality: number;
   };
   safety: {
     collision_avoidance: boolean;
@@ -244,6 +276,9 @@ export interface RobotSettings {
     openai_api_key: string;
     model: string;
   };
+  system: {
+    telemetry_interval: number;
+  };
   ai: {
     speak_pause_threshold: number;
     distance_threshold_cm: number;
@@ -252,6 +287,7 @@ export interface RobotSettings {
     motor_balance: number;
     autonomous_speed: number;
     turn_speed: number;
+    circuit_turn_speed: number;
     wait_to_turn_time: number;
     stop_sign_wait_time: number;
     stop_sign_ignore_time: number;
@@ -262,6 +298,8 @@ export interface RobotSettings {
     speed_dead_zone: number;
     turn_factor: number;
     circuit_use_imu: boolean;
+    circuit_no_inference: boolean;
+    yolo_worker_process: boolean;
     imu_heading_kp: number;
     imu_heading_ki: number;
     imu_max_correction: number;
@@ -281,6 +319,9 @@ export interface RobotSettings {
     gyro_deadband_dps: number;
     mag_declination_deg: number;
     mag_yaw_invert: boolean;
+    mag_offset?: { x: number; y: number; z: number };
+    mag_scale?: { x: number; y: number; z: number };
+    mount_orientation: string;
   };
   led: {
     enabled: boolean;

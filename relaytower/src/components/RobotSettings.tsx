@@ -162,7 +162,16 @@ export default function RobotSettings() {
     gyro_deadband_dps: 0.35,
     mag_declination_deg: 0,
     mag_yaw_invert: false,
+    mount_orientation: "components_down_pins_rear",
   };
+  const systemSettings = localSettings.system || {
+    telemetry_interval: 0.2,
+  };
+  const telemetryInterval = Math.max(
+    0.05,
+    Math.min(2, systemSettings.telemetry_interval ?? 0.2)
+  );
+  const telemetryFps = Math.round(1 / telemetryInterval);
 
   // Update a specific setting
   const updateSetting = (
@@ -509,6 +518,34 @@ export default function RobotSettings() {
                 </div>
               )}
 
+              <div className="space-y-2">
+                <div className="text-xs">Mount Orientation</div>
+                <Select
+                  value={imuSettings.mount_orientation || "standard"}
+                  disabled={!imuSettings.enabled}
+                  onValueChange={(value) =>
+                    updateSetting("imu", "mount_orientation", value)
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="IMU mount" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="standard">Components up</SelectItem>
+                    <SelectItem value="components_down_pins_rear">
+                      Components down, pins rear
+                    </SelectItem>
+                    <SelectItem value="upside_down">Components down</SelectItem>
+                    <SelectItem value="upside_down_y">Components down, Y flip</SelectItem>
+                    <SelectItem value="upside_down_z">Diagnostic Z flip</SelectItem>
+                    <SelectItem value="rotated_180">Rotated 180°</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="text-[10px] text-muted-foreground">
+                  Current build: components down, board back upward, pin row toward rear.
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
                   <div className="text-xs">I2C Address</div>
@@ -597,6 +634,39 @@ export default function RobotSettings() {
                   disabled={!imuSettings.enabled}
                   onCheckedChange={(checked) =>
                     updateSetting("ai", "circuit_use_imu", checked)
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-sm">Circuit test without inference</div>
+                  <div className="text-xs text-muted-foreground">
+                    Keeps heading control active but replaces YOLO detections with
+                    manual simulation buttons.
+                  </div>
+                </div>
+                <Switch
+                  checked={localSettings.ai.circuit_no_inference || false}
+                  onCheckedChange={(checked) =>
+                    updateSetting("ai", "circuit_no_inference", checked)
+                  }
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <div className="text-sm">Isolated YOLO process</div>
+                  <div className="text-xs text-muted-foreground">
+                    Runs NCNN outside the controller so inference cannot block
+                    steering, sockets, or telemetry.
+                  </div>
+                </div>
+                <Switch
+                  checked={localSettings.ai.yolo_worker_process ?? true}
+                  disabled={localSettings.ai.circuit_no_inference || false}
+                  onCheckedChange={(checked) =>
+                    updateSetting("ai", "yolo_worker_process", checked)
                   }
                 />
               </div>
@@ -694,6 +764,27 @@ export default function RobotSettings() {
                     updateSetting("ai", "circuit_turn_in_place", checked)
                   }
                 />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Turn-in-place Speed</span>
+                  <span>{((localSettings.ai.circuit_turn_speed ?? 0.18) * 100).toFixed(1)}%</span>
+                </div>
+                <Slider
+                  value={[(localSettings.ai.circuit_turn_speed ?? 0.18) * 100]}
+                  min={8}
+                  max={40}
+                  step={1}
+                  disabled={!localSettings.ai.circuit_turn_in_place}
+                  onValueChange={(value) =>
+                    updateSetting("ai", "circuit_turn_speed", value[0] / 100)
+                  }
+                />
+                <div className="text-[10px] text-muted-foreground">
+                  Dedicated pivot speed for circuit turns. Raise it if the motors
+                  stall during IMU 90° rotations.
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1048,6 +1139,54 @@ export default function RobotSettings() {
                   Higher resolution provides better image quality but may affect
                   performance.
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Camera FPS Limit</span>
+                  <span>{localSettings.camera.camera_fps ?? 15} fps</span>
+                </div>
+                <Slider
+                  value={[localSettings.camera.camera_fps ?? 15]}
+                  min={5}
+                  max={30}
+                  step={1}
+                  onValueChange={(value) =>
+                    updateSetting("camera", "camera_fps", value[0])
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>Web Stream FPS</span>
+                  <span>{localSettings.camera.web_fps ?? 12} fps</span>
+                </div>
+                <Slider
+                  value={[localSettings.camera.web_fps ?? 12]}
+                  min={3}
+                  max={20}
+                  step={1}
+                  onValueChange={(value) =>
+                    updateSetting("camera", "web_fps", value[0])
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span>JPEG Quality</span>
+                  <span>{localSettings.camera.jpeg_quality ?? 70}%</span>
+                </div>
+                <Slider
+                  value={[localSettings.camera.jpeg_quality ?? 70]}
+                  min={40}
+                  max={90}
+                  step={5}
+                  onValueChange={(value) =>
+                    updateSetting("camera", "jpeg_quality", value[0])
+                  }
+                />
               </div>
             </div>
           </div>
@@ -1889,6 +2028,36 @@ export default function RobotSettings() {
           {/* GitHub settings */}
           <div className="space-y-4">
             <h3 className="font-bold mb-4">System Settings</h3>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <BarChart className="h-4 w-4" />
+                  <span>UI Telemetry Refresh</span>
+                </div>
+                <span>
+                  {telemetryFps} FPS ({telemetryInterval.toFixed(2)}s)
+                </span>
+              </div>
+              <Slider
+                value={[telemetryFps]}
+                min={1}
+                max={20}
+                step={1}
+                onValueChange={(value) =>
+                  updateSetting(
+                    "system",
+                    "telemetry_interval",
+                    Number((1 / Math.max(1, value[0])).toFixed(3))
+                  )
+                }
+              />
+              <div className="text-xs text-muted-foreground">
+                Controls only WebSocket/UI sensor updates. Motor, IMU, and camera
+                control loops keep their own timing.
+              </div>
+            </div>
+
             <div className="flex items-center space-x-2 mb-2">
               <GitBranch className="h-4 w-4" />
               <span className="text-sm font-medium">
