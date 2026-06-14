@@ -855,7 +855,7 @@ export default function RobotSettings() {
                 <Slider
                   value={[localSettings.ai.wait_to_turn_time || 2.0]}
                   min={0.5}
-                  max={5}
+                  max={10}
                   step={0.1}
                   onValueChange={(value) =>
                     updateSetting("ai", "wait_to_turn_time", value[0])

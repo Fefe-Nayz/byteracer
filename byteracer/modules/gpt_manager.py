@@ -1095,7 +1095,7 @@ def _build_script_with_environment(script_code: str) -> str:
    • set_motor_balance(motor_balance: number): Sets the motor balance for circuit mode (-50 / 50)
    • set_yolo_confidence(confidence: number): Sets the YOLO confidence threshold for circuit mode (0.1-0.9)
    • set_autonomous_speed(speed: number): Sets the autonomous driving speed (0.01-0.2 or 1%-20%)
-   • set_wait_to_turn_time(seconds: number): Sets the wait time before turning (0.5-5.0 seconds)
+   • set_wait_to_turn_time(seconds: number): Sets the wait time before turning (0.5-10.0 seconds)
    • set_stop_sign_wait_time(seconds: number): Sets the wait time at stop signs (0.5-5.0 seconds)
    • set_stop_sign_ignore_time(seconds: number): Sets time to ignore stop signs after stopping (1.0-10.0 seconds)
    • set_traffic_light_ignore_time(seconds: number): Sets time to ignore traffic lights after responding (1.0-10.0 seconds)
@@ -2449,13 +2449,13 @@ Maintain a cheerful, optimistic, and playful tone in all responses.
             elif function_name == "set_wait_to_turn_time":
                 seconds = parameters.get("seconds", 2.0)
                 
-                # Validate timing value (between 0.5 and 5.0 seconds)
+                # Validate timing value (between 0.5 and 10.0 seconds)
                 if not isinstance(seconds, (int, float)):
                     logger.warning(f"Invalid wait_to_turn_time value: {seconds}. Must be a number.")
                     return False
                     
                 # Clamp to valid range
-                seconds = max(min(float(seconds), 5.0), 0.5)
+                seconds = max(min(float(seconds), 10.0), 0.5)
                 
                 # Update settings
                 self.config_manager.set("ai.wait_to_turn_time", seconds)
